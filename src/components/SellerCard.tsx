@@ -5,14 +5,13 @@ import { Trophy, TrendingUp, Key } from "lucide-react";
 interface SellerCardProps {
   seller: Seller;
   rank: number;
-  onGoalReached?: (seller: Seller) => void;
 }
 
 export function SellerCard({ seller, rank }: SellerCardProps) {
   const percentage = Math.min((seller.sales / seller.goal) * 100, 150);
   const isGoalReached = seller.sales >= seller.goal;
-  const formattedSales = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(seller.sales);
-  const formattedGoal = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(seller.goal);
+  const isTopPerformer = rank <= 3 && isGoalReached;
+  const fmt = (v: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
 
   return (
     <motion.div
@@ -25,21 +24,23 @@ export function SellerCard({ seller, rank }: SellerCardProps) {
       className={`
         relative overflow-hidden rounded-xl border p-5 transition-colors
         bg-gradient-card metal-texture
-        ${isGoalReached
-          ? "border-gold/50 glow-gold"
-          : "border-border hover:border-primary/30"
+        ${isTopPerformer
+          ? "border-primary/50 glow-gold"
+          : isGoalReached
+            ? "border-primary/30 glow-primary"
+            : "border-border hover:border-primary/20"
         }
       `}
     >
-      {/* Rank badge */}
+      {/* Rank */}
       <div className={`
         absolute top-3 right-3 w-8 h-8 rounded-lg flex items-center justify-center font-mono text-sm font-bold
-        ${rank <= 3 ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground"}
+        ${rank <= 3 ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}
       `}>
         #{rank}
       </div>
 
-      {/* Goal reached seal */}
+      {/* Goal seal */}
       {isGoalReached && (
         <motion.div
           initial={{ scale: 0, rotate: -180 }}
@@ -47,23 +48,18 @@ export function SellerCard({ seller, rank }: SellerCardProps) {
           transition={{ type: "spring", stiffness: 200, delay: 0.2 }}
           className="absolute top-3 left-3"
         >
-          <div className="flex items-center gap-1.5 rounded-full bg-gold/15 px-2.5 py-1 text-xs font-semibold text-gold">
+          <div className="flex items-center gap-1.5 rounded-full bg-primary/15 px-2.5 py-1 text-xs font-semibold text-primary">
             <Trophy className="w-3 h-3" />
             META BATIDA
           </div>
         </motion.div>
       )}
 
-      {/* Content */}
       <div className="mt-8 space-y-4">
-        {/* Avatar + Name */}
         <div className="flex items-center gap-3">
           <div className={`
             w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold
-            ${isGoalReached
-              ? "bg-gold/20 text-gold"
-              : "bg-primary/15 text-primary"
-            }
+            ${isGoalReached ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground"}
           `}>
             {seller.avatar}
           </div>
@@ -76,19 +72,17 @@ export function SellerCard({ seller, rank }: SellerCardProps) {
           </div>
         </div>
 
-        {/* Values */}
         <div className="grid grid-cols-2 gap-3">
           <div>
             <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-0.5">Vendas</p>
-            <p className="font-mono text-sm font-semibold text-foreground">{formattedSales}</p>
+            <p className="font-mono text-sm font-semibold text-foreground">{fmt(seller.sales)}</p>
           </div>
           <div>
             <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-0.5">Meta</p>
-            <p className="font-mono text-sm font-medium text-muted-foreground">{formattedGoal}</p>
+            <p className="font-mono text-sm font-medium text-muted-foreground">{fmt(seller.goal)}</p>
           </div>
         </div>
 
-        {/* Progress bar */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -96,7 +90,7 @@ export function SellerCard({ seller, rank }: SellerCardProps) {
               Progresso
             </div>
             <span className={`font-mono text-sm font-bold ${
-              isGoalReached ? "text-gold" : percentage >= 80 ? "text-primary" : "text-muted-foreground"
+              isGoalReached ? "text-primary" : percentage >= 80 ? "text-foreground" : "text-muted-foreground"
             }`}>
               {percentage.toFixed(1)}%
             </span>
@@ -108,19 +102,19 @@ export function SellerCard({ seller, rank }: SellerCardProps) {
               transition={{ duration: 1, ease: "easeOut", delay: 0.3 }}
               className={`h-full rounded-full ${
                 isGoalReached
-                  ? "bg-gradient-to-r from-gold to-accent"
+                  ? "bg-primary"
                   : percentage >= 80
-                    ? "bg-gradient-to-r from-primary to-primary/70"
-                    : "bg-primary/50"
+                    ? "bg-foreground/40"
+                    : "bg-muted-foreground/30"
               }`}
             />
           </div>
         </div>
       </div>
 
-      {/* Shimmer overlay for goal reached */}
-      {isGoalReached && (
-        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-gold/5 to-transparent animate-shimmer bg-[length:200%_100%] pointer-events-none" />
+      {/* Shimmer for top performers */}
+      {isTopPerformer && (
+        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-primary/5 to-transparent animate-shimmer bg-[length:200%_100%] pointer-events-none" />
       )}
     </motion.div>
   );

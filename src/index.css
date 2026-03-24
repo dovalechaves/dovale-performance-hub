@@ -6,55 +6,104 @@
 
 @layer base {
   :root {
-    --background: 220 20% 7%;
-    --foreground: 0 0% 95%;
+    --background: 0 0% 98%;
+    --foreground: 240 55% 18%;
 
-    --card: 220 18% 10%;
-    --card-foreground: 0 0% 95%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 55% 18%;
 
-    --popover: 220 18% 10%;
-    --popover-foreground: 0 0% 95%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 55% 18%;
 
-    --primary: 28 100% 55%;
+    --primary: 240 55% 24%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 15% 16%;
-    --secondary-foreground: 0 0% 90%;
+    --secondary: 240 15% 92%;
+    --secondary-foreground: 240 55% 18%;
 
-    --muted: 220 14% 14%;
-    --muted-foreground: 220 10% 55%;
+    --muted: 240 10% 93%;
+    --muted-foreground: 240 10% 45%;
 
-    --accent: 45 100% 50%;
-    --accent-foreground: 0 0% 5%;
+    --accent: 75 85% 55%;
+    --accent-foreground: 240 55% 12%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 220 15% 18%;
-    --input: 220 15% 18%;
-    --ring: 28 100% 55%;
+    --border: 240 10% 90%;
+    --input: 240 10% 90%;
+    --ring: 240 55% 24%;
 
     --radius: 0.75rem;
 
-    --sidebar-background: 220 20% 9%;
-    --sidebar-foreground: 0 0% 85%;
-    --sidebar-primary: 28 100% 55%;
+    --sidebar-background: 0 0% 97%;
+    --sidebar-foreground: 240 55% 18%;
+    --sidebar-primary: 240 55% 24%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 15% 14%;
-    --sidebar-accent-foreground: 0 0% 90%;
-    --sidebar-border: 220 15% 15%;
-    --sidebar-ring: 28 100% 55%;
+    --sidebar-accent: 240 10% 93%;
+    --sidebar-accent-foreground: 240 55% 18%;
+    --sidebar-border: 240 10% 90%;
+    --sidebar-ring: 240 55% 24%;
 
     /* Custom tokens */
     --success: 145 65% 42%;
     --success-foreground: 0 0% 100%;
-    --gold: 45 100% 50%;
-    --gold-foreground: 0 0% 5%;
-    --gradient-primary: linear-gradient(135deg, hsl(28 100% 55%), hsl(35 100% 60%));
-    --gradient-card: linear-gradient(145deg, hsl(220 18% 12%), hsl(220 18% 9%));
-    --gradient-gold: linear-gradient(135deg, hsl(45 100% 50%), hsl(38 100% 60%));
-    --shadow-glow: 0 0 30px -5px hsl(28 100% 55% / 0.3);
-    --shadow-gold: 0 0 40px -5px hsl(45 100% 50% / 0.4);
+    --gold: 75 85% 55%;
+    --gold-foreground: 240 55% 12%;
+    --gradient-primary: linear-gradient(135deg, hsl(240 55% 24%), hsl(240 55% 32%));
+    --gradient-card: linear-gradient(145deg, hsl(0 0% 100%), hsl(0 0% 98%));
+    --gradient-gold: linear-gradient(135deg, hsl(75 85% 55%), hsl(75 85% 65%));
+    --shadow-glow: 0 0 30px -5px hsl(240 55% 24% / 0.2);
+    --shadow-gold: 0 0 40px -5px hsl(75 85% 55% / 0.3);
+  }
+
+  .dark {
+    --background: 240 30% 6%;
+    --foreground: 0 0% 95%;
+
+    --card: 240 30% 9%;
+    --card-foreground: 0 0% 95%;
+
+    --popover: 240 30% 9%;
+    --popover-foreground: 0 0% 95%;
+
+    --primary: 75 85% 55%;
+    --primary-foreground: 240 55% 12%;
+
+    --secondary: 240 25% 14%;
+    --secondary-foreground: 0 0% 90%;
+
+    --muted: 240 25% 13%;
+    --muted-foreground: 240 10% 50%;
+
+    --accent: 75 85% 55%;
+    --accent-foreground: 240 55% 12%;
+
+    --destructive: 0 62% 30%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 240 25% 15%;
+    --input: 240 25% 15%;
+    --ring: 75 85% 55%;
+
+    --sidebar-background: 240 30% 7%;
+    --sidebar-foreground: 0 0% 85%;
+    --sidebar-primary: 75 85% 55%;
+    --sidebar-primary-foreground: 240 55% 12%;
+    --sidebar-accent: 240 25% 13%;
+    --sidebar-accent-foreground: 0 0% 90%;
+    --sidebar-border: 240 25% 13%;
+    --sidebar-ring: 75 85% 55%;
+
+    --success: 145 65% 42%;
+    --success-foreground: 0 0% 100%;
+    --gold: 75 85% 55%;
+    --gold-foreground: 240 55% 12%;
+    --gradient-primary: linear-gradient(135deg, hsl(75 85% 55%), hsl(75 85% 65%));
+    --gradient-card: linear-gradient(145deg, hsl(240 30% 10%), hsl(240 30% 7%));
+    --gradient-gold: linear-gradient(135deg, hsl(75 85% 55%), hsl(75 85% 65%));
+    --shadow-glow: 0 0 30px -5px hsl(75 85% 55% / 0.25);
+    --shadow-gold: 0 0 40px -5px hsl(75 85% 55% / 0.4);
   }
 }
 
@@ -99,8 +148,8 @@
       0deg,
       transparent,
       transparent 2px,
-      hsl(0 0% 100% / 0.01) 2px,
-      hsl(0 0% 100% / 0.01) 4px
+      hsl(0 0% 100% / 0.008) 2px,
+      hsl(0 0% 100% / 0.008) 4px
     );
   }
 }

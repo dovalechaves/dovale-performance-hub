@@ -4,7 +4,9 @@ import { SellerCard } from "@/components/SellerCard";
 import { StatsBar } from "@/components/StatsBar";
 import { useCelebration } from "@/hooks/useCelebration";
 import { MOCK_SELLERS, Seller } from "@/data/sellers";
-import { Key, Zap, Moon, Sun } from "lucide-react";
+import { Zap, Moon, Sun } from "lucide-react";
+import logoBlue from "@/assets/logo-blue.png";
+import logoWhite from "@/assets/logo-white.png";
 
 const Index = () => {
   const [sellers, setSellers] = useState<Seller[]>(MOCK_SELLERS);

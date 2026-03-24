@@ -96,19 +96,31 @@ export function SellerCard({ seller, rank }: SellerCardProps) {
               {percentage.toFixed(1)}%
             </span>
           </div>
-          <div className="h-2 rounded-full bg-muted overflow-hidden">
+          <div className="relative pt-6">
+            <div className="h-2 rounded-full bg-muted overflow-hidden">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${Math.min(percentage, 100)}%` }}
+                transition={{ duration: 1, ease: "easeOut", delay: 0.3 }}
+                className={`h-full rounded-full ${
+                  isGoalReached
+                    ? "bg-primary"
+                    : percentage >= 80
+                      ? "bg-foreground/40"
+                      : "bg-muted-foreground/30"
+                }`}
+              />
+            </div>
+            {/* Mascot indicator */}
             <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${Math.min(percentage, 100)}%` }}
+              initial={{ left: "0%" }}
+              animate={{ left: `${Math.min(percentage, 100)}%` }}
               transition={{ duration: 1, ease: "easeOut", delay: 0.3 }}
-              className={`h-full rounded-full ${
-                isGoalReached
-                  ? "bg-primary"
-                  : percentage >= 80
-                    ? "bg-foreground/40"
-                    : "bg-muted-foreground/30"
-              }`}
-            />
+              className="absolute -top-1 -translate-x-1/2"
+              style={{ filter: isGoalReached ? "drop-shadow(0 0 6px hsl(var(--primary) / 0.6))" : "none" }}
+            >
+              <img src={mascot} alt="Dovale mascot" className="w-8 h-auto" />
+            </motion.div>
           </div>
         </div>
       </div>

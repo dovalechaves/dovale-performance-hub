@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { Seller } from "@/data/sellers";
 import { Trophy, TrendingUp, Key } from "lucide-react";
+import mascot from "@/assets/mascot.png";
 
 interface SellerCardProps {
   seller: Seller;

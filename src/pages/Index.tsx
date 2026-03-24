@@ -4,7 +4,9 @@ import { SellerCard } from "@/components/SellerCard";
 import { StatsBar } from "@/components/StatsBar";
 import { useCelebration } from "@/hooks/useCelebration";
 import { MOCK_SELLERS, Seller } from "@/data/sellers";
-import { Key, Zap, Moon, Sun } from "lucide-react";
+import { Zap, Moon, Sun } from "lucide-react";
+import logoBlue from "@/assets/logo-blue.png";
+import logoWhite from "@/assets/logo-white.png";
 
 const Index = () => {
   const [sellers, setSellers] = useState<Seller[]>(MOCK_SELLERS);
@@ -46,13 +48,20 @@ const Index = () => {
       <header className="border-b border-border bg-gradient-card">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-primary/15 flex items-center justify-center">
-              <Key className="w-5 h-5 text-primary" />
+            <div className="relative h-9 w-36 overflow-hidden">
+              <img
+                src={logoBlue}
+                alt="Dovale"
+                className={`absolute inset-0 h-full w-auto object-contain transition-all duration-700 ease-in-out ${dark ? 'opacity-0 scale-90 blur-sm rotate-3' : 'opacity-100 scale-100 blur-0 rotate-0'}`}
+              />
+              <img
+                src={logoWhite}
+                alt="Dovale"
+                className={`absolute inset-0 h-full w-auto object-contain transition-all duration-700 ease-in-out ${dark ? 'opacity-100 scale-100 blur-0 rotate-0' : 'opacity-0 scale-90 blur-sm -rotate-3'}`}
+              />
             </div>
-            <div>
-              <h1 className="text-xl font-bold text-foreground tracking-tight">DOVALE</h1>
-              <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Painel de Vendas</p>
-            </div>
+            <div className="h-6 w-px bg-border" />
+            <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground font-medium">Painel de Vendas</p>
           </div>
           <div className="flex items-center gap-4">
             <button

@@ -1,7 +1,6 @@
 import { motion } from "framer-motion";
 import { Seller } from "@/data/sellers";
 import { Trophy, TrendingUp, Key } from "lucide-react";
-import mascot from "@/assets/mascot.png";
 
 interface SellerCardProps {
   seller: Seller;
@@ -21,9 +20,9 @@ export function SellerCard({ seller, rank }: SellerCardProps) {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ type: "spring", stiffness: 300, damping: 30 }}
-      whileHover={{ scale: 1.02, y: -4 }}
+      whileHover={{ scale: 1.01, y: -2 }}
       className={`
-        relative overflow-hidden rounded-xl border p-5 transition-colors
+        relative overflow-hidden rounded-xl border px-6 py-4 transition-colors
         bg-gradient-card metal-texture
         ${isTopPerformer
           ? "border-primary/50 glow-gold"
@@ -33,59 +32,49 @@ export function SellerCard({ seller, rank }: SellerCardProps) {
         }
       `}
     >
-      {/* Rank */}
-      <div className={`
-        absolute top-3 right-3 w-8 h-8 rounded-lg flex items-center justify-center font-mono text-sm font-bold
-        ${rank <= 3 ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}
-      `}>
-        #{rank}
-      </div>
+      {/* Layout horizontal */}
+      <div className="flex items-center gap-6">
 
-      {/* Goal seal */}
-      {isGoalReached && (
-        <motion.div
-          initial={{ scale: 0, rotate: -180 }}
-          animate={{ scale: 1, rotate: 0 }}
-          transition={{ type: "spring", stiffness: 200, delay: 0.2 }}
-          className="absolute top-3 left-3"
-        >
-          <div className="flex items-center gap-1.5 rounded-full bg-primary/15 px-2.5 py-1 text-xs font-semibold text-primary">
-            <Trophy className="w-3 h-3" />
-            META BATIDA
-          </div>
-        </motion.div>
-      )}
+        {/* Rank */}
+        <div className={`
+          shrink-0 w-10 h-10 rounded-lg flex items-center justify-center font-mono text-sm font-bold
+          ${rank <= 3 ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}
+        `}>
+          #{rank}
+        </div>
 
-      <div className="mt-8 space-y-4">
-        <div className="flex items-center gap-3">
+        {/* Avatar + Nome */}
+        <div className="flex items-center gap-3 w-44 shrink-0">
           <div className={`
-            w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold
+            w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold shrink-0
             ${isGoalReached ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground"}
           `}>
             {seller.avatar}
           </div>
-          <div>
-            <h3 className="font-semibold text-foreground leading-tight">{seller.name}</h3>
+          <div className="min-w-0">
+            <h3 className="font-semibold text-foreground leading-tight truncate">{seller.name}</h3>
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
-              <Key className="w-3 h-3" />
-              {seller.category}
+              <Key className="w-3 h-3 shrink-0" />
+              <span className="truncate">{seller.category}</span>
             </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-0.5">Vendas</p>
-            <p className="font-mono text-sm font-semibold text-foreground">{fmt(seller.sales)}</p>
-          </div>
-          <div>
-            <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-0.5">Meta</p>
-            <p className="font-mono text-sm font-medium text-muted-foreground">{fmt(seller.goal)}</p>
-          </div>
+        {/* Vendas */}
+        <div className="shrink-0 w-36">
+          <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-0.5">Vendas</p>
+          <p className="font-mono text-sm font-semibold text-foreground">{fmt(seller.sales)}</p>
         </div>
 
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
+        {/* Meta */}
+        <div className="shrink-0 w-36">
+          <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-0.5">Meta</p>
+          <p className="font-mono text-sm font-medium text-muted-foreground">{fmt(seller.goal)}</p>
+        </div>
+
+        {/* Barra de progresso — ocupa o resto */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
               <TrendingUp className="w-3 h-3" />
               Progresso
@@ -96,7 +85,7 @@ export function SellerCard({ seller, rank }: SellerCardProps) {
               {percentage.toFixed(1)}%
             </span>
           </div>
-          <div className="relative pt-6">
+          <div className="relative pt-8">
             <div className="h-2 rounded-full bg-muted overflow-hidden">
               <motion.div
                 initial={{ width: 0 }}
@@ -111,18 +100,32 @@ export function SellerCard({ seller, rank }: SellerCardProps) {
                 }`}
               />
             </div>
-            {/* Mascot indicator */}
             <motion.div
               initial={{ left: "0%" }}
-              animate={{ left: `${Math.min(percentage, 100)}%` }}
+              animate={{ left: isGoalReached ? "calc(100% - 1.25rem)" : `${Math.min(percentage, 99)}%` }}
               transition={{ duration: 1, ease: "easeOut", delay: 0.3 }}
-              className="absolute -top-1 -translate-x-1/2"
-              style={{ filter: isGoalReached ? "drop-shadow(0 0 6px hsl(var(--primary) / 0.6))" : "none" }}
+              className="absolute -top-6 -translate-x-1/2"
+              style={{ filter: isGoalReached ? "drop-shadow(0 0 8px hsl(var(--primary) / 0.8))" : "none" }}
             >
-              <img src={mascot} alt="Dovale mascot" className="w-8 h-auto" />
+              <img src="/image-removebg-preview%20%283%29.png" alt="mascot" className="w-10 h-auto" />
             </motion.div>
           </div>
         </div>
+
+        {/* Badge META BATIDA */}
+        {isGoalReached && (
+          <motion.div
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            transition={{ type: "spring", stiffness: 200, delay: 0.2 }}
+            className="shrink-0"
+          >
+            <div className="flex items-center gap-1.5 rounded-full bg-primary/15 px-2.5 py-1 text-xs font-semibold text-primary">
+              <Trophy className="w-3 h-3" />
+              META BATIDA
+            </div>
+          </motion.div>
+        )}
       </div>
 
       {/* Shimmer for top performers */}

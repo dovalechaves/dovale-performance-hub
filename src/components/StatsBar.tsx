@@ -4,21 +4,22 @@ import { Seller } from "@/data/sellers";
 
 interface StatsBarProps {
   sellers: Seller[];
+  canViewTotalSales?: boolean;
 }
 
-export function StatsBar({ sellers }: StatsBarProps) {
+export function StatsBar({ sellers, canViewTotalSales = true }: StatsBarProps) {
   const totalSales = sellers.reduce((s, v) => s + v.sales, 0);
   const totalGoal = sellers.reduce((s, v) => s + v.goal, 0);
   const overallPct = ((totalSales / totalGoal) * 100).toFixed(1);
   const goalsReached = sellers.filter((s) => s.sales >= s.goal).length;
 
   const stats = [
-    {
+    ...(canViewTotalSales ? [{
       label: "Total Vendas",
       value: new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", notation: "compact" }).format(totalSales),
       icon: TrendingUp,
       accent: "text-primary",
-    },
+    }] : []),
     {
       label: "Meta Geral",
       value: `${overallPct}%`,
@@ -40,7 +41,7 @@ export function StatsBar({ sellers }: StatsBarProps) {
   ];
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+    <div className={`grid gap-3 ${stats.length === 4 ? "grid-cols-2 lg:grid-cols-4" : "grid-cols-1 sm:grid-cols-3"}`}>
       {stats.map((stat, i) => (
         <motion.div
           key={stat.label}

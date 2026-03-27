@@ -30,7 +30,7 @@ export function StatsBar({ sellers, canViewTotalSales = true }: StatsBarProps) {
       label: "Vendedores",
       value: sellers.length.toString(),
       icon: Users,
-      accent: "text-muted-foreground",
+      accent: "text-foreground",
     },
     {
       label: "Metas Batidas",
@@ -52,7 +52,7 @@ export function StatsBar({ sellers, canViewTotalSales = true }: StatsBarProps) {
         >
           <div className="flex items-center gap-2 mb-2">
             <stat.icon className={`w-4 h-4 ${stat.accent}`} />
-            <span className="text-[10px] uppercase tracking-widest text-muted-foreground">{stat.label}</span>
+            <span className="text-[10px] uppercase tracking-widest text-muted-foreground dark:text-slate-300">{stat.label}</span>
           </div>
           <p className={`font-mono text-2xl font-bold ${stat.accent}`}>{stat.value}</p>
         </motion.div>

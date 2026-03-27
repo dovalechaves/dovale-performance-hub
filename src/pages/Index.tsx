@@ -5,13 +5,13 @@ import { SellerCard } from "@/components/SellerCard";
 import { StatsBar } from "@/components/StatsBar";
 import { useCelebration } from "@/hooks/useCelebration";
 import { Seller } from "@/data/sellers";
-import { Zap, Moon, Sun, LogOut, Settings, RefreshCw, ChevronDown } from "lucide-react";
+import { Zap, Moon, Sun, LogOut, Settings, RefreshCw, ChevronDown, Monitor, EyeOff } from "lucide-react";
 import logoBlue from "@/assets/logo-blue.png";
 import logoWhite from "@/assets/logo-white.png";
 import { useAuth } from "@/context/AuthContext";
-import { getVendas, getMetas, LOJAS } from "@/services/api";
+import { getVendas, getVendasHoje, getMetas, LOJAS } from "@/services/api";
 
-const REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutos
+const REFRESH_INTERVAL = 60 * 1000; // 1 minuto
 
 function initials(name: string) {
   return name.split(" ").slice(0, 2).map(w => w[0]).join("").toUpperCase();
@@ -21,19 +21,22 @@ const Index = () => {
   const { user, can, logout } = useAuth();
   const navigate = useNavigate();
   const [sellers, setSellers] = useState<Seller[]>([]);
-  const [dark, setDark] = useState(true);
-  const [loja, setLoja] = useState("bh");
+  const [dark, setDark] = useState(() => localStorage.getItem("dovale_theme") !== "light");
+  const [loja, setLoja] = useState(() => user?.loja ?? "bh");
   const [loading, setLoading] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [showCelebrationMascot, setShowCelebrationMascot] = useState(false);
+  const [tvMode, setTvMode] = useState(true); // gerente: padrão oculto (modo TV)
+  const [modoVista, setModoVista] = useState<"mensal" | "diario">("diario");
   const { celebrate } = useCelebration();
   const prevGoalsRef = useRef<Set<string>>(new Set());
+  const initializedRef = useRef(false);
   const celebrationAudioRef = useRef<HTMLAudioElement | null>(null);
-
   const handleLogout = () => { logout(); navigate("/login"); };
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
+    localStorage.setItem("dovale_theme", dark ? "dark" : "light");
   }, [dark]);
 
   const fetchData = useCallback(async () => {
@@ -44,21 +47,29 @@ const Index = () => {
       const ano = now.getFullYear();
 
       const [vendas, metas] = await Promise.all([
-        getVendas(loja, mes, ano),
+        modoVista === "diario" ? getVendasHoje(loja) : getVendas(loja, mes, ano),
         getMetas(loja, mes, ano),
       ]);
 
       const metasMap = Object.fromEntries(metas.map(m => [m.rep_codigo, m.meta_valor]));
+      const diasUteisMap = Object.fromEntries(metas.map(m => [m.rep_codigo, m.dias_uteis ?? null]));
 
-      const data: Seller[] = vendas.map(v => ({
-        id: String(v.rep_codigo),
-        name: v.rep_nome,
-        category: LOJAS.find(l => l.value === loja)?.label ?? loja.toUpperCase(),
-        sales: v.total_vendas,
-        goal: metasMap[v.rep_codigo] ?? 0,
-        goalReached: v.total_vendas >= (metasMap[v.rep_codigo] ?? 1),
-        avatar: initials(v.rep_nome),
-      }));
+      const data: Seller[] = vendas.map(v => {
+        const metaMensal = metasMap[v.rep_codigo] ?? 0;
+        const diasUteis = diasUteisMap[v.rep_codigo];
+        const goal = modoVista === "diario" && diasUteis && diasUteis > 0
+          ? metaMensal / diasUteis
+          : metaMensal;
+        return {
+          id: String(v.rep_codigo),
+          name: v.rep_nome,
+          category: LOJAS.find(l => l.value === loja)?.label ?? loja.toUpperCase(),
+          sales: v.total_vendas,
+          goal,
+          goalReached: v.total_vendas >= (goal ?? 1),
+          avatar: initials(v.rep_nome),
+        };
+      });
 
       setSellers(data);
       setLastUpdate(new Date());
@@ -67,9 +78,15 @@ const Index = () => {
     } finally {
       setLoading(false);
     }
-  }, [loja]);
+  }, [loja, modoVista]);
 
-  // Carrega ao montar e quando muda a loja
+  // Reseta referência ao trocar modo ou loja — evita celebração falsa na troca
+  useEffect(() => {
+    initializedRef.current = false;
+    prevGoalsRef.current = new Set();
+  }, [modoVista, loja]);
+
+  // Carrega ao montar e quando muda a loja ou modo
   useEffect(() => {
     fetchData();
   }, [fetchData]);
@@ -80,12 +97,20 @@ const Index = () => {
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  // Detecta novas metas batidas
+  // Detecta novas metas batidas — só anima quando um vendedor cruza 100% entre dois fetches
   useEffect(() => {
     if (sellers.length === 0) return;
     const current = new Set(sellers.filter(s => s.sales >= s.goal && s.goal > 0).map(s => s.id));
+
+    if (!initializedRef.current) {
+      // Primeira carga: apenas registra quem já está em 100%, sem animar
+      initializedRef.current = true;
+      prevGoalsRef.current = current;
+      return;
+    }
+
     const newGoals = [...current].filter(id => !prevGoalsRef.current.has(id));
-    if (newGoals.length > 0 && prevGoalsRef.current.size > 0) {
+    if (newGoals.length > 0) {
       celebrate();
       setShowCelebrationMascot(true);
       setTimeout(() => setShowCelebrationMascot(false), 3000);
@@ -115,10 +140,10 @@ const Index = () => {
               <img src={logoWhite} alt="Dovale" className={`absolute inset-0 h-full w-auto object-contain transition-all duration-700 ease-in-out ${dark ? 'opacity-100 scale-100 blur-0 rotate-0' : 'opacity-0 scale-90 blur-sm -rotate-3'}`} />
             </div>
             <div className="h-6 w-px bg-border" />
-            <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground font-medium">Painel de Vendas</p>
+            <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground dark:text-slate-300 font-medium">Painel de Vendas</p>
 
             {/* Seletor de loja — só admin/manager */}
-            {can("read:all") && (
+            {user?.role === "admin" && (
               <div className="relative ml-2">
                 <select
                   value={loja}
@@ -158,6 +183,20 @@ const Index = () => {
               <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
             </button>
 
+            {user?.role === "manager" && (
+              <button
+                onClick={() => setTvMode(v => !v)}
+                title={tvMode ? "Revelar valores (visão gerente)" : "Ocultar valores (modo TV)"}
+                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors
+                  ${tvMode
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-secondary text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                  }`}
+              >
+                {tvMode ? <EyeOff className="w-4 h-4" /> : <Monitor className="w-4 h-4" />}
+              </button>
+            )}
+
             {(can("manage:metas") || can("manage:roles")) && (
               <button
                 onClick={() => navigate("/gestao")}
@@ -193,7 +232,7 @@ const Index = () => {
 
       {/* Main */}
       <main className="container mx-auto px-4 py-6 space-y-6">
-        {can("view:stats") && <StatsBar sellers={sellers} canViewTotalSales={can("view:totalSales")} />}
+        {can("view:stats") && <StatsBar sellers={sellers} canViewTotalSales={user?.role === "manager" ? !tvMode : can("view:totalSales")} />}
 
         {can("view:classification") && (
           <>
@@ -203,6 +242,21 @@ const Index = () => {
               </h2>
               <div className="flex-1 h-px bg-border" />
               {loading && <span className="text-[10px] text-muted-foreground animate-pulse">carregando...</span>}
+              {/* Toggle Mensal / Hoje */}
+              <div className="flex rounded-lg border border-border overflow-hidden text-[11px] font-semibold">
+                <button
+                  onClick={() => setModoVista("mensal")}
+                  className={`px-3 py-1 transition-colors ${modoVista === "mensal" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"}`}
+                >
+                  Mensal
+                </button>
+                <button
+                  onClick={() => setModoVista("diario")}
+                  className={`px-3 py-1 transition-colors ${modoVista === "diario" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"}`}
+                >
+                  Hoje
+                </button>
+              </div>
             </div>
 
             {sellers.length === 0 && !loading ? (
@@ -213,7 +267,7 @@ const Index = () => {
               <div className="flex flex-col gap-3">
                 <AnimatePresence mode="popLayout">
                   {sorted.map((seller, i) => (
-                    <SellerCard key={seller.id} seller={seller} rank={i + 1} />
+                    <SellerCard key={seller.id} seller={seller} rank={i + 1} showValues={user?.role === "manager" ? !tvMode : can("view:salesValues")} />
                   ))}
                 </AnimatePresence>
               </div>

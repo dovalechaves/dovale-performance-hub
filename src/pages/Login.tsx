@@ -1,12 +1,19 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Eye, EyeOff, LogIn, Loader2 } from "lucide-react";
+import { Eye, EyeOff, LogIn, Loader2, Sun, Moon } from "lucide-react";
 import logoWhite from "@/assets/logo-white.png";
+import logoBlue from "@/assets/logo-blue.png";
 import { useAuth } from "@/context/AuthContext";
 
 export default function Login() {
   const navigate = useNavigate();
+  const [dark, setDark] = useState(() => localStorage.getItem("dovale_theme") !== "light");
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", dark);
+    localStorage.setItem("dovale_theme", dark ? "dark" : "light");
+  }, [dark]);
   const { login } = useAuth();
   const [usuario, setUsuario] = useState("");
   const [senha, setSenha] = useState("");
@@ -25,7 +32,7 @@ export default function Login() {
 
     setLoading(true);
     try {
-      const res = await fetch("http://localhost:3001/api/auth/login", {
+      const res = await fetch(`${window.location.protocol}//${window.location.hostname}:3001/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ usuario, senha }),
@@ -39,7 +46,7 @@ export default function Login() {
 
       const data = await res.json().catch(() => ({}));
       const token = data?.token || data?.access_token || "authenticated";
-      login(usuario, token, data?.role);
+      login(usuario, token, data?.role, data?.loja);
       navigate("/");
     } catch {
       setErro("Erro de conexão. Tente novamente.");
@@ -50,6 +57,12 @@ export default function Login() {
 
   return (
     <div className="min-h-screen bg-background scanline flex items-center justify-center px-4">
+      <button
+        onClick={() => setDark(!dark)}
+        className="fixed top-4 right-4 w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
+      >
+        {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+      </button>
       <motion.div
         initial={{ opacity: 0, y: 24 }}
         animate={{ opacity: 1, y: 0 }}
@@ -58,7 +71,8 @@ export default function Login() {
       >
         {/* Logo */}
         <div className="flex flex-col items-center gap-4 mb-8">
-          <img src={logoWhite} alt="Dovale" className="h-10 w-auto" />
+          <img src={logoWhite} alt="Dovale" className="h-10 w-auto dark:block hidden" />
+          <img src={logoBlue} alt="Dovale" className="h-10 w-auto dark:hidden block" />
           <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground font-medium">
             Painel de Vendas
           </p>

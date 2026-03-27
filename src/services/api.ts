@@ -1,4 +1,4 @@
-const BASE = "http://localhost:3001/api";
+const BASE = `${window.location.protocol}//${window.location.hostname}:3001/api`;
 
 export interface Representante {
   rep_codigo: string;
@@ -11,14 +11,15 @@ export interface Meta {
   rep_nome: string;
   loja: string;
   meta_valor: number;
+  dias_uteis?: number | null;
   mes: number;
   ano: number;
 }
 
 export const LOJAS = [
   { value: "bh", label: "BH" },
-  { value: "l2", label: "Loja 2" },
-  { value: "l3", label: "Loja 3" },
+  { value: "l2", label: "Santana" },
+  { value: "l3", label: "Rio de Janeiro" },
 ];
 
 async function handleResponse<T>(res: Response): Promise<T> {
@@ -45,6 +46,11 @@ export async function getVendas(loja: string, mes: number, ano: number): Promise
   return handleResponse<VendaConsolidada[]>(res);
 }
 
+export async function getVendasHoje(loja: string): Promise<VendaConsolidada[]> {
+  const res = await fetch(`${BASE}/sync/vendas-hoje?loja=${loja}`);
+  return handleResponse<VendaConsolidada[]>(res);
+}
+
 export async function getMetas(loja: string, mes: number, ano: number): Promise<Meta[]> {
   const res = await fetch(`${BASE}/metas?loja=${loja}&mes=${mes}&ano=${ano}`);
   return handleResponse<Meta[]>(res);
@@ -55,6 +61,15 @@ export async function saveMeta(meta: Omit<Meta, "id">): Promise<void> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(meta),
+  });
+  return handleResponse<void>(res);
+}
+
+export async function saveDiasUteis(loja: string, mes: number, ano: number, dias_uteis: number): Promise<void> {
+  const res = await fetch(`${BASE}/metas/dias-uteis`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ loja, mes, ano, dias_uteis }),
   });
   return handleResponse<void>(res);
 }

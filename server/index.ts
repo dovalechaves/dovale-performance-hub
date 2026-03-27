@@ -11,7 +11,7 @@ import { startSyncJob } from "./jobs/syncJob";
 const app = express();
 const PORT = Number(process.env.SERVER_PORT) || 3001;
 
-app.use(cors({ origin: /^http:\/\/localhost:\d+$/ }));
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
 app.use("/api/auth",            authRouter);
@@ -24,7 +24,7 @@ app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-app.listen(PORT, () => {
-  console.log(`[server] rodando em http://localhost:${PORT}`);
-  startSyncJob(5 * 60 * 1000); // sync a cada 5 minutos
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`[server] rodando em http://0.0.0.0:${PORT}`);
+  // syncJob desativado — frontend busca direto do Firebird via /api/sync/vendas
 });

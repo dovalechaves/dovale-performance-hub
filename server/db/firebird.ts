@@ -45,10 +45,13 @@ export function queryFirebird<T = Record<string, unknown>>(
   return new Promise((resolve, reject) => {
     Firebird.attach(config, (err, db) => {
       if (err) return reject(err);
-      db.query(sql, params, (err2, result) => {
-        db.detach();
-        if (err2) return reject(err2);
-        resolve(result as T[]);
+      db.transaction(Firebird.ISOLATION_READ_COMMITTED, (err2, transaction) => {
+        if (err2) { db.detach(); return reject(err2); }
+        transaction.query(sql, params, (err3, result) => {
+          transaction.commit(() => db.detach());
+          if (err3) return reject(err3);
+          resolve(result as T[]);
+        });
       });
     });
   });

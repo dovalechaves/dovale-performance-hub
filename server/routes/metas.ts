@@ -11,7 +11,7 @@ router.get("/", async (req, res) => {
 
   try {
     const rows = await querySqlServer(`
-      SELECT id, rep_codigo, rep_nome, loja, meta_valor, mes, ano
+      SELECT id, rep_codigo, rep_nome, loja, meta_valor, dias_uteis, mes, ano
       FROM dbo.METAS_VENDEDORES
       WHERE loja = @loja AND mes = @mes AND ano = @ano
     `, { loja, mes, ano });
@@ -24,7 +24,7 @@ router.get("/", async (req, res) => {
 
 /** POST /api/metas — salva ou atualiza meta de um vendedor */
 router.post("/", async (req, res) => {
-  const { rep_codigo, rep_nome, loja, meta_valor, mes, ano } = req.body;
+  const { rep_codigo, rep_nome, loja, meta_valor, dias_uteis, mes, ano } = req.body;
 
   if (!rep_codigo || !loja || !meta_valor || !mes || !ano) {
     return res.status(400).json({ error: "Campos obrigatórios: rep_codigo, loja, meta_valor, mes, ano" });
@@ -37,6 +37,7 @@ router.post("/", async (req, res) => {
       .input("rep_nome",    rep_nome)
       .input("loja",        loja)
       .input("meta_valor",  meta_valor)
+      .input("dias_uteis",  dias_uteis ?? null)
       .input("mes",         mes)
       .input("ano",         ano)
       .query(`
@@ -49,12 +50,38 @@ router.post("/", async (req, res) => {
         WHEN MATCHED THEN
           UPDATE SET
             rep_nome   = @rep_nome,
-            meta_valor = @meta_valor
+            meta_valor = @meta_valor,
+            dias_uteis = @dias_uteis
         WHEN NOT MATCHED THEN
-          INSERT (rep_codigo, rep_nome, loja, meta_valor, mes, ano)
-          VALUES (@rep_codigo, @rep_nome, @loja, @meta_valor, @mes, @ano);
+          INSERT (rep_codigo, rep_nome, loja, meta_valor, dias_uteis, mes, ano)
+          VALUES (@rep_codigo, @rep_nome, @loja, @meta_valor, @dias_uteis, @mes, @ano);
       `);
 
+    res.json({ ok: true });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: message });
+  }
+});
+
+/** PATCH /api/metas/dias-uteis — atualiza dias úteis de todos os vendedores do mês/loja */
+router.patch("/dias-uteis", async (req, res) => {
+  const { loja, mes, ano, dias_uteis } = req.body;
+  if (!loja || !mes || !ano || !dias_uteis) {
+    return res.status(400).json({ error: "Campos obrigatórios: loja, mes, ano, dias_uteis" });
+  }
+  try {
+    const pool = await getPool();
+    await pool.request()
+      .input("loja",       loja)
+      .input("mes",        mes)
+      .input("ano",        ano)
+      .input("dias_uteis", Number(dias_uteis))
+      .query(`
+        UPDATE dbo.METAS_VENDEDORES
+        SET dias_uteis = @dias_uteis
+        WHERE loja = @loja AND mes = @mes AND ano = @ano
+      `);
     res.json({ ok: true });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

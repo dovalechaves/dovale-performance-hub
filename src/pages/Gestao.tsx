@@ -8,6 +8,7 @@ import {
   getRepresentantes,
   getMetas,
   saveMeta,
+  saveDiasUteis,
   LOJAS,
   type Representante,
   type Meta,
@@ -25,12 +26,15 @@ const fmt = (v: number) =>
 
 // ─── Seção: Gestão de Metas ───────────────────────────────────────────────
 function SecaoMetas({ dark }: { dark: boolean }) {
-  const { can } = useAuth();
-  const [loja, setLoja] = useState("bh");
+  const { user, can } = useAuth();
+  const isAdmin = user?.role === "admin";
+  const [loja, setLoja] = useState(() => user?.loja ?? "bh");
   const [mes, setMes] = useState(new Date().getMonth() + 1);
   const [ano, setAno] = useState(new Date().getFullYear());
   const [reps, setReps] = useState<Representante[]>([]);
   const [metasMap, setMetasMap] = useState<Record<string, string>>({});
+  const [diasUteis, setDiasUteis] = useState<string>("");
+  const [savingDias, setSavingDias] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
   const [erro, setErro] = useState("");
@@ -50,6 +54,9 @@ function SecaoMetas({ dark }: { dark: boolean }) {
         map[m.rep_codigo] = m.meta_valor.toString();
       }
       setMetasMap(map);
+      // dias_uteis é o mesmo para todos os vendedores do mês
+      const du = metasData[0]?.dias_uteis;
+      if (du) setDiasUteis(String(du));
     } catch (e: unknown) {
       setErro(e instanceof Error ? e.message : "Erro ao carregar dados");
     } finally {
@@ -70,6 +77,7 @@ function SecaoMetas({ dark }: { dark: boolean }) {
         rep_nome: rep.rep_nome,
         loja,
         meta_valor: valor,
+        dias_uteis: diasUteis ? Number(diasUteis) : null,
         mes,
         ano,
       });
@@ -93,19 +101,25 @@ function SecaoMetas({ dark }: { dark: boolean }) {
 
       {/* Filtros */}
       <div className="flex flex-wrap gap-3">
-        {/* Loja */}
-        <div className="relative">
-          <select
-            value={loja}
-            onChange={(e) => setLoja(e.target.value)}
-            className="appearance-none rounded-lg border border-border bg-muted px-3 py-2 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-          >
-            {LOJAS.map((l) => (
-              <option key={l.value} value={l.value}>{l.label}</option>
-            ))}
-          </select>
-          <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
-        </div>
+        {/* Loja — só admin troca */}
+        {isAdmin ? (
+          <div className="relative">
+            <select
+              value={loja}
+              onChange={(e) => setLoja(e.target.value)}
+              className="appearance-none rounded-lg border border-border bg-muted px-3 py-2 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            >
+              {LOJAS.map((l) => (
+                <option key={l.value} value={l.value}>{l.label}</option>
+              ))}
+            </select>
+            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+          </div>
+        ) : (
+          <span className="rounded-lg border border-border bg-muted px-3 py-2 text-sm text-foreground font-semibold">
+            {LOJAS.find(l => l.value === loja)?.label ?? loja.toUpperCase()}
+          </span>
+        )}
 
         {/* Mês */}
         <div className="relative">
@@ -139,6 +153,45 @@ function SecaoMetas({ dark }: { dark: boolean }) {
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
           Atualizar
         </button>
+      </div>
+
+      {/* Dias úteis do mês */}
+      <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/40 px-4 py-3">
+        <span className="text-xs text-muted-foreground dark:text-slate-300 font-medium whitespace-nowrap">
+          Dias úteis de {MESES[mes - 1]}/{ano}:
+        </span>
+        <input
+          type="number"
+          value={diasUteis}
+          onChange={(e) => setDiasUteis(e.target.value)}
+          min={1}
+          max={31}
+          placeholder="ex: 22"
+          className="w-20 rounded-lg border border-border bg-muted px-3 py-1.5 text-sm text-foreground text-center focus:outline-none focus:ring-2 focus:ring-primary/50"
+        />
+        <button
+          disabled={savingDias || !diasUteis}
+          onClick={async () => {
+            setSavingDias(true);
+            setErro("");
+            try {
+              await saveDiasUteis(loja, mes, ano, Number(diasUteis));
+              setSucesso("Dias úteis salvos!");
+              setTimeout(() => setSucesso(""), 3000);
+            } catch (e: unknown) {
+              setErro(e instanceof Error ? e.message : "Erro ao salvar dias úteis");
+            } finally {
+              setSavingDias(false);
+            }
+          }}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {savingDias ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+          Salvar
+        </button>
+        <span className="text-[10px] text-muted-foreground">
+          Meta diária = meta ÷ dias úteis
+        </span>
       </div>
 
       {/* Feedback */}
@@ -237,17 +290,51 @@ function SecaoMetas({ dark }: { dark: boolean }) {
 // ─── Seção: Gestão de Usuários (só admin) ────────────────────────────────
 function SecaoUsuarios() {
   const MOCK_USUARIOS = [
-    { usuario: "kevin.silva", role: "admin" as Role },
-    { usuario: "gerente.bh",  role: "manager" as Role },
-    { usuario: "vendedor01",  role: "viewer" as Role },
+    { usuario: "kevin.silva",      role: "admin"   as Role, loja: null },
+    { usuario: "henrique.berbert", role: "admin"   as Role, loja: null },
+    { usuario: "paul.moraes",      role: "admin"   as Role, loja: null },
+    { usuario: "willian.rubim",    role: "admin"   as Role, loja: null },
+    { usuario: "joao.pedro",       role: "admin"   as Role, loja: null },
+    { usuario: "gerente.teste",    role: "manager" as Role, loja: null },
+  ];
+
+  const LOJAS_OPTIONS = [
+    { value: "bh",  label: "BH" },
+    { value: "l2",  label: "Santana" },
+    { value: "l3",  label: "Rio de Janeiro" },
   ];
 
   const [usuarios, setUsuarios] = useState(MOCK_USUARIOS);
+  const [saving, setSaving] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+
+  const persist = async (usuario: string, role: Role, loja: string | null) => {
+    setSaving(usuario);
+    try {
+      await fetch(`${window.location.protocol}//${window.location.hostname}:3001/api/auth/role`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ usuario, role, loja }),
+      });
+      setSaved(usuario);
+      setTimeout(() => setSaved(null), 2000);
+    } finally {
+      setSaving(null);
+    }
+  };
 
   const handleRoleChange = (usuario: string, novaRole: Role) => {
-    setUsuarios((prev) =>
-      prev.map((u) => (u.usuario === usuario ? { ...u, role: novaRole } : u))
-    );
+    const loja = novaRole === "manager"
+      ? (usuarios.find(u => u.usuario === usuario)?.loja ?? "bh")
+      : null;
+    setUsuarios(prev => prev.map(u => u.usuario === usuario ? { ...u, role: novaRole, loja } : u));
+    persist(usuario, novaRole, loja);
+  };
+
+  const handleLojaChange = (usuario: string, novaLoja: string) => {
+    setUsuarios(prev => prev.map(u => u.usuario === usuario ? { ...u, loja: novaLoja } : u));
+    const role = usuarios.find(u => u.usuario === usuario)?.role ?? "manager";
+    persist(usuario, role, novaLoja);
   };
 
   return (
@@ -267,8 +354,9 @@ function SecaoUsuarios() {
           <thead>
             <tr className="border-b border-border bg-muted/50">
               <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Usuário</th>
-              <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role atual</th>
-              <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Alterar</th>
+              <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role</th>
+              <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Alterar Role</th>
+              <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Loja</th>
             </tr>
           </thead>
           <tbody>
@@ -285,25 +373,47 @@ function SecaoUsuarios() {
                   <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest
                     ${u.role === "admin" ? "bg-primary/15 text-primary" :
                       u.role === "manager" ? "bg-blue-500/15 text-blue-400" :
-                      u.role === "editor" ? "bg-yellow-500/15 text-yellow-400" :
                       "bg-muted text-muted-foreground"}`}>
                     {ROLE_LABELS[u.role]}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-center">
-                  <div className="relative inline-block">
-                    <select
-                      value={u.role}
-                      onChange={(e) => handleRoleChange(u.usuario, e.target.value as Role)}
-                      disabled={u.usuario === "kevin.silva"}
-                      className="appearance-none rounded-lg border border-border bg-muted px-3 py-1.5 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      {(Object.keys(ROLE_LABELS) as Role[]).map((r) => (
-                        <option key={r} value={r}>{ROLE_LABELS[r]}</option>
-                      ))}
-                    </select>
-                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                  <div className="relative inline-flex items-center gap-2">
+                    <div className="relative">
+                      <select
+                        value={u.role}
+                        onChange={(e) => handleRoleChange(u.usuario, e.target.value as Role)}
+                        disabled={u.usuario === "kevin.silva" || saving === u.usuario}
+                        className="appearance-none rounded-lg border border-border bg-muted px-3 py-1.5 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {(Object.keys(ROLE_LABELS) as Role[]).map((r) => (
+                          <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                        ))}
+                      </select>
+                      <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                    </div>
+                    {saving === u.usuario && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
+                    {saved === u.usuario && <span className="text-[10px] text-emerald-400 font-semibold">Salvo</span>}
                   </div>
+                </td>
+                <td className="px-4 py-3 text-center">
+                  {u.role === "manager" ? (
+                    <div className="relative inline-block">
+                      <select
+                        value={u.loja ?? "bh"}
+                        onChange={(e) => handleLojaChange(u.usuario, e.target.value)}
+                        disabled={saving === u.usuario}
+                        className="appearance-none rounded-lg border border-border bg-muted px-3 py-1.5 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40"
+                      >
+                        {LOJAS_OPTIONS.map(l => (
+                          <option key={l.value} value={l.value}>{l.label}</option>
+                        ))}
+                      </select>
+                      <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                    </div>
+                  ) : (
+                    <span className="text-[10px] text-muted-foreground">—</span>
+                  )}
                 </td>
               </motion.tr>
             ))}

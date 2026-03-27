@@ -13,7 +13,21 @@ router.post("/login", async (req, res) => {
   }
 
   try {
-    // 1. Autentica via API do AD (Dovale)
+    const pool = await getPool();
+
+    // Usuários de teste (*.teste): autentica pelo banco local (sem AD)
+    if (usuario.endsWith(".teste")) {
+      const testResult = await pool.request()
+        .input("usuario", usuario)
+        .query(`SELECT senha_hash, role, loja FROM dbo.USUARIOS_LOJAS WHERE usuario = @usuario AND ativo = 1`);
+      const testUser = testResult.recordset[0];
+      if (!testUser) return res.status(401).json({ error: "Usuário ou senha inválidos." });
+      const senhaOk = await bcrypt.compare(senha, testUser.senha_hash);
+      if (!senhaOk) return res.status(401).json({ error: "Usuário ou senha inválidos." });
+      return res.json({ token: `local_${Date.now()}`, usuario, role: testUser.role, loja: testUser.loja ?? null });
+    }
+
+    // Demais usuários: autentica via AD
     const adRes = await fetch("https://api.dovale.com.br/LoginUsuario1", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -26,21 +40,18 @@ router.post("/login", async (req, res) => {
 
     const adData = await adRes.json().catch(() => ({}));
 
-    // 2. Busca a role no banco local
-    const pool = await getPool();
-    const result = await pool.request()
+    const roleResult = await pool.request()
       .input("usuario", usuario)
-      .query(`
-        SELECT role FROM dbo.USUARIOS_LOJAS
-        WHERE usuario = @usuario AND ativo = 1
-      `);
+      .query(`SELECT role, loja FROM dbo.USUARIOS_LOJAS WHERE usuario = @usuario AND ativo = 1`);
 
-    const role = result.recordset[0]?.role ?? "viewer";
+    const role = roleResult.recordset[0]?.role ?? "viewer";
+    const loja = roleResult.recordset[0]?.loja ?? null;
 
     res.json({
       token: adData?.token || adData?.access_token || `ad_${Date.now()}`,
       usuario,
       role,
+      loja,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -77,6 +88,35 @@ router.post("/seed", async (req, res) => {
         `);
     }
     res.json({ ok: true, criados: usuarios.map(u => u.usuario) });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: message });
+  }
+});
+
+/** PUT /api/auth/role — atualiza role e loja de um usuário */
+router.put("/role", async (req, res) => {
+  const { usuario, role, loja } = req.body;
+  const validRoles = ["admin", "manager", "viewer"];
+  if (!usuario || !validRoles.includes(role)) {
+    return res.status(400).json({ error: "Dados inválidos." });
+  }
+  try {
+    const pool = await getPool();
+    await pool.request()
+      .input("usuario", usuario)
+      .input("role",    role)
+      .input("loja",    loja ?? null)
+      .query(`
+        MERGE dbo.USUARIOS_LOJAS AS target
+        USING (SELECT @usuario AS usuario) AS source
+          ON target.usuario = source.usuario
+        WHEN MATCHED THEN
+          UPDATE SET role = @role, loja = @loja
+        WHEN NOT MATCHED THEN
+          INSERT (usuario, senha_hash, role, loja) VALUES (@usuario, '', @role, @loja);
+      `);
+    res.json({ ok: true });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: message });

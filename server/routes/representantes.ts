@@ -17,13 +17,13 @@ router.get("/", async (req, res) => {
   const loja = (req.query.loja as string) || "bh";
 
   try {
-    const rows = await queryFirebird<RepFirebird>(loja as "bh", `
+    const rows = await queryFirebird<RepFirebird>(loja as "bh" | "l2" | "l3", `
       SELECT DISTINCT
         r.REP_CODIGO,
         r.REP_NOME
       FROM REPRESENTANTES r
       WHERE r.REP_NOME IS NOT NULL
-        ${firebirdFiltroRep("r")}
+        ${firebirdFiltroRep("r", loja)}
         AND EXISTS (
           SELECT 1 FROM PEDIDOS_VENDAS pv
           WHERE pv.PDV_REP_CODIGO = r.REP_CODIGO

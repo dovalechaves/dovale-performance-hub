@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { queryFirebird } from "../db/firebird";
 import { querySqlServer, getPool } from "../db/sqlserver";
-import { sqlServerFiltroRep } from "../db/filters";
+import { sqlServerFiltroRep, firebirdFiltroRep } from "../db/filters";
 
 const router = Router();
 
@@ -35,8 +35,8 @@ router.post("/", async (req, res) => {
       FROM PEDIDOS_VENDAS pv
       INNER JOIN REPRESENTANTES r       ON r.REP_CODIGO  = pv.PDV_REP_CODIGO
       INNER JOIN PEDIDOS_VENDAS_ITENS pvi ON pvi.PVI_NUMERO = pv.PDV_NUMERO
-      WHERE pv.PDV_PSI_CODIGO NOT IN ('CC')
-        AND pv.PDV_DATA >= '01.01.${new Date().getFullYear()}'
+      WHERE pv.PDV_DATA >= '01.01.${new Date().getFullYear()}'
+        AND r.REP_NOME IS NOT NULL
       GROUP BY r.REP_CODIGO, r.REP_NOME, pv.PDV_NUMERO, pv.PDV_DATA, pv.PDV_PSI_CODIGO
     `);
 
@@ -85,7 +85,7 @@ router.post("/", async (req, res) => {
 
 /**
  * GET /api/sync/vendas?loja=bh&mes=3&ano=2026
- * Lê vendas consolidadas do SQL Server (sem bater no Firebird).
+ * Busca diretamente do Firebird — sempre fresco, sem intermediário.
  */
 router.get("/vendas", async (req, res) => {
   const loja = (req.query.loja as string) || "bh";
@@ -93,22 +93,69 @@ router.get("/vendas", async (req, res) => {
   const ano  = Number(req.query.ano)  || new Date().getFullYear();
 
   try {
-    const rows = await querySqlServer(`
-      SELECT
-        rep_codigo,
-        rep_nome,
-        SUM(valor_total) AS total_vendas
-      FROM dbo.VENDAS_LOJAS_APP
-      WHERE loja  = @loja
-        AND MONTH(pdv_data) = @mes
-        AND YEAR(pdv_data)  = @ano
-        AND status NOT IN ('CC')
-        ${sqlServerFiltroRep("rep_nome")}
-      GROUP BY rep_codigo, rep_nome
-      ORDER BY total_vendas DESC
-    `, { loja, mes, ano });
+    const rows = await queryFirebird<{ REP_CODIGO: string; REP_NOME: string; TOTAL_VENDAS: number }>(
+      loja as "bh" | "l2" | "l3",
+      `SELECT
+        r.REP_CODIGO,
+        r.REP_NOME,
+        SUM(pvi.PVI_TOTALITEM) AS TOTAL_VENDAS
+      FROM PEDIDOS_VENDAS pv
+      INNER JOIN REPRESENTANTES r         ON r.REP_CODIGO  = pv.PDV_REP_CODIGO
+      INNER JOIN PEDIDOS_VENDAS_ITENS pvi ON pvi.PVI_NUMERO = pv.PDV_NUMERO
+      WHERE EXTRACT(MONTH FROM pv.PDV_DATA) = ${mes}
+        AND EXTRACT(YEAR  FROM pv.PDV_DATA) = ${ano}
+        AND pv.PDV_PSI_CODIGO NOT IN ('CC')
+        ${firebirdFiltroRep("r", loja)}
+      GROUP BY r.REP_CODIGO, r.REP_NOME
+      ORDER BY TOTAL_VENDAS DESC`
+    );
 
-    res.json(rows);
+    const result = rows.map(r => ({
+      rep_codigo:   r.REP_CODIGO,
+      rep_nome:     r.REP_NOME,
+      total_vendas: r.TOTAL_VENDAS,
+    }));
+
+    res.json(result);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: message });
+  }
+});
+
+/**
+ * GET /api/sync/vendas-hoje?loja=bh
+ * Busca vendas do dia atual diretamente do Firebird.
+ */
+router.get("/vendas-hoje", async (req, res) => {
+  const loja = (req.query.loja as string) || "bh";
+  const mes  = new Date().getMonth() + 1;
+  const ano  = new Date().getFullYear();
+
+  try {
+    const rows = await queryFirebird<{ REP_CODIGO: string; REP_NOME: string; TOTAL_VENDAS: number }>(
+      loja as "bh" | "l2" | "l3",
+      `SELECT
+        r.REP_CODIGO,
+        r.REP_NOME,
+        SUM(pvi.PVI_TOTALITEM) AS TOTAL_VENDAS
+      FROM PEDIDOS_VENDAS pv
+      INNER JOIN REPRESENTANTES r         ON r.REP_CODIGO  = pv.PDV_REP_CODIGO
+      INNER JOIN PEDIDOS_VENDAS_ITENS pvi ON pvi.PVI_NUMERO = pv.PDV_NUMERO
+      WHERE CAST(pv.PDV_DATA AS DATE) = CURRENT_DATE
+        AND pv.PDV_PSI_CODIGO NOT IN ('CC')
+        ${firebirdFiltroRep("r", loja)}
+      GROUP BY r.REP_CODIGO, r.REP_NOME
+      ORDER BY TOTAL_VENDAS DESC`
+    );
+
+    const result = rows.map(r => ({
+      rep_codigo:   r.REP_CODIGO,
+      rep_nome:     r.REP_NOME,
+      total_vendas: r.TOTAL_VENDAS,
+    }));
+
+    res.json(result);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: message });

@@ -6,20 +6,21 @@ interface AuthUser {
   role: Role;
   roleLabel: string;
   token: string;
+  loja?: string | null;
 }
 
 interface AuthContextValue {
   user: AuthUser | null;
   can: (permission: Permission) => boolean;
-  login: (usuario: string, token: string, apiRole?: string) => void;
+  login: (usuario: string, token: string, apiRole?: string, loja?: string | null) => void;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-function buildUser(usuario: string, token: string, apiRole?: string): AuthUser {
+function buildUser(usuario: string, token: string, apiRole?: string, loja?: string | null): AuthUser {
   const role = resolveRole(usuario, apiRole);
-  return { usuario, role, roleLabel: ROLE_LABELS[role], token };
+  return { usuario, role, roleLabel: ROLE_LABELS[role], token, loja: loja ?? null };
 }
 
 function loadFromStorage(): AuthUser | null {
@@ -35,8 +36,8 @@ function loadFromStorage(): AuthUser | null {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(loadFromStorage);
 
-  const login = useCallback((usuario: string, token: string, apiRole?: string) => {
-    const authUser = buildUser(usuario, token, apiRole);
+  const login = useCallback((usuario: string, token: string, apiRole?: string, loja?: string | null) => {
+    const authUser = buildUser(usuario, token, apiRole, loja);
     localStorage.setItem("dovale_auth", JSON.stringify(authUser));
     setUser(authUser);
   }, []);

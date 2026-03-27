@@ -48,7 +48,7 @@
     /* Custom tokens */
     --success: 145 65% 42%;
     --success-foreground: 0 0% 100%;
-    --gold: 75 85% 55%;
+    --gold: 48 95% 50%;
     --gold-foreground: 240 55% 12%;
     --gradient-primary: linear-gradient(135deg, hsl(240 55% 24%), hsl(240 55% 32%));
     --gradient-card: linear-gradient(145deg, hsl(0 0% 100%), hsl(0 0% 98%));
@@ -58,13 +58,13 @@
   }
 
   .dark {
-    --background: 240 30% 6%;
+    --background: 245 70% 10%;
     --foreground: 0 0% 95%;
 
-    --card: 240 30% 9%;
+    --card: 245 70% 10%;
     --card-foreground: 0 0% 95%;
 
-    --popover: 240 30% 9%;
+    --popover: 245 70% 10%;
     --popover-foreground: 0 0% 95%;
 
     --primary: 48 95% 55%;
@@ -100,7 +100,7 @@
     --gold: 48 95% 55%;
     --gold-foreground: 240 55% 12%;
     --gradient-primary: linear-gradient(135deg, hsl(48 95% 50%), hsl(48 95% 62%));
-    --gradient-card: linear-gradient(145deg, hsl(240 30% 10%), hsl(240 30% 7%));
+    --gradient-card: linear-gradient(145deg, hsl(245 72% 7%), hsl(245 72% 5%));
     --gradient-gold: linear-gradient(135deg, hsl(48 95% 50%), hsl(48 95% 62%));
     --shadow-glow: 0 0 30px -5px hsl(48 95% 55% / 0.25);
     --shadow-gold: 0 0 40px -5px hsl(48 95% 55% / 0.4);

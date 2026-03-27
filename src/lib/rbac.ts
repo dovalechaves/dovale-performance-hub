@@ -7,10 +7,11 @@ export type Permission =
   | "manage:roles"
   | "manage:metas"
   | "view:totalSales"
+  | "view:salesValues"
   | "view:stats"
   | "view:classification";
 
-export type Role = "admin" | "manager" | "editor" | "viewer";
+export type Role = "admin" | "manager" | "viewer";
 
 export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   admin: [
@@ -21,22 +22,14 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "manage:roles",
     "manage:metas",
     "view:totalSales",
+    "view:salesValues",
     "view:stats",
     "view:classification",
   ],
   manager: [
     "read:all",
     "write:own",
-    "manage:users",
     "manage:metas",
-    "view:totalSales",
-    "view:stats",
-    "view:classification",
-  ],
-  editor: [
-    "read:all",
-    "write:own",
-    "view:totalSales",
     "view:stats",
     "view:classification",
   ],
@@ -47,20 +40,24 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
 };
 
 export const ROLE_LABELS: Record<Role, string> = {
-  admin: "Administrador",
+  admin:   "Administrador",
   manager: "Gerente",
-  editor: "Editor",
-  viewer: "Visualizador",
+  viewer:  "Visualizador",
 };
 
-/** Usuários com roles fixas (independente do que a API retorna) */
+/** Usuários com roles fixas */
 const STATIC_USER_ROLES: Record<string, Role> = {
-  "kevin.silva": "admin",
+  "kevin.silva":      "admin",
+  "henrique.berbert": "admin",
+  "paul.moraes":      "admin",
+  "willian.rubim":    "admin",
+  "joao.pedro":       "admin",
+  "gerente.teste":    "manager",
 };
 
 export function resolveRole(usuario: string, apiRole?: string): Role {
   if (STATIC_USER_ROLES[usuario]) return STATIC_USER_ROLES[usuario];
-  const valid: Role[] = ["admin", "manager", "editor", "viewer"];
+  const valid: Role[] = ["admin", "manager", "viewer"];
   if (apiRole && valid.includes(apiRole as Role)) return apiRole as Role;
   return "viewer";
 }

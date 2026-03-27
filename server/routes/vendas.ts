@@ -25,7 +25,7 @@ router.get("/", async (req, res) => {
       FROM PEDIDOS P
       JOIN VENDEDORES V ON V.CODVEND = P.CODVEND
       WHERE CAST(P.DTEMISSAO AS DATE) = CAST(CURRENT_DATE AS DATE)
-        AND P.SITUACAO NOT IN ('C')
+        AND P.SITUACAO NOT IN ('CC')
       GROUP BY V.CODVEND, V.NOMEVEND
       ORDER BY vendas DESC
     `);

@@ -6,11 +6,13 @@ services:
       dockerfile: Dockerfile
     env_file: .env
     restart: unless-stopped
+    networks:
+      - coolify-overlay
     labels:
       - traefik.enable=true
-      - traefik.http.routers.backend-http.rule=Host(`backend.dovale.online`) && PathPrefix(`/`)
+      - traefik.docker.network=coolify-overlay
+      - traefik.http.routers.backend-http.rule=Host(`backend.dovale.online`)
       - traefik.http.routers.backend-http.entrypoints=http
-      - traefik.http.routers.backend-http.middlewares=gzip
       - traefik.http.routers.backend-http.service=backend-svc
       - traefik.http.services.backend-svc.loadbalancer.server.port=3001
 
@@ -21,10 +23,16 @@ services:
       args:
         VITE_API_URL: https://backend.dovale.online/api
     restart: unless-stopped
+    networks:
+      - coolify-overlay
     labels:
       - traefik.enable=true
-      - traefik.http.routers.frontend-http.rule=Host(`lojas.dovale.online`) && PathPrefix(`/`)
+      - traefik.docker.network=coolify-overlay
+      - traefik.http.routers.frontend-http.rule=Host(`lojas.dovale.online`)
       - traefik.http.routers.frontend-http.entrypoints=http
-      - traefik.http.routers.frontend-http.middlewares=gzip
       - traefik.http.routers.frontend-http.service=frontend-svc
       - traefik.http.services.frontend-svc.loadbalancer.server.port=80
+
+networks:
+  coolify-overlay:
+    external: true

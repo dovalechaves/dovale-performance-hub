@@ -19,7 +19,7 @@ export interface Meta {
 }
 
 export const LOJAS = [
-  { value: "bh", label: "BH" },
+  { value: "bh", label: "Belo Horizonte" },
   { value: "l2", label: "Santana" },
   { value: "l3", label: "Rio de Janeiro" },
 ];

@@ -6,15 +6,13 @@ services:
       dockerfile: Dockerfile
     env_file: .env
     restart: unless-stopped
-    networks:
-      - coolify
     labels:
-      - caddy_0=http://backend.dovale.online
-      - caddy_0.encode=zstd gzip
-      - caddy_0.handle_path=/*
-      - caddy_0.handle_path.0_reverse_proxy={{upstreams 3001}}
-      - caddy_0.header=-Server
-      - caddy_ingress_network=coolify
+      - traefik.enable=true
+      - traefik.http.routers.backend-http.rule=Host(`backend.dovale.online`) && PathPrefix(`/`)
+      - traefik.http.routers.backend-http.entrypoints=http
+      - traefik.http.routers.backend-http.middlewares=gzip
+      - traefik.http.routers.backend-http.service=backend-svc
+      - traefik.http.services.backend-svc.loadbalancer.server.port=3001
 
   frontend:
     build:
@@ -23,17 +21,10 @@ services:
       args:
         VITE_API_URL: https://backend.dovale.online/api
     restart: unless-stopped
-    networks:
-      - coolify
     labels:
-      - caddy_0=http://lojas.dovale.online
-      - caddy_0.encode=zstd gzip
-      - caddy_0.handle_path=/*
-      - caddy_0.handle_path.0_reverse_proxy={{upstreams 80}}
-      - caddy_0.header=-Server
-      - caddy_0.try_files={path} /index.html
-      - caddy_ingress_network=coolify
-
-networks:
-  coolify:
-    external: true
+      - traefik.enable=true
+      - traefik.http.routers.frontend-http.rule=Host(`lojas.dovale.online`) && PathPrefix(`/`)
+      - traefik.http.routers.frontend-http.entrypoints=http
+      - traefik.http.routers.frontend-http.middlewares=gzip
+      - traefik.http.routers.frontend-http.service=frontend-svc
+      - traefik.http.services.frontend-svc.loadbalancer.server.port=80

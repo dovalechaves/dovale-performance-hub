@@ -1,4 +1,6 @@
-const BASE = import.meta.env.VITE_API_URL ?? `${window.location.protocol}//${window.location.hostname}:3001/api`;
+export const API_BASE = (import.meta.env.VITE_API_URL ?? "/api").replace(/\/$/, "");
+
+const BASE = API_BASE;
 
 export interface Representante {
   rep_codigo: string;

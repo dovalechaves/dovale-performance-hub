@@ -5,6 +5,7 @@ import { Eye, EyeOff, LogIn, Loader2, Sun, Moon } from "lucide-react";
 import logoWhite from "@/assets/logo-white.png";
 import logoBlue from "@/assets/logo-blue.png";
 import { useAuth } from "@/context/AuthContext";
+import { API_BASE } from "@/services/api";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -32,7 +33,7 @@ export default function Login() {
 
     setLoading(true);
     try {
-      const res = await fetch(`${window.location.protocol}//${window.location.hostname}:3001/api/auth/login`, {
+      const res = await fetch(`${API_BASE}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ usuario, senha }),

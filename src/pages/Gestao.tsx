@@ -5,6 +5,7 @@ import { Target, Users, Save, Loader2, ArrowLeft, RefreshCw, Shield, ChevronDown
 import { useAuth } from "@/context/AuthContext";
 import { ROLE_LABELS, type Role } from "@/lib/rbac";
 import {
+  API_BASE,
   getRepresentantes,
   getMetas,
   saveMeta,
@@ -311,7 +312,7 @@ function SecaoUsuarios() {
   const persist = async (usuario: string, role: Role, loja: string | null) => {
     setSaving(usuario);
     try {
-      await fetch(`${window.location.protocol}//${window.location.hostname}:3001/api/auth/role`, {
+      await fetch(`${API_BASE}/auth/role`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ usuario, role, loja }),

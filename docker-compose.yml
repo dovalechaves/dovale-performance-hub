@@ -7,11 +7,11 @@ services:
     env_file: .env
     restart: unless-stopped
     labels:
-      - traefik.enable=true
-      - traefik.http.routers.backend-http.rule=Host(`backend.dovale.online`)
-      - traefik.http.routers.backend-http.entrypoints=web
-      - traefik.http.routers.backend-http.service=backend-svc
-      - traefik.http.services.backend-svc.loadbalancer.server.port=3001
+      - caddy_0=http://backend.dovale.online
+      - caddy_0.encode=zstd gzip
+      - caddy_0.reverse_proxy={{upstreams 3001}}
+      - caddy_0.header=-Server
+      - caddy_ingress_network=r101pwz0f1vqyh2yjh64h86o
 
   frontend:
     build:
@@ -21,8 +21,10 @@ services:
         VITE_API_URL: https://backend.dovale.online/api
     restart: unless-stopped
     labels:
-      - traefik.enable=true
-      - traefik.http.routers.frontend-http.rule=Host(`lojas.dovale.online`)
-      - traefik.http.routers.frontend-http.entrypoints=web
-      - traefik.http.routers.frontend-http.service=frontend-svc
-      - traefik.http.services.frontend-svc.loadbalancer.server.port=80
+      - caddy_0=http://lojas.dovale.online
+      - caddy_0.encode=zstd gzip
+      - caddy_0.handle_path=/*
+      - caddy_0.handle_path.0_reverse_proxy={{upstreams 80}}
+      - caddy_0.header=-Server
+      - caddy_0.try_files={path} /index.html /index.php
+      - caddy_ingress_network=r101pwz0f1vqyh2yjh64h86o

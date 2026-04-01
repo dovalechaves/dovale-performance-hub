@@ -5,12 +5,14 @@ import { Target, Users, Save, Loader2, ArrowLeft, RefreshCw, Shield, ChevronDown
 import { useAuth } from "@/context/AuthContext";
 import { ROLE_LABELS, type Role } from "@/lib/rbac";
 import {
-  API_BASE,
   getRepresentantes,
   getMetas,
   saveMeta,
   saveDiasUteis,
   LOJAS,
+  getAuthUsers,
+  updateAuthUserRole,
+  type AuthManagedUser,
   type Representante,
   type Meta,
 } from "@/services/api";
@@ -290,48 +292,88 @@ function SecaoMetas({ dark }: { dark: boolean }) {
 
 // ─── Seção: Gestão de Usuários (só admin) ────────────────────────────────
 function SecaoUsuarios() {
-  const MOCK_USUARIOS = [
-    { usuario: "kevin.silva",      role: "admin"   as Role, loja: null },
-    { usuario: "gerente.teste",    role: "manager" as Role, loja: null },
-  ];
-
-  const LOJAS_OPTIONS = [
-    { value: "bh",  label: "BH" },
-    { value: "l2",  label: "Santana" },
-    { value: "l3",  label: "Rio de Janeiro" },
-  ];
-
-  const [usuarios, setUsuarios] = useState(MOCK_USUARIOS);
+  const { user } = useAuth();
+  const [usuarios, setUsuarios] = useState<AuthManagedUser[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [erro, setErro] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
 
-  const persist = async (usuario: string, role: Role, loja: string | null) => {
-    setSaving(usuario);
+  const carregar = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    setErro("");
     try {
-      await fetch(`${API_BASE}/auth/role`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ usuario, role, loja }),
+      const data = await getAuthUsers(user.usuario);
+      setUsuarios(data);
+    } catch (e: unknown) {
+      setErro(e instanceof Error ? e.message : "Erro ao carregar usuários");
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    carregar();
+  }, [carregar]);
+
+  const persist = async (next: AuthManagedUser) => {
+    if (!user) return;
+    setSaving(next.usuario);
+    setErro("");
+    try {
+      await updateAuthUserRole({
+        actor_usuario: user.usuario,
+        usuario: next.usuario,
+        can_access_hub: next.can_access_hub,
+        apps: next.apps,
       });
-      setSaved(usuario);
+      setSaved(next.usuario);
       setTimeout(() => setSaved(null), 2000);
+    } catch (e: unknown) {
+      setErro(e instanceof Error ? e.message : "Erro ao salvar usuário");
     } finally {
       setSaving(null);
     }
   };
 
-  const handleRoleChange = (usuario: string, novaRole: Role) => {
-    const loja = novaRole === "manager"
-      ? (usuarios.find(u => u.usuario === usuario)?.loja ?? "bh")
-      : null;
-    setUsuarios(prev => prev.map(u => u.usuario === usuario ? { ...u, role: novaRole, loja } : u));
-    persist(usuario, novaRole, loja);
+  const updateUsuario = (usuario: string, updater: (u: AuthManagedUser) => AuthManagedUser) => {
+    setUsuarios((prev) => prev.map((u) => (u.usuario === usuario ? updater(u) : u)));
   };
 
-  const handleLojaChange = (usuario: string, novaLoja: string) => {
-    setUsuarios(prev => prev.map(u => u.usuario === usuario ? { ...u, loja: novaLoja } : u));
-    const role = usuarios.find(u => u.usuario === usuario)?.role ?? "manager";
-    persist(usuario, role, novaLoja);
+  const handleRoleChange = async (u: AuthManagedUser, novaRole: Role) => {
+    const nextLoja = novaRole === "manager" ? (u.apps.dashboard.loja ?? u.loja ?? "bh") : null;
+    const next: AuthManagedUser = {
+      ...u,
+      role: novaRole,
+      loja: nextLoja,
+      apps: {
+        ...u.apps,
+        dashboard: {
+          ...u.apps.dashboard,
+          role: novaRole,
+          loja: nextLoja,
+        },
+      },
+    };
+    updateUsuario(u.usuario, () => next);
+    await persist(next);
+  };
+
+  const handleLojaChange = async (u: AuthManagedUser, novaLoja: string) => {
+    const next: AuthManagedUser = {
+      ...u,
+      loja: novaLoja,
+      apps: {
+        ...u.apps,
+        dashboard: {
+          ...u.apps.dashboard,
+          loja: novaLoja,
+        },
+      },
+    };
+    updateUsuario(u.usuario, () => next);
+    await persist(next);
   };
 
   return (
@@ -344,7 +386,17 @@ function SecaoUsuarios() {
         <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary uppercase tracking-widest">
           Admin
         </span>
+        <button
+          onClick={carregar}
+          disabled={loading}
+          className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-secondary px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-primary/10 transition-colors disabled:opacity-40"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+          Atualizar
+        </button>
       </div>
+
+      {erro && <p className="text-xs text-red-400">{erro}</p>}
 
       <div className="rounded-xl border border-border overflow-hidden">
         <table className="w-full text-sm">
@@ -357,7 +409,19 @@ function SecaoUsuarios() {
             </tr>
           </thead>
           <tbody>
-            {usuarios.map((u, i) => (
+            {loading ? (
+              <tr>
+                <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">
+                  <Loader2 className="w-5 h-5 animate-spin mx-auto" />
+                </td>
+              </tr>
+            ) : usuarios.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground text-xs">
+                  Nenhum usuário encontrado.
+                </td>
+              </tr>
+            ) : usuarios.map((u, i) => (
               <motion.tr
                 key={u.usuario}
                 initial={{ opacity: 0, y: 8 }}
@@ -368,19 +432,19 @@ function SecaoUsuarios() {
                 <td className="px-4 py-3 font-mono text-xs text-foreground">{u.usuario}</td>
                 <td className="px-4 py-3">
                   <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest
-                    ${u.role === "admin" ? "bg-primary/15 text-primary" :
-                      u.role === "manager" ? "bg-blue-500/15 text-blue-400" :
+                    ${u.apps.dashboard.role === "admin" ? "bg-primary/15 text-primary" :
+                      u.apps.dashboard.role === "manager" ? "bg-blue-500/15 text-blue-400" :
                       "bg-muted text-muted-foreground"}`}>
-                    {ROLE_LABELS[u.role]}
+                    {ROLE_LABELS[u.apps.dashboard.role]}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-center">
                   <div className="relative inline-flex items-center gap-2">
                     <div className="relative">
                       <select
-                        value={u.role}
-                        onChange={(e) => handleRoleChange(u.usuario, e.target.value as Role)}
-                        disabled={saving === u.usuario}
+                        value={u.apps.dashboard.role}
+                        onChange={(e) => void handleRoleChange(u, e.target.value as Role)}
+                        disabled={saving === u.usuario || !u.can_access_hub}
                         className="appearance-none rounded-lg border border-border bg-muted px-3 py-1.5 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         {(Object.keys(ROLE_LABELS) as Role[]).map((r) => (
@@ -394,15 +458,15 @@ function SecaoUsuarios() {
                   </div>
                 </td>
                 <td className="px-4 py-3 text-center">
-                  {u.role === "manager" ? (
+                  {u.apps.dashboard.role === "manager" ? (
                     <div className="relative inline-block">
                       <select
-                        value={u.loja ?? "bh"}
-                        onChange={(e) => handleLojaChange(u.usuario, e.target.value)}
-                        disabled={saving === u.usuario}
+                        value={u.apps.dashboard.loja ?? "bh"}
+                        onChange={(e) => void handleLojaChange(u, e.target.value)}
+                        disabled={saving === u.usuario || !u.can_access_hub}
                         className="appearance-none rounded-lg border border-border bg-muted px-3 py-1.5 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40"
                       >
-                        {LOJAS_OPTIONS.map(l => (
+                        {LOJAS.map(l => (
                           <option key={l.value} value={l.value}>{l.label}</option>
                         ))}
                       </select>

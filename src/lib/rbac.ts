@@ -46,7 +46,7 @@ export const ROLE_LABELS: Record<Role, string> = {
 };
 
 /** Usuários com roles fixas */
-const STATIC_USER_ROLES: Record<string, Role> = {
+export const STATIC_USER_ROLES: Record<string, Role> = {
   "kevin.silva":      "admin",
   "henrique.berbert": "admin",
   "paul.moraes":      "admin",

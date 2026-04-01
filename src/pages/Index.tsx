@@ -5,7 +5,7 @@ import { SellerCard } from "@/components/SellerCard";
 import { StatsBar } from "@/components/StatsBar";
 import { useCelebration } from "@/hooks/useCelebration";
 import { Seller } from "@/data/sellers";
-import { Zap, Moon, Sun, LogOut, Settings, RefreshCw, ChevronDown, Monitor, EyeOff } from "lucide-react";
+import { Zap, Moon, Sun, LogOut, Settings, RefreshCw, ChevronDown, Monitor, EyeOff, ArrowLeft } from "lucide-react";
 import logoBlue from "@/assets/logo-blue.png";
 import logoWhite from "@/assets/logo-white.png";
 import { useAuth } from "@/context/AuthContext";
@@ -135,6 +135,14 @@ const Index = () => {
       <header className="border-b border-border bg-gradient-card">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => navigate("/hub")}
+              className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors"
+              title="Voltar ao Hub"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+            <div className="h-6 w-px bg-border" />
             <div className="relative h-9 w-36 overflow-hidden">
               <img src={logoBlue} alt="Dovale" className={`absolute inset-0 h-full w-auto object-contain transition-all duration-700 ease-in-out ${dark ? 'opacity-0 scale-90 blur-sm rotate-3' : 'opacity-100 scale-100 blur-0 rotate-0'}`} />
               <img src={logoWhite} alt="Dovale" className={`absolute inset-0 h-full w-auto object-contain transition-all duration-700 ease-in-out ${dark ? 'opacity-100 scale-100 blur-0 rotate-0' : 'opacity-0 scale-90 blur-sm -rotate-3'}`} />

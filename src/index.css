@@ -6,6 +6,8 @@
 
 @layer base {
   :root {
+    color-scheme: light;
+    --theme-ease: cubic-bezier(0.22, 1, 0.36, 1);
     --background: 0 0% 98%;
     --foreground: 240 55% 18%;
 
@@ -58,6 +60,7 @@
   }
 
   .dark {
+    color-scheme: dark;
     --background: 245 70% 10%;
     --foreground: 0 0% 95%;
 
@@ -113,6 +116,16 @@
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    *,
+    *::before,
+    *::after {
+      transition-property: background-color, border-color, color, fill, stroke, box-shadow, text-decoration-color;
+      transition-duration: 420ms;
+      transition-timing-function: var(--theme-ease);
+    }
   }
 }
 

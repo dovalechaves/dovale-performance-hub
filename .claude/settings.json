@@ -9,7 +9,8 @@
       "Bash(curl -s http://localhost:3001/api/health)",
       "Bash(curl -s -X POST http://localhost:3001/api/sync?loja=bh)",
       "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d\\)\")",
-      "Bash(curl -s -X POST \"http://localhost:3001/api/auth/seed\")"
+      "Bash(curl -s -X POST \"http://localhost:3001/api/auth/seed\")",
+      "Bash(npx tsc:*)"
     ]
   }
 }

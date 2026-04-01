@@ -6,6 +6,7 @@ import metasRouter from "./routes/metas";
 import syncRouter from "./routes/sync";
 import representantesRouter from "./routes/representantes";
 import authRouter from "./routes/auth";
+import ecommerceRouter from "./routes/ecommerce";
 import { startSyncJob } from "./jobs/syncJob";
 
 const app = express();
@@ -19,6 +20,7 @@ app.use("/api/vendas",          vendasRouter);
 app.use("/api/metas",           metasRouter);
 app.use("/api/sync",            syncRouter);
 app.use("/api/representantes",  representantesRouter);
+app.use("/api/ecommerce",       ecommerceRouter);
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });

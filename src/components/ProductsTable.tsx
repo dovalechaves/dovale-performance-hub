@@ -118,6 +118,8 @@ const selectClass =
   "appearance-none bg-secondary border-0 rounded-lg px-4 py-3.5 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary transition-all duration-200 cursor-pointer w-full";
 const labelClass = "text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2 block";
 
+const roundCurrency = (value: number) => Math.round(value * 100) / 100;
+
 const ChevronIcon = () => (
   <svg
     className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none"
@@ -150,7 +152,7 @@ const ProductsTable = () => {
             codigo: String(p.pro_codigo),
             descricao: p.resumo,
             percentualDesconto: 0,
-            precoFinal: p.preco ?? 0,
+            precoFinal: roundCurrency(p.preco ?? 0),
             custo: p.custo ?? 0,
             peso: p.peso ?? 0,
           }))
@@ -371,27 +373,27 @@ const ProductsTable = () => {
           </div>
         </div>
 
-        {/* Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+        {/* Tabela completa (somente telas muito largas) */}
+        <div className="hidden 2xl:block overflow-hidden rounded-xl border border-border/60">
+          <table className="w-full table-fixed text-xs">
             <thead>
-              <tr>
-                <th className="px-4 py-3 text-left font-semibold text-foreground text-xs uppercase tracking-wider">Código</th>
-                <th className="px-4 py-3 text-left font-semibold text-foreground text-xs uppercase tracking-wider">Descrição</th>
-                <th className="px-4 py-3 text-center font-semibold text-foreground text-xs uppercase tracking-wider">% Desc</th>
-                <th className="px-4 py-3 text-right font-semibold text-foreground text-xs uppercase tracking-wider">Preço Final</th>
-                <th className="px-4 py-3 text-right font-semibold text-muted-foreground text-xs uppercase tracking-wider">Preço</th>
-                <th className="px-4 py-3 text-right font-semibold text-muted-foreground text-xs uppercase tracking-wider">{taxaLabel}</th>
+              <tr className="bg-muted/40 border-b border-border/60">
+                <th className="px-2 py-2 text-left font-semibold text-foreground uppercase tracking-wider">Código</th>
+                <th className="px-2 py-2 text-left font-semibold text-foreground uppercase tracking-wider">Descrição</th>
+                <th className="px-2 py-2 text-center font-semibold text-foreground uppercase tracking-wider">% Desc</th>
+                <th className="px-2 py-2 text-right font-semibold text-foreground uppercase tracking-wider">Preço Final</th>
+                <th className="px-2 py-2 text-right font-semibold text-muted-foreground uppercase tracking-wider">Preço</th>
+                <th className="px-2 py-2 text-right font-semibold text-muted-foreground uppercase tracking-wider">{taxaLabel}</th>
                 {(marketplace === "mercadolivre" || marketplace === "amazon") && (
-                  <th className="px-4 py-3 text-right font-semibold text-muted-foreground text-xs uppercase tracking-wider">Frete (est.)</th>
+                  <th className="px-2 py-2 text-right font-semibold text-muted-foreground uppercase tracking-wider">Frete (est.)</th>
                 )}
-                <th className="px-4 py-3 text-right font-semibold text-muted-foreground text-xs uppercase tracking-wider">Imposto</th>
-                <th className="px-4 py-3 text-right font-semibold text-muted-foreground text-xs uppercase tracking-wider">Custo</th>
-                <th className="px-4 py-3 text-right font-semibold text-muted-foreground text-xs uppercase tracking-wider">Custo Op.</th>
-                <th className="px-4 py-3 text-right font-semibold text-primary text-xs uppercase tracking-wider">Custo Real</th>
-                <th className="px-4 py-3 text-right font-semibold text-foreground text-xs uppercase tracking-wider font-bold">Lucro R$</th>
-                <th className="px-4 py-3 text-right font-semibold text-primary text-xs uppercase tracking-wider">Margem c/ Imp.</th>
-                <th className="px-4 py-3 text-right font-semibold text-foreground text-xs uppercase tracking-wider">Peso</th>
+                <th className="px-2 py-2 text-right font-semibold text-muted-foreground uppercase tracking-wider">Imposto</th>
+                <th className="px-2 py-2 text-right font-semibold text-muted-foreground uppercase tracking-wider">Custo</th>
+                <th className="px-2 py-2 text-right font-semibold text-muted-foreground uppercase tracking-wider">Custo Op.</th>
+                <th className="px-2 py-2 text-right font-semibold text-primary uppercase tracking-wider">Custo Real</th>
+                <th className="px-2 py-2 text-right font-semibold text-foreground uppercase tracking-wider">Lucro R$</th>
+                <th className="px-2 py-2 text-right font-semibold text-primary uppercase tracking-wider">Margem c/ Imp.</th>
+                <th className="px-2 py-2 text-right font-semibold text-foreground uppercase tracking-wider">Peso</th>
               </tr>
             </thead>
             <tbody>
@@ -401,9 +403,9 @@ const ProductsTable = () => {
 
                 return (
                   <tr key={product.codigo} className="border-b border-border/50 hover:bg-secondary/50 transition-colors">
-                    <td className="px-4 py-3 text-foreground font-medium">{product.codigo}</td>
-                    <td className="px-4 py-3 text-foreground font-medium max-w-[200px] truncate" title={product.descricao}>{product.descricao}</td>
-                    <td className="px-4 py-3 text-center">
+                    <td className="px-2 py-2 text-foreground font-medium">{product.codigo}</td>
+                    <td className="px-2 py-2 text-foreground font-medium break-words" title={product.descricao}>{product.descricao}</td>
+                    <td className="px-2 py-2 text-center">
                       <input
                         type="number"
                         min="0"
@@ -411,46 +413,143 @@ const ProductsTable = () => {
                         step="0.01"
                         value={product.percentualDesconto}
                         onChange={(e) => updateProduct(actualIndex, { percentualDesconto: parseFloat(e.target.value) || 0 })}
-                        className="w-16 bg-secondary border-0 rounded px-2 py-1 text-sm text-center text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                        className="w-14 bg-secondary border-0 rounded px-1.5 py-1 text-xs text-center text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                       />
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-2 py-2">
                       <input
                         type="number"
                         min="0"
                         step="0.01"
                         value={product.precoFinal}
-                        onChange={(e) => updateProduct(actualIndex, { precoFinal: parseFloat(e.target.value) || 0 })}
-                        className="w-24 bg-secondary border-0 rounded px-2 py-1 text-sm text-right text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                        onChange={(e) => updateProduct(actualIndex, { precoFinal: roundCurrency(parseFloat(e.target.value) || 0) })}
+                        className="w-20 bg-secondary border-0 rounded px-1.5 py-1 text-xs text-right text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                       />
                     </td>
-                    <td className="px-4 py-3 text-right text-muted-foreground">{fmt(values.recebimento)}</td>
-                    <td className="px-4 py-3 text-right text-muted-foreground">{fmt(values.taxa)}</td>
+                    <td className="px-2 py-2 text-right text-muted-foreground">{fmt(values.recebimento)}</td>
+                    <td className="px-2 py-2 text-right text-muted-foreground">{fmt(values.taxa)}</td>
                     {(marketplace === "mercadolivre" || marketplace === "amazon") && (
-                      <td className="px-4 py-3 text-right text-muted-foreground">{fmt(values.frete)}</td>
+                      <td className="px-2 py-2 text-right text-muted-foreground">{fmt(values.frete)}</td>
                     )}
-                    <td className="px-4 py-3 text-right text-muted-foreground">{fmt(values.imposto)}</td>
-                    <td className="px-4 py-3 text-right text-muted-foreground">{fmt(product.custo)}</td>
-                    <td className="px-4 py-3 text-right text-muted-foreground">
+                    <td className="px-2 py-2 text-right text-muted-foreground">{fmt(values.imposto)}</td>
+                    <td className="px-2 py-2 text-right text-muted-foreground">{fmt(product.custo)}</td>
+                    <td className="px-2 py-2 text-right text-muted-foreground">
                       {(() => {
                         const c = custoOp[Number(product.codigo)];
                         if (!c || c.custo_operacional_unit == null) return <span>—</span>;
                         return fmt(c.custo_operacional_unit);
                       })()}
                     </td>
-                    <td className="px-4 py-3 text-right font-medium text-primary">
+                    <td className="px-2 py-2 text-right font-medium text-primary">
                       {fmt(values.custoReal)}
                     </td>
-                    <td className={`px-4 py-3 text-right font-bold ${values.lucro >= 0 ? "text-green-600" : "text-red-600"}`}>
+                    <td className={`px-2 py-2 text-right font-bold ${values.lucro >= 0 ? "text-green-600" : "text-red-600"}`}>
                       {fmt(values.lucro)}
                     </td>
-                    <td className="px-4 py-3 text-right">{getMarginBadge(values.margemComImposto)}</td>
-                    <td className="px-4 py-3 text-right text-foreground">{product.peso} g</td>
+                    <td className="px-2 py-2 text-right">{getMarginBadge(values.margemComImposto)}</td>
+                    <td className="px-2 py-2 text-right text-foreground">{product.peso} g</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
+        </div>
+
+        {/* Cards responsivos (sem scroll horizontal) */}
+        <div className="2xl:hidden space-y-3">
+          {filteredProducts.map((product) => {
+            const values = getCalculatedValues(product);
+            const actualIndex = products.findIndex((p) => p.codigo === product.codigo);
+            const custoOpUnit = custoOp[Number(product.codigo)]?.custo_operacional_unit ?? null;
+
+            return (
+              <article key={product.codigo} className="rounded-xl border border-border/60 bg-background/70 p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[11px] uppercase tracking-widest text-muted-foreground">Código {product.codigo}</p>
+                    <h3 className="text-sm font-semibold text-foreground leading-snug break-words">{product.descricao}</h3>
+                  </div>
+                  <div className={`shrink-0 text-sm font-bold ${values.lucro >= 0 ? "text-green-600" : "text-red-600"}`}>
+                    {fmt(values.lucro)}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest text-muted-foreground block mb-1">% Desc</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.01"
+                      value={product.percentualDesconto}
+                      onChange={(e) => updateProduct(actualIndex, { percentualDesconto: parseFloat(e.target.value) || 0 })}
+                      className="w-full bg-secondary border-0 rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest text-muted-foreground block mb-1">Preço Final</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={product.precoFinal}
+                      onChange={(e) => updateProduct(actualIndex, { precoFinal: roundCurrency(parseFloat(e.target.value) || 0) })}
+                      className="w-full bg-secondary border-0 rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                    />
+                  </div>
+
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Peso</p>
+                    <p className="text-sm font-medium text-foreground">{product.peso} g</p>
+                  </div>
+
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Preço</p>
+                    <p className="text-sm text-foreground">{fmt(values.recebimento)}</p>
+                  </div>
+
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">{taxaLabel}</p>
+                    <p className="text-sm text-foreground">{fmt(values.taxa)}</p>
+                  </div>
+
+                  {(marketplace === "mercadolivre" || marketplace === "amazon") && (
+                    <div>
+                      <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Frete (est.)</p>
+                      <p className="text-sm text-foreground">{fmt(values.frete)}</p>
+                    </div>
+                  )}
+
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Imposto</p>
+                    <p className="text-sm text-foreground">{fmt(values.imposto)}</p>
+                  </div>
+
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Custo</p>
+                    <p className="text-sm text-foreground">{fmt(product.custo)}</p>
+                  </div>
+
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Custo Op.</p>
+                    <p className="text-sm text-foreground">{custoOpUnit == null ? "—" : fmt(custoOpUnit)}</p>
+                  </div>
+
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Custo Real</p>
+                    <p className="text-sm font-semibold text-primary">{fmt(values.custoReal)}</p>
+                  </div>
+
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Margem c/ Imp.</p>
+                    <div>{getMarginBadge(values.margemComImposto)}</div>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
         </div>
 
         {isLoading && (

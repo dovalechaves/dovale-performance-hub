@@ -510,10 +510,14 @@ export default function Gestao() {
       <header className="border-b border-border bg-gradient-card">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="relative h-9 w-36 overflow-hidden">
+            <button
+              onClick={() => navigate("/hub")}
+              className="relative h-9 w-36 overflow-hidden"
+              title="Ir para o Hub"
+            >
               <img src={logoBlue} alt="Dovale" className={`absolute inset-0 h-full w-auto object-contain transition-all duration-700 ${dark ? "opacity-0" : "opacity-100"}`} />
               <img src={logoWhite} alt="Dovale" className={`absolute inset-0 h-full w-auto object-contain transition-all duration-700 ${dark ? "opacity-100" : "opacity-0"}`} />
-            </div>
+            </button>
             <div className="h-6 w-px bg-border" />
             <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground font-medium">Gerenciamento</p>
           </div>

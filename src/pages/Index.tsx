@@ -186,10 +186,14 @@ const Index = () => {
               <ArrowLeft className="w-4 h-4" />
             </button>
             <div className="h-6 w-px bg-border" />
-            <div className="relative h-9 w-36 overflow-hidden">
+            <button
+              onClick={() => navigate("/hub")}
+              className="relative h-9 w-36 overflow-hidden"
+              title="Ir para o Hub"
+            >
               <img src={logoBlue} alt="Dovale" className={`absolute inset-0 h-full w-auto object-contain transition-all duration-700 ease-in-out ${dark ? 'opacity-0 scale-90 blur-sm rotate-3' : 'opacity-100 scale-100 blur-0 rotate-0'}`} />
               <img src={logoWhite} alt="Dovale" className={`absolute inset-0 h-full w-auto object-contain transition-all duration-700 ease-in-out ${dark ? 'opacity-100 scale-100 blur-0 rotate-0' : 'opacity-0 scale-90 blur-sm -rotate-3'}`} />
-            </div>
+            </button>
             <div className="h-6 w-px bg-border" />
             <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground dark:text-slate-300 font-medium">Painel de Vendas</p>
 

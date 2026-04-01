@@ -10,7 +10,8 @@ interface StatsBarProps {
 export function StatsBar({ sellers, canViewTotalSales = true }: StatsBarProps) {
   const totalSales = sellers.reduce((s, v) => s + v.sales, 0);
   const totalGoal = sellers.reduce((s, v) => s + v.goal, 0);
-  const overallPct = ((totalSales / totalGoal) * 100).toFixed(1);
+  const hasOverallBase = Number.isFinite(totalSales) && Number.isFinite(totalGoal) && totalGoal > 0;
+  const overallPct = hasOverallBase ? `${((totalSales / totalGoal) * 100).toFixed(1)}%` : "Sem vendas";
   const goalsReached = sellers.filter((s) => s.sales >= s.goal).length;
 
   const stats = [
@@ -22,7 +23,7 @@ export function StatsBar({ sellers, canViewTotalSales = true }: StatsBarProps) {
     }] : []),
     {
       label: "Meta Geral",
-      value: `${overallPct}%`,
+      value: overallPct,
       icon: Target,
       accent: "text-primary",
     },

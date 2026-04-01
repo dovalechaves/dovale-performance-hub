@@ -41,13 +41,21 @@ export default function Login() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setErro(data?.mensagem || data?.message || "Usuário ou senha inválidos.");
+        setErro(data?.error || data?.mensagem || data?.message || "Usuário ou senha inválidos.");
         return;
       }
 
       const data = await res.json().catch(() => ({}));
       const token = data?.token || data?.access_token || "authenticated";
-      login(usuario, token, data?.role, data?.loja);
+      login(
+        usuario,
+        token,
+        data?.role,
+        data?.loja,
+        data?.can_access_dashboard !== false,
+        data?.can_access_hub !== false,
+        data?.apps
+      );
       navigate("/");
     } catch {
       setErro("Erro de conexão. Tente novamente.");

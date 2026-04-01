@@ -38,6 +38,30 @@ export interface VendaConsolidada {
   total_vendas: number;
 }
 
+export interface AuthManagedUser {
+  usuario: string;
+  displayname: string;
+  department: string;
+  can_access_hub: boolean;
+  role: "admin" | "manager" | "viewer";
+  loja: string | null;
+  can_access_dashboard: boolean;
+  apps: {
+    dashboard: {
+      app_key: "dashboard";
+      role: "admin" | "manager" | "viewer";
+      loja: string | null;
+      can_access: boolean;
+    };
+    calculadora: {
+      app_key: "calculadora";
+      role: "admin" | "manager" | "viewer";
+      loja: string | null;
+      can_access: boolean;
+    };
+  };
+}
+
 export async function getRepresentantes(loja: string): Promise<Representante[]> {
   const res = await fetch(`${BASE}/representantes?loja=${loja}`);
   return handleResponse<Representante[]>(res);
@@ -78,5 +102,24 @@ export async function saveDiasUteis(loja: string, mes: number, ano: number, dias
 
 export async function deleteMeta(id: number): Promise<void> {
   const res = await fetch(`${BASE}/metas/${id}`, { method: "DELETE" });
+  return handleResponse<void>(res);
+}
+
+export async function getAuthUsers(actorUsuario: string): Promise<AuthManagedUser[]> {
+  const res = await fetch(`${BASE}/auth/users?actor_usuario=${encodeURIComponent(actorUsuario)}`);
+  return handleResponse<AuthManagedUser[]>(res);
+}
+
+export async function updateAuthUserRole(params: {
+  actor_usuario: string;
+  usuario: string;
+  can_access_hub: boolean;
+  apps: AuthManagedUser["apps"];
+}): Promise<void> {
+  const res = await fetch(`${BASE}/auth/role`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
   return handleResponse<void>(res);
 }

@@ -15,13 +15,33 @@ const queryClient = new QueryClient();
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
-  return user ? <>{children}</> : <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.canAccessHub) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
+
+function DashboardRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.canAccessHub) return <Navigate to="/login" replace />;
+  if (!user.apps.dashboard.canAccess) return <Navigate to="/hub" replace />;
+  return <>{children}</>;
+}
+
+function CalculadoraRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.canAccessHub) return <Navigate to="/login" replace />;
+  if (!user.apps.calculadora.canAccess) return <Navigate to="/hub" replace />;
+  return <>{children}</>;
 }
 
 function AdminManagerRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
-  if (user.role !== "admin" && user.role !== "manager") return <Navigate to="/hub" replace />;
+  if (!user.canAccessHub) return <Navigate to="/login" replace />;
+  const dashboardRole = user.apps.dashboard.role;
+  if (dashboardRole !== "admin" && dashboardRole !== "manager") return <Navigate to="/hub" replace />;
   return <>{children}</>;
 }
 
@@ -36,9 +56,9 @@ const App = () => (
             <Route path="/login" element={<Login />} />
             <Route path="/" element={<Navigate to="/hub" replace />} />
             <Route path="/hub" element={<PrivateRoute><Hub /></PrivateRoute>} />
-            <Route path="/dashboard" element={<PrivateRoute><Index /></PrivateRoute>} />
+            <Route path="/dashboard" element={<DashboardRoute><Index /></DashboardRoute>} />
             <Route path="/gestao" element={<AdminManagerRoute><Gestao /></AdminManagerRoute>} />
-            <Route path="/calculadora" element={<AdminManagerRoute><Calculadora /></AdminManagerRoute>} />
+            <Route path="/calculadora" element={<CalculadoraRoute><Calculadora /></CalculadoraRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

@@ -9,7 +9,7 @@ interface SellerCardProps {
 }
 
 export function SellerCard({ seller, rank, showValues = true }: SellerCardProps) {
-  const rawPercentage = (seller.sales / seller.goal) * 100;
+  const rawPercentage = seller.goal > 0 ? (seller.sales / seller.goal) * 100 : 0;
   const isGoalReached = rawPercentage >= 100;
   const isOverGoal = rawPercentage > 100;
   const isTopPerformer = rank <= 3 && isGoalReached;

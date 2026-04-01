@@ -9,12 +9,53 @@ import { Zap, Moon, Sun, LogOut, Settings, RefreshCw, ChevronDown, Monitor, EyeO
 import logoBlue from "@/assets/logo-blue.png";
 import logoWhite from "@/assets/logo-white.png";
 import { useAuth } from "@/context/AuthContext";
-import { getVendas, getVendasHoje, getMetas, LOJAS } from "@/services/api";
+import { getRepresentantes, getVendas, getVendasHoje, getMetas, LOJAS } from "@/services/api";
 
 const REFRESH_INTERVAL = 60 * 1000; // 1 minuto
 
 function initials(name: string) {
   return name.split(" ").slice(0, 2).map(w => w[0]).join("").toUpperCase();
+}
+
+function normalizeRepCode(code: string | number | null | undefined) {
+  const raw = String(code ?? "").trim();
+  if (!raw) return "";
+  const numeric = Number(raw);
+  return Number.isFinite(numeric) ? String(numeric) : raw.toLowerCase();
+}
+
+function playGoalReachedChime() {
+  if (typeof window === "undefined") return;
+
+  const AudioContextClass = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextClass) return;
+
+  const ctx = new AudioContextClass();
+  const now = ctx.currentTime;
+  const notes = [523.25, 659.25, 783.99];
+
+  notes.forEach((freq, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "triangle";
+    osc.frequency.value = freq;
+
+    const start = now + i * 0.09;
+    const end = start + 0.22;
+
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(0.12, start + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.0001, end);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(start);
+    osc.stop(end);
+  });
+
+  setTimeout(() => {
+    void ctx.close().catch(() => {});
+  }, 800);
 }
 
 const Index = () => {
@@ -31,7 +72,6 @@ const Index = () => {
   const { celebrate } = useCelebration();
   const prevGoalsRef = useRef<Set<string>>(new Set());
   const initializedRef = useRef(false);
-  const celebrationAudioRef = useRef<HTMLAudioElement | null>(null);
   const handleLogout = () => { logout(); navigate("/login"); };
 
   useEffect(() => {
@@ -46,28 +86,34 @@ const Index = () => {
       const mes = now.getMonth() + 1;
       const ano = now.getFullYear();
 
-      const [vendas, metas] = await Promise.all([
+      const [vendas, metas, representantes] = await Promise.all([
         modoVista === "diario" ? getVendasHoje(loja) : getVendas(loja, mes, ano),
         getMetas(loja, mes, ano),
+        getRepresentantes(loja),
       ]);
 
-      const metasMap = Object.fromEntries(metas.map(m => [m.rep_codigo, m.meta_valor]));
-      const diasUteisMap = Object.fromEntries(metas.map(m => [m.rep_codigo, m.dias_uteis ?? null]));
+      const metasMap = new Map(metas.map((m) => [normalizeRepCode(m.rep_codigo), m.meta_valor]));
+      const diasUteisMap = new Map(metas.map((m) => [normalizeRepCode(m.rep_codigo), m.dias_uteis ?? null]));
+      const vendasMap = new Map(vendas.map((v) => [normalizeRepCode(v.rep_codigo), v]));
 
-      const data: Seller[] = vendas.map(v => {
-        const metaMensal = metasMap[v.rep_codigo] ?? 0;
-        const diasUteis = diasUteisMap[v.rep_codigo];
+      const data: Seller[] = representantes.map((rep) => {
+        const repCode = normalizeRepCode(rep.rep_codigo);
+        const venda = vendasMap.get(repCode);
+        const sales = venda?.total_vendas ?? 0;
+        const metaMensal = metasMap.get(repCode) ?? 0;
+        const diasUteis = diasUteisMap.get(repCode);
         const goal = modoVista === "diario" && diasUteis && diasUteis > 0
           ? metaMensal / diasUteis
           : metaMensal;
+
         return {
-          id: String(v.rep_codigo),
-          name: v.rep_nome,
+          id: repCode,
+          name: rep.rep_nome,
           category: LOJAS.find(l => l.value === loja)?.label ?? loja.toUpperCase(),
-          sales: v.total_vendas,
+          sales,
           goal,
-          goalReached: v.total_vendas >= (goal ?? 1),
-          avatar: initials(v.rep_nome),
+          goalReached: goal > 0 && sales >= goal,
+          avatar: initials(rep.rep_nome),
         };
       });
 
@@ -114,10 +160,7 @@ const Index = () => {
       celebrate();
       setShowCelebrationMascot(true);
       setTimeout(() => setShowCelebrationMascot(false), 3000);
-      const audio = new Audio("/aiaiaiaiai.mp3");
-      celebrationAudioRef.current = audio;
-      audio.play().catch(() => {});
-      setTimeout(() => { audio.pause(); audio.currentTime = 0; }, 3000);
+      playGoalReachedChime();
     }
     prevGoalsRef.current = current;
   }, [sellers, celebrate]);

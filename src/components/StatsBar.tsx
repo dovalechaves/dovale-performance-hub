@@ -10,8 +10,13 @@ interface StatsBarProps {
 export function StatsBar({ sellers, canViewTotalSales = true }: StatsBarProps) {
   const totalSales = sellers.reduce((s, v) => s + v.sales, 0);
   const totalGoal = sellers.reduce((s, v) => s + v.goal, 0);
-  const hasOverallBase = Number.isFinite(totalSales) && Number.isFinite(totalGoal) && totalGoal > 0;
-  const overallPct = hasOverallBase ? `${((totalSales / totalGoal) * 100).toFixed(1)}%` : "Sem vendas";
+  const hasSales = Number.isFinite(totalSales) && totalSales > 0;
+  const hasGoal = Number.isFinite(totalGoal) && totalGoal > 0;
+  const overallPct = !hasSales
+    ? "Sem vendas"
+    : !hasGoal
+      ? "Meta não registrada"
+      : `${((totalSales / totalGoal) * 100).toFixed(1)}%`;
   const goalsReached = sellers.filter((s) => s.sales >= s.goal).length;
 
   const stats = [

@@ -342,7 +342,7 @@ function SecaoUsuarios() {
   };
 
   const handleRoleChange = async (u: AuthManagedUser, novaRole: Role) => {
-    const nextLoja = novaRole === "manager" ? (u.apps.dashboard.loja ?? u.loja ?? "bh") : null;
+    const nextLoja = novaRole === "admin" ? null : (u.apps.dashboard.loja ?? u.loja ?? "bh");
     const next: AuthManagedUser = {
       ...u,
       role: novaRole,
@@ -359,6 +359,8 @@ function SecaoUsuarios() {
     updateUsuario(u.usuario, () => next);
     await persist(next);
   };
+
+  const usuariosDashboard = usuarios.filter((u) => u.apps.dashboard.can_access);
 
   const handleLojaChange = async (u: AuthManagedUser, novaLoja: string) => {
     const next: AuthManagedUser = {
@@ -415,13 +417,13 @@ function SecaoUsuarios() {
                   <Loader2 className="w-5 h-5 animate-spin mx-auto" />
                 </td>
               </tr>
-            ) : usuarios.length === 0 ? (
+            ) : usuariosDashboard.length === 0 ? (
               <tr>
                 <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground text-xs">
                   Nenhum usuário encontrado.
                 </td>
               </tr>
-            ) : usuarios.map((u, i) => (
+            ) : usuariosDashboard.map((u, i) => (
               <motion.tr
                 key={u.usuario}
                 initial={{ opacity: 0, y: 8 }}
@@ -458,7 +460,7 @@ function SecaoUsuarios() {
                   </div>
                 </td>
                 <td className="px-4 py-3 text-center">
-                  {u.apps.dashboard.role === "manager" ? (
+                  {u.apps.dashboard.role !== "admin" ? (
                     <div className="relative inline-block">
                       <select
                         value={u.apps.dashboard.loja ?? "bh"}
@@ -489,7 +491,7 @@ function SecaoUsuarios() {
 export default function Gestao() {
   const { user, can } = useAuth();
   const navigate = useNavigate();
-  const [dark] = useState(true);
+  const [dark] = useState(() => localStorage.getItem("dovale_theme") !== "light");
 
   if (!can("manage:metas") && !can("manage:users")) {
     return (

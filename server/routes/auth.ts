@@ -5,13 +5,6 @@ import { getPool } from "../db/sqlserver";
 const router = Router();
 const VALID_ROLES = ["admin", "manager", "viewer"] as const;
 const MANAGED_APPS = ["dashboard", "calculadora"] as const;
-const STATIC_ADMIN_USERS = new Set([
-  "kevin.silva",
-  "henrique.berbert",
-  "paul.moraes",
-  "willian.rubim",
-  "joao.pedro",
-]);
 
 type Role = typeof VALID_ROLES[number];
 type AppKey = typeof MANAGED_APPS[number];
@@ -62,24 +55,22 @@ async function ensureAppsTable(pool: any): Promise<void> {
 }
 
 function normalizeRoleForUser(usuario: string, candidate: unknown): Role {
-  if (STATIC_ADMIN_USERS.has(usuario.toLowerCase())) return "admin";
   return isRole(candidate) ? candidate : "viewer";
 }
 
 function buildDefaultApps(usuario: string, localRole: unknown, localLoja: unknown, canAccessHub: boolean) {
   const baseRole = normalizeRoleForUser(usuario, localRole);
-  const isStaticAdmin = STATIC_ADMIN_USERS.has(usuario.toLowerCase());
   const dashboardRole = baseRole;
   const dashboardLoja = dashboardRole === "manager" ? (localLoja ? String(localLoja) : "bh") : null;
   const calculadoraRole = baseRole;
-  const calculadoraDefaultAccess = isStaticAdmin || (canAccessHub && baseRole !== "viewer");
+  const calculadoraDefaultAccess = canAccessHub && baseRole !== "viewer";
 
   return {
     dashboard: {
       app_key: "dashboard" as AppKey,
       role: dashboardRole,
       loja: dashboardLoja,
-      can_access: isStaticAdmin || canAccessHub,
+      can_access: canAccessHub,
     },
     calculadora: {
       app_key: "calculadora" as AppKey,
@@ -168,14 +159,13 @@ function normalizeAppsPayload(
 async function isAdminActor(pool: any, actorUsuario: string): Promise<boolean> {
   const normalized = String(actorUsuario || "").trim().toLowerCase();
   if (!normalized) return false;
-  if (STATIC_ADMIN_USERS.has(normalized)) return true;
 
   const result = await pool.request()
     .input("actor", normalized)
     .query(`
       SELECT TOP 1 role
       FROM dbo.USUARIOS_LOJAS
-      WHERE LOWER(usuario) = @actor
+      WHERE LOWER(usuario) = @actor AND ativo = 1
     `);
 
   return isRole(result.recordset[0]?.role) && result.recordset[0].role === "admin";
@@ -204,8 +194,7 @@ router.post("/login", async (req, res) => {
       const senhaOk = await bcrypt.compare(senha, testUser.senha_hash);
       if (!senhaOk) return res.status(401).json({ error: "Usuário ou senha inválidos." });
 
-      const isStaticAdmin = STATIC_ADMIN_USERS.has(usuario.toLowerCase());
-      const canAccessHub = isStaticAdmin || testUser.ativo === 1;
+      const canAccessHub = testUser.ativo === 1;
       if (!canAccessHub) {
         return res.status(403).json({ error: "Acesso ao Hub não liberado. Solicite liberação ao administrador." });
       }
@@ -249,8 +238,7 @@ router.post("/login", async (req, res) => {
       .query(`SELECT role, loja, ativo FROM dbo.USUARIOS_LOJAS WHERE usuario = @usuario`);
 
     const localUser = localResult.recordset[0];
-    const isStaticAdmin = STATIC_ADMIN_USERS.has(usuario.toLowerCase());
-    const canAccessHub = isStaticAdmin || localUser?.ativo === 1;
+    const canAccessHub = localUser?.ativo === 1;
     if (!canAccessHub) {
       return res.status(403).json({ error: "Acesso ao Hub não liberado. Solicite liberação ao administrador." });
     }
@@ -332,8 +320,7 @@ router.get("/users", async (req, res) => {
         const key = usuario.toLowerCase();
         seen.add(key);
         const local = localMap.get(key);
-        const isStaticAdmin = STATIC_ADMIN_USERS.has(key);
-        const canAccessHub = isStaticAdmin || local?.ativo === 1;
+        const canAccessHub = local?.ativo === 1;
         const apps = mergeApps(usuario, local?.role, local?.loja, canAccessHub, appRowsByUser.get(key) ?? []);
 
         merged.push({
@@ -354,8 +341,7 @@ router.get("/users", async (req, res) => {
       if (!usuario) continue;
       const key = usuario.toLowerCase();
       if (seen.has(key)) continue;
-      const isStaticAdmin = STATIC_ADMIN_USERS.has(key);
-      const canAccessHub = isStaticAdmin || r.ativo === 1;
+      const canAccessHub = r.ativo === 1;
       const apps = mergeApps(usuario, r.role, r.loja, canAccessHub, appRowsByUser.get(key) ?? []);
 
       merged.push({
@@ -441,7 +427,7 @@ router.put("/role", async (req, res) => {
 
     await ensureAppsTable(pool);
 
-    const canAccessHub = STATIC_ADMIN_USERS.has(String(usuario).toLowerCase()) || can_access_hub !== false;
+    const canAccessHub = can_access_hub !== false;
     const normalizedApps = normalizeAppsPayload(
       String(usuario),
       apps,

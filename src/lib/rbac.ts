@@ -47,18 +47,13 @@ export const ROLE_LABELS: Record<Role, string> = {
 
 /** Usuários com roles fixas */
 export const STATIC_USER_ROLES: Record<string, Role> = {
-  "kevin.silva":      "admin",
-  "henrique.berbert": "admin",
-  "paul.moraes":      "admin",
-  "willian.rubim":    "admin",
-  "joao.pedro":       "admin",
   "gerente.teste":    "manager",
 };
 
 export function resolveRole(usuario: string, apiRole?: string): Role {
-  if (STATIC_USER_ROLES[usuario]) return STATIC_USER_ROLES[usuario];
   const valid: Role[] = ["admin", "manager", "viewer"];
   if (apiRole && valid.includes(apiRole as Role)) return apiRole as Role;
+  if (STATIC_USER_ROLES[usuario]) return STATIC_USER_ROLES[usuario];
   return "viewer";
 }
 

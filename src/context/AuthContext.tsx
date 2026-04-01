@@ -3,6 +3,7 @@ import { Role, Permission, hasPermission, resolveRole, ROLE_LABELS } from "@/lib
 
 interface AuthUser {
   usuario: string;
+  displayName: string;
   role: Role;
   roleLabel: string;
   token: string;
@@ -28,6 +29,7 @@ interface AuthContextValue {
   can: (permission: Permission) => boolean;
   login: (
     usuario: string,
+    displayName: string | undefined,
     token: string,
     apiRole?: string,
     loja?: string | null,
@@ -45,6 +47,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 function buildUser(
   usuario: string,
+  displayName: string | undefined,
   token: string,
   apiRole?: string,
   loja?: string | null,
@@ -63,6 +66,7 @@ function buildUser(
 
   return {
     usuario,
+    displayName: displayName?.trim() ? displayName : usuario,
     role: dashboardRole,
     roleLabel: ROLE_LABELS[dashboardRole],
     token,
@@ -98,6 +102,7 @@ function loadFromStorage(): AuthUser | null {
 
     return {
       usuario: parsed.usuario,
+      displayName: parsed.displayName?.trim() ? parsed.displayName : parsed.usuario,
       token: parsed.token,
       role: dashboardRole,
       roleLabel: ROLE_LABELS[dashboardRole],
@@ -127,6 +132,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback((
     usuario: string,
+    displayName: string | undefined,
     token: string,
     apiRole?: string,
     loja?: string | null,
@@ -137,7 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       calculadora?: { role?: string; loja?: string | null; can_access?: boolean };
     }
   ) => {
-    const authUser = buildUser(usuario, token, apiRole, loja, canAccessDashboard, canAccessHub, apps);
+    const authUser = buildUser(usuario, displayName, token, apiRole, loja, canAccessDashboard, canAccessHub, apps);
     localStorage.setItem("dovale_auth", JSON.stringify(authUser));
     setUser(authUser);
   }, []);

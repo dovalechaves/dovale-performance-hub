@@ -292,10 +292,6 @@ function SecaoMetas({ dark }: { dark: boolean }) {
 function SecaoUsuarios() {
   const MOCK_USUARIOS = [
     { usuario: "kevin.silva",      role: "admin"   as Role, loja: null },
-    { usuario: "henrique.berbert", role: "admin"   as Role, loja: null },
-    { usuario: "paul.moraes",      role: "admin"   as Role, loja: null },
-    { usuario: "willian.rubim",    role: "admin"   as Role, loja: null },
-    { usuario: "joao.pedro",       role: "admin"   as Role, loja: null },
     { usuario: "gerente.teste",    role: "manager" as Role, loja: null },
   ];
 
@@ -384,7 +380,7 @@ function SecaoUsuarios() {
                       <select
                         value={u.role}
                         onChange={(e) => handleRoleChange(u.usuario, e.target.value as Role)}
-                        disabled={u.usuario === "kevin.silva" || saving === u.usuario}
+                        disabled={saving === u.usuario}
                         className="appearance-none rounded-lg border border-border bg-muted px-3 py-1.5 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         {(Object.keys(ROLE_LABELS) as Role[]).map((r) => (
@@ -421,9 +417,6 @@ function SecaoUsuarios() {
           </tbody>
         </table>
       </div>
-      <p className="text-[11px] text-muted-foreground">
-        * O usuário <span className="text-primary font-mono">kevin.silva</span> é administrador fixo e não pode ter sua role alterada.
-      </p>
     </section>
   );
 }
@@ -466,7 +459,7 @@ export default function Gestao() {
               </div>
             )}
             <button
-              onClick={() => navigate("/")}
+              onClick={() => navigate("/dashboard")}
               className="flex items-center gap-1.5 rounded-lg bg-secondary px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-primary/10 transition-colors"
             >
               <ArrowLeft className="w-3.5 h-3.5" />

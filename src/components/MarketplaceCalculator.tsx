@@ -644,7 +644,7 @@ const MarketplaceCalculator = () => {
                 <span className="text-sm font-medium text-primary-foreground/70 uppercase tracking-wide">
                   Lucro por Venda
                 </span>
-                <span className={`text-2xl font-bold tabular-nums ${results.lucroPorVenda >= 0 ? "text-accent" : "text-destructive"}`}>
+                <span className={`text-2xl font-bold tabular-nums ${results.lucroPorVenda >= 0 ? "text-[#00A650]" : "text-destructive"}`}>
                   {fmt(results.lucroPorVenda)}
                 </span>
               </div>

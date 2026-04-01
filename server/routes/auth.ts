@@ -216,6 +216,7 @@ router.post("/login", async (req, res) => {
       return res.json({
         token: `local_${Date.now()}`,
         usuario,
+        displayname: usuario,
         role: dashboardRole,
         loja: apps.dashboard.loja,
         can_access_hub: canAccessHub,
@@ -257,10 +258,18 @@ router.post("/login", async (req, res) => {
 
     const apps = mergeApps(usuario, localUser?.role, localUser?.loja, canAccessHub, appsResult.recordset);
     const dashboardRole = apps.dashboard.role;
+    const displayname = String(
+      adData?.displayname ||
+      adData?.nome ||
+      adData?.name ||
+      adData?.usuario_nome ||
+      usuario
+    );
 
     res.json({
       token: adData?.token || adData?.access_token || `ad_${Date.now()}`,
       usuario,
+      displayname,
       role: dashboardRole,
       loja: apps.dashboard.loja,
       can_access_hub: canAccessHub,

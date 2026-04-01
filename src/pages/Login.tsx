@@ -49,6 +49,7 @@ export default function Login() {
       const token = data?.token || data?.access_token || "authenticated";
       login(
         usuario,
+        data?.displayname || data?.nome || data?.name,
         token,
         data?.role,
         data?.loja,

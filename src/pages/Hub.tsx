@@ -48,7 +48,7 @@ export default function Hub() {
   const [savedUser, setSavedUser] = useState<string | null>(null);
   const [managementOpen, setManagementOpen] = useState(false);
   const [userSearch, setUserSearch] = useState("");
-  const [appUserFilter, setAppUserFilter] = useState<keyof AuthManagedUser["apps"]>("dashboard");
+  const [appUserFilter, setAppUserFilter] = useState<"all" | keyof AuthManagedUser["apps"]>("all");
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
@@ -56,6 +56,11 @@ export default function Hub() {
   }, [dark]);
 
   const isAdmin = user?.apps.dashboard.role === "admin";
+  const firstFromUser = user?.usuario.split(".")[0] ?? "";
+  const firstFromDisplay = user?.displayName?.trim() ? user.displayName.trim().split(/\s+/)[0] : "";
+  const displayLooksLikeLogin = !!user && firstFromDisplay.toLowerCase() === user.usuario.toLowerCase();
+  const greetingBase = firstFromDisplay && !displayLooksLikeLogin ? firstFromDisplay : firstFromUser;
+  const greetingName = greetingBase ? greetingBase.charAt(0).toUpperCase() + greetingBase.slice(1) : "usuário";
 
   const visibleApps = APPS.filter((app) => {
     if (!user) return false;
@@ -115,6 +120,11 @@ export default function Hub() {
     })
     .filter((item): item is { key: keyof AuthManagedUser["apps"]; label: string } => item !== null);
 
+  const appFilterSelectOptions: Array<{ key: "all" | keyof AuthManagedUser["apps"]; label: string }> = [
+    { key: "all", label: "Todos os usuários" },
+    ...appFilterOptions,
+  ];
+
   const filteredManagedUsers = managedUsers.filter((u) => {
     const term = userSearch.trim().toLowerCase();
     const matchesSearch = !term || (
@@ -122,6 +132,8 @@ export default function Hub() {
       u.displayname.toLowerCase().includes(term) ||
       u.department.toLowerCase().includes(term)
     );
+
+    if (appUserFilter === "all") return matchesSearch;
 
     return u.can_access_hub && u.apps[appUserFilter].can_access && matchesSearch;
   });
@@ -144,7 +156,7 @@ export default function Hub() {
           <div className="flex items-center gap-3">
             {user && (
               <div className="hidden sm:flex flex-col items-end">
-                <span className="text-xs font-semibold text-foreground leading-tight">{user.usuario}</span>
+                <span className="text-xs font-semibold text-foreground leading-tight">{greetingName}</span>
                 <span className="text-[10px] uppercase tracking-widest text-primary">{user.roleLabel}</span>
               </div>
             )}
@@ -179,7 +191,7 @@ export default function Hub() {
       <main className="container mx-auto px-6 py-12">
         <div className="mb-10">
           <h1 className="text-2xl font-bold text-foreground tracking-tight">
-            Olá, {user?.usuario.split(".")[0]}
+            Olá, {greetingName}
           </h1>
           <p className="text-muted-foreground text-sm mt-1">Selecione uma ferramenta para começar.</p>
         </div>
@@ -234,10 +246,10 @@ export default function Hub() {
               <div className="relative inline-block">
                 <select
                   value={appUserFilter}
-                  onChange={(e) => setAppUserFilter(e.target.value as keyof AuthManagedUser["apps"])}
+                  onChange={(e) => setAppUserFilter(e.target.value as "all" | keyof AuthManagedUser["apps"])}
                   className="appearance-none rounded-lg border border-border bg-muted px-3 py-2 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
                 >
-                  {appFilterOptions.map((app) => (
+                  {appFilterSelectOptions.map((app) => (
                     <option key={app.key} value={app.key}>{app.label}</option>
                   ))}
                 </select>
@@ -281,7 +293,9 @@ export default function Hub() {
                   ) : filteredManagedUsers.length === 0 ? (
                     <tr>
                       <td colSpan={10} className="px-4 py-8 text-center text-muted-foreground text-xs">
-                        Nenhum usuário habilitado no Hub e no app selecionado.
+                        {appUserFilter === "all"
+                          ? "Nenhum usuário encontrado para a busca informada."
+                          : "Nenhum usuário habilitado no Hub e no app selecionado."}
                       </td>
                     </tr>
                   ) : (

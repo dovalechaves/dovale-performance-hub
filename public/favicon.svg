@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Dovale favicon">
+  <rect width="256" height="256" fill="#ffffff"/>
+  <rect x="5" y="5" width="246" height="246" rx="68" ry="68" fill="none" stroke="#231b7a" stroke-width="7"/>
+  <rect x="56" y="72" width="144" height="136" rx="26" ry="26" fill="none" stroke="#231b7a" stroke-width="7"/>
+  <circle cx="128" cy="115" r="18" fill="#231b7a"/>
+  <rect x="114" y="126" width="28" height="56" fill="#231b7a"/>
+</svg>

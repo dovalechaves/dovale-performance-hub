@@ -17,6 +17,10 @@ function isAppKey(value: unknown): value is AppKey {
   return typeof value === "string" && MANAGED_APPS.includes(value as AppKey);
 }
 
+function isEnabledFlag(value: unknown): boolean {
+  return value === true || value === 1 || value === "1";
+}
+
 function toUsuario(adUser: any): string {
   return String(adUser?.samAccountName || adUser?.name || "").trim();
 }
@@ -102,7 +106,7 @@ function mergeApps(
       app_key: appKey,
       role,
       loja: appKey === "dashboard" && role === "manager" ? (row?.loja ? String(row.loja) : "bh") : null,
-      can_access: row?.ativo !== 0,
+      can_access: isEnabledFlag(row?.ativo),
     };
   }
 
@@ -194,7 +198,7 @@ router.post("/login", async (req, res) => {
       const senhaOk = await bcrypt.compare(senha, testUser.senha_hash);
       if (!senhaOk) return res.status(401).json({ error: "Usuário ou senha inválidos." });
 
-      const canAccessHub = testUser.ativo === 1;
+      const canAccessHub = isEnabledFlag(testUser.ativo);
       if (!canAccessHub) {
         return res.status(403).json({ error: "Acesso ao Hub não liberado. Solicite liberação ao administrador." });
       }
@@ -238,7 +242,7 @@ router.post("/login", async (req, res) => {
       .query(`SELECT role, loja, ativo FROM dbo.USUARIOS_LOJAS WHERE usuario = @usuario`);
 
     const localUser = localResult.recordset[0];
-    const canAccessHub = localUser?.ativo === 1;
+    const canAccessHub = isEnabledFlag(localUser?.ativo);
     if (!canAccessHub) {
       return res.status(403).json({ error: "Acesso ao Hub não liberado. Solicite liberação ao administrador." });
     }
@@ -320,7 +324,7 @@ router.get("/users", async (req, res) => {
         const key = usuario.toLowerCase();
         seen.add(key);
         const local = localMap.get(key);
-        const canAccessHub = local?.ativo === 1;
+        const canAccessHub = isEnabledFlag(local?.ativo);
         const apps = mergeApps(usuario, local?.role, local?.loja, canAccessHub, appRowsByUser.get(key) ?? []);
 
         merged.push({
@@ -341,7 +345,7 @@ router.get("/users", async (req, res) => {
       if (!usuario) continue;
       const key = usuario.toLowerCase();
       if (seen.has(key)) continue;
-      const canAccessHub = r.ativo === 1;
+      const canAccessHub = isEnabledFlag(r.ativo);
       const apps = mergeApps(usuario, r.role, r.loja, canAccessHub, appRowsByUser.get(key) ?? []);
 
       merged.push({

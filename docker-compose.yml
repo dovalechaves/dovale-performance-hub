@@ -21,7 +21,7 @@ services:
         VITE_API_URL: https://backend.dovale.online/api
     restart: unless-stopped
     labels:
-      - caddy_0=http://lojas.dovale.online
+      - caddy_0=http://hub.dovale.online
       - caddy_0.encode=zstd gzip
       - caddy_0.handle_path=/*
       - caddy_0.handle_path.0_reverse_proxy={{upstreams 80}}

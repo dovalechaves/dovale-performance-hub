@@ -17,7 +17,12 @@ export function StatsBar({ sellers, canViewTotalSales = true }: StatsBarProps) {
   const stats = [
     ...(canViewTotalSales ? [{
       label: "Total Vendas",
-      value: new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", notation: "compact" }).format(totalSales),
+      value: new Intl.NumberFormat("pt-BR", {
+        style: "currency",
+        currency: "BRL",
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(totalSales),
       icon: TrendingUp,
       accent: "text-primary",
     }] : []),

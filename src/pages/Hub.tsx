@@ -48,6 +48,7 @@ export default function Hub() {
   const [savedUser, setSavedUser] = useState<string | null>(null);
   const [managementOpen, setManagementOpen] = useState(false);
   const [userSearch, setUserSearch] = useState("");
+  const [appUserFilter, setAppUserFilter] = useState<keyof AuthManagedUser["apps"]>("dashboard");
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
@@ -107,14 +108,22 @@ export default function Hub() {
     setManagedUsers((prev) => prev.map((u) => (u.usuario === usuario ? updater(u) : u)));
   };
 
+  const appFilterOptions = APPS
+    .map((app) => {
+      const appKey = APP_BY_ROUTE[app.route];
+      return appKey ? { key: appKey, label: app.title } : null;
+    })
+    .filter((item): item is { key: keyof AuthManagedUser["apps"]; label: string } => item !== null);
+
   const filteredManagedUsers = managedUsers.filter((u) => {
     const term = userSearch.trim().toLowerCase();
-    if (!term) return true;
-    return (
+    const matchesSearch = !term || (
       u.usuario.toLowerCase().includes(term) ||
       u.displayname.toLowerCase().includes(term) ||
       u.department.toLowerCase().includes(term)
     );
+
+    return u.can_access_hub && u.apps[appUserFilter].can_access && matchesSearch;
   });
 
   return (
@@ -221,14 +230,29 @@ export default function Hub() {
 
             {usersError && <p className="text-xs text-destructive">{usersError}</p>}
 
-            <div className="max-w-sm">
-              <input
-                type="text"
-                value={userSearch}
-                onChange={(e) => setUserSearch(e.target.value)}
-                placeholder="Pesquisar por usuário, nome ou departamento"
-                className="w-full rounded-lg border border-border bg-muted px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-              />
+            <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
+              <div className="relative inline-block">
+                <select
+                  value={appUserFilter}
+                  onChange={(e) => setAppUserFilter(e.target.value as keyof AuthManagedUser["apps"])}
+                  className="appearance-none rounded-lg border border-border bg-muted px-3 py-2 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                >
+                  {appFilterOptions.map((app) => (
+                    <option key={app.key} value={app.key}>{app.label}</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+              </div>
+
+              <div className="max-w-sm w-full">
+                <input
+                  type="text"
+                  value={userSearch}
+                  onChange={(e) => setUserSearch(e.target.value)}
+                  placeholder="Pesquisar por usuário, nome ou departamento"
+                  className="w-full rounded-lg border border-border bg-muted px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                />
+              </div>
             </div>
 
             <div className="rounded-xl border border-border overflow-x-auto">
@@ -257,7 +281,7 @@ export default function Hub() {
                   ) : filteredManagedUsers.length === 0 ? (
                     <tr>
                       <td colSpan={10} className="px-4 py-8 text-center text-muted-foreground text-xs">
-                        Nenhum usuário encontrado para a busca informada.
+                        Nenhum usuário habilitado no Hub e no app selecionado.
                       </td>
                     </tr>
                   ) : (

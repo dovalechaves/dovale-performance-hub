@@ -119,6 +119,7 @@ const selectClass =
 const labelClass = "text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2 block";
 
 const roundCurrency = (value: number) => Math.round(value * 100) / 100;
+const ITEMS_PER_PAGE = 20;
 
 const ChevronIcon = () => (
   <svg
@@ -135,6 +136,9 @@ const ProductsTable = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [is2xlScreen, setIs2xlScreen] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia("(min-width: 1536px)").matches : true
+  );
 
   // Custo operacional
   const [custoOp, setCustoOp] = useState<Record<number, CustoOperacionalItem>>({});
@@ -162,6 +166,18 @@ const ProductsTable = () => {
       .finally(() => setIsLoading(false));
   }, []);
 
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 1536px)");
+    const onChange = (event: MediaQueryListEvent) => setIs2xlScreen(event.matches);
+
+    setIs2xlScreen(media.matches);
+    media.addEventListener("change", onChange);
+
+    return () => {
+      media.removeEventListener("change", onChange);
+    };
+  }, []);
+
   // Busca custo operacional; re-executa com debounce quando valorParticipacao muda
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -180,6 +196,7 @@ const ProductsTable = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [marketplace, setMarketplace] = useState<Marketplace>("mercadolivre");
   const [descontoFrete, setDescontoFrete] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const effectiveFeeRate = useMemo(() => {
     if (marketplace === "mercadolivre") {
@@ -218,23 +235,60 @@ const ProductsTable = () => {
     [effectiveFeeRate, marketplace, taxRate, custoOp, descontoFrete]
   );
 
-  const updateProduct = (index: number, updates: Partial<Product>) => {
+  const updateProduct = useCallback((codigo: string, updates: Partial<Product>) => {
     setProducts((prev) => {
+      const index = prev.findIndex((item) => item.codigo === codigo);
+      if (index < 0) return prev;
+
       const updated = [...prev];
       updated[index] = { ...updated[index], ...updates };
       return updated;
     });
-  };
+  }, []);
 
   const filteredProducts = useMemo(() => {
+    const query = searchQuery.toLowerCase().trim();
+    if (!query) return products;
+
     return products.filter((product) => {
       const matchesSearch =
-        product.codigo.includes(searchQuery.toLowerCase()) ||
-        product.descricao.toLowerCase().includes(searchQuery.toLowerCase());
+        product.codigo.includes(query) ||
+        product.descricao.toLowerCase().includes(query);
 
       return matchesSearch;
     });
   }, [products, searchQuery]);
+
+  const visibleRows = useMemo(() => {
+    return filteredProducts.map((product) => {
+      const values = getCalculatedValues(product);
+      const custoOpUnit = custoOp[Number(product.codigo)]?.custo_operacional_unit ?? null;
+
+      return {
+        product,
+        values,
+        custoOpUnit,
+      };
+    });
+  }, [filteredProducts, getCalculatedValues, custoOp]);
+
+  const totalPages = Math.max(1, Math.ceil(visibleRows.length / ITEMS_PER_PAGE));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const pageStart = (safeCurrentPage - 1) * ITEMS_PER_PAGE;
+  const pageRows = useMemo(
+    () => visibleRows.slice(pageStart, pageStart + ITEMS_PER_PAGE),
+    [visibleRows, pageStart]
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const getMarginBadge = (margem: number) => {
     if (margem >= 0) return <Badge className="bg-green-100 text-green-800">{margem.toFixed(1)}%</Badge>;
@@ -253,23 +307,21 @@ const ProductsTable = () => {
       "Lucro R$", "Margem c/ Imp. (%)", "Peso (g)",
     ];
 
-    const rows = filteredProducts.map((product) => {
-      const v = getCalculatedValues(product);
-      const custoOpUnit = custoOp[Number(product.codigo)]?.custo_operacional_unit ?? null;
+    const rows = visibleRows.map(({ product, values, custoOpUnit }) => {
       return [
         product.codigo,
         product.descricao,
         product.percentualDesconto,
         product.precoFinal,
-        v.recebimento,
-        v.taxa,
-        ...(showFrete ? [v.frete] : []),
-        v.imposto,
+        values.recebimento,
+        values.taxa,
+        ...(showFrete ? [values.frete] : []),
+        values.imposto,
         product.custo,
         custoOpUnit ?? "",
-        v.custoReal,
-        v.lucro,
-        parseFloat(v.margemComImposto.toFixed(2)),
+        values.custoReal,
+        values.lucro,
+        parseFloat(values.margemComImposto.toFixed(2)),
         product.peso,
       ];
     });
@@ -374,7 +426,7 @@ const ProductsTable = () => {
         </div>
 
         {/* Tabela completa (somente telas muito largas) */}
-        <div className="hidden 2xl:block overflow-hidden rounded-xl border border-border/60">
+        {is2xlScreen && <div className="overflow-hidden rounded-xl border border-border/60">
           <table className="w-full table-fixed text-xs">
             <thead>
               <tr className="bg-muted/40 border-b border-border/60">
@@ -397,9 +449,7 @@ const ProductsTable = () => {
               </tr>
             </thead>
             <tbody>
-              {filteredProducts.map((product) => {
-                const values = getCalculatedValues(product);
-                const actualIndex = products.findIndex((p) => p.codigo === product.codigo);
+              {pageRows.map(({ product, values, custoOpUnit }) => {
 
                 return (
                   <tr key={product.codigo} className="border-b border-border/50 hover:bg-secondary/50 transition-colors">
@@ -412,7 +462,7 @@ const ProductsTable = () => {
                         max="100"
                         step="0.01"
                         value={product.percentualDesconto}
-                        onChange={(e) => updateProduct(actualIndex, { percentualDesconto: parseFloat(e.target.value) || 0 })}
+                        onChange={(e) => updateProduct(product.codigo, { percentualDesconto: parseFloat(e.target.value) || 0 })}
                         className="w-14 bg-secondary border-0 rounded px-1.5 py-1 text-xs text-center text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                       />
                     </td>
@@ -422,7 +472,7 @@ const ProductsTable = () => {
                         min="0"
                         step="0.01"
                         value={product.precoFinal}
-                        onChange={(e) => updateProduct(actualIndex, { precoFinal: roundCurrency(parseFloat(e.target.value) || 0) })}
+                        onChange={(e) => updateProduct(product.codigo, { precoFinal: roundCurrency(parseFloat(e.target.value) || 0) })}
                         className="w-20 bg-secondary border-0 rounded px-1.5 py-1 text-xs text-right text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                       />
                     </td>
@@ -434,11 +484,7 @@ const ProductsTable = () => {
                     <td className="px-2 py-2 text-right text-muted-foreground">{fmt(values.imposto)}</td>
                     <td className="px-2 py-2 text-right text-muted-foreground">{fmt(product.custo)}</td>
                     <td className="px-2 py-2 text-right text-muted-foreground">
-                      {(() => {
-                        const c = custoOp[Number(product.codigo)];
-                        if (!c || c.custo_operacional_unit == null) return <span>—</span>;
-                        return fmt(c.custo_operacional_unit);
-                      })()}
+                      {custoOpUnit == null ? <span>—</span> : fmt(custoOpUnit)}
                     </td>
                     <td className="px-2 py-2 text-right font-medium text-primary">
                       {fmt(values.custoReal)}
@@ -453,14 +499,11 @@ const ProductsTable = () => {
               })}
             </tbody>
           </table>
-        </div>
+        </div>}
 
         {/* Cards responsivos (sem scroll horizontal) */}
-        <div className="2xl:hidden space-y-3">
-          {filteredProducts.map((product) => {
-            const values = getCalculatedValues(product);
-            const actualIndex = products.findIndex((p) => p.codigo === product.codigo);
-            const custoOpUnit = custoOp[Number(product.codigo)]?.custo_operacional_unit ?? null;
+        {!is2xlScreen && <div className="space-y-3">
+          {pageRows.map(({ product, values, custoOpUnit }) => {
 
             return (
               <article key={product.codigo} className="rounded-xl border border-border/60 bg-background/70 p-4 space-y-3">
@@ -483,7 +526,7 @@ const ProductsTable = () => {
                       max="100"
                       step="0.01"
                       value={product.percentualDesconto}
-                      onChange={(e) => updateProduct(actualIndex, { percentualDesconto: parseFloat(e.target.value) || 0 })}
+                      onChange={(e) => updateProduct(product.codigo, { percentualDesconto: parseFloat(e.target.value) || 0 })}
                       className="w-full bg-secondary border-0 rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                     />
                   </div>
@@ -495,7 +538,7 @@ const ProductsTable = () => {
                       min="0"
                       step="0.01"
                       value={product.precoFinal}
-                      onChange={(e) => updateProduct(actualIndex, { precoFinal: roundCurrency(parseFloat(e.target.value) || 0) })}
+                      onChange={(e) => updateProduct(product.codigo, { precoFinal: roundCurrency(parseFloat(e.target.value) || 0) })}
                       className="w-full bg-secondary border-0 rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                     />
                   </div>
@@ -550,7 +593,7 @@ const ProductsTable = () => {
               </article>
             );
           })}
-        </div>
+        </div>}
 
         {isLoading && (
           <div className="text-center py-12">
@@ -568,9 +611,34 @@ const ProductsTable = () => {
           </div>
         )}
 
-        <p className="text-xs text-muted-foreground mt-4">
-          Mostrando {filteredProducts.length} produtos
-        </p>
+        {!isLoading && !loadError && filteredProducts.length > 0 && (
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-muted-foreground">
+              Mostrando {pageStart + 1}–{Math.min(pageStart + ITEMS_PER_PAGE, filteredProducts.length)} de {filteredProducts.length} produtos
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={safeCurrentPage === 1}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-secondary text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Anterior
+              </button>
+              <span className="text-xs text-muted-foreground">
+                Página {safeCurrentPage} de {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={safeCurrentPage === totalPages}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-secondary text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Próxima
+              </button>
+            </div>
+          </div>
+        )}
     </div>
   );
 };

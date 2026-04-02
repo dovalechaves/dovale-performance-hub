@@ -139,7 +139,8 @@ const ProductsTable = () => {
 
   const [custoOp, setCustoOp] = useState<Record<number, CustoOperacionalItem>>({});
   const [custoOpError, setCustoOpError] = useState<string | null>(null);
-  const [valorParticipacao, setValorParticipacao] = useState(2000000);
+  const [valorParticipacaoInput, setValorParticipacaoInput] = useState("2000000");
+  const valorParticipacao = parseFloat(valorParticipacaoInput) || 0;
   const [custoOpLoading, setCustoOpLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -398,10 +399,10 @@ const ProductsTable = () => {
             </label>
             <Input
               type="number"
-              min="1"
+              min="0"
               step="100000"
-              value={valorParticipacao}
-              onChange={(e) => setValorParticipacao(parseFloat(e.target.value) || 2000000)}
+              value={valorParticipacaoInput}
+              onChange={(e) => setValorParticipacaoInput(e.target.value)}
               className="w-full bg-secondary border-0 rounded-lg px-4 py-3.5 text-sm"
             />
           </div>

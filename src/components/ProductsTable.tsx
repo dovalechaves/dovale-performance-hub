@@ -23,8 +23,8 @@ const MARKETPLACE_LABELS: Record<Marketplace, string> = {
 
 const MARKETPLACE_FEES: Record<Marketplace, number> = {
   mercadolivre: 16.5,
-  amazon: 11, // Ferragens e Construção
-  shopee: 0, // calculado via shopeeFee()
+  amazon: 11,
+  shopee: 0,
 };
 
 function shopeeFee(price: number): number {
@@ -35,8 +35,6 @@ function shopeeFee(price: number): number {
   return price * 0.14 + 26;
 }
 
-// Amazon DBA — colunas: <30 | 30-49.99 | 50-78.99 | 79-99.99 | 100-119.99 | 120-149.99 | 150-199.99 | >=200
-// null = sem cobertura DBA nessa faixa
 const AMAZON_SHIPPING_TABLE: { max_weight_g: number; costs: (number | null)[] }[] = [
   { max_weight_g: 100,  costs: [null, null, null, 10.05, 12.05, 14.05, 15.05, 15.55] },
   { max_weight_g: 200,  costs: [null, null, null, 10.45, 12.45, 14.45, 15.45, 16.05] },
@@ -77,7 +75,6 @@ function estimateAmazonShipping(price: number, weightGrams: number): number {
   if (row) {
     return row.costs[col] ?? 0;
   }
-  // Acima de 10kg: tarifa de 9-10kg + adicional por kg excedente
   const base = AMAZON_SHIPPING_TABLE[AMAZON_SHIPPING_TABLE.length - 1].costs[col] ?? 0;
   const extra = AMAZON_ADDITIONAL_PER_KG[col] ?? 0;
   const extraKg = Math.ceil((weightGrams - 10000) / 1000);
@@ -140,7 +137,6 @@ const ProductsTable = () => {
     typeof window !== "undefined" ? window.matchMedia("(min-width: 1536px)").matches : true
   );
 
-  // Custo operacional
   const [custoOp, setCustoOp] = useState<Record<number, CustoOperacionalItem>>({});
   const [custoOpError, setCustoOpError] = useState<string | null>(null);
   const [valorParticipacao, setValorParticipacao] = useState(2000000);

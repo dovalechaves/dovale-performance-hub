@@ -143,40 +143,23 @@ router.get("/custo-operacional", async (req, res) => {
         DECLARE @D0 DATE = DATEADD(MONTH, DATEDIFF(MONTH,0,GETDATE())-3, 0);
         DECLARE @D1 DATE = EOMONTH(GETDATE(),-1);
         WITH
-        comercial  AS (SELECT CODIGO AS PRO_CODIGO, SUM(VALORTOTAL) AS VALOR, SUM(QTD) AS QTD FROM [TI-COMERCIAL_62-ControleEP] WHERE DATA BETWEEN @D0 AND @D1 GROUP BY CODIGO),
-        desconto   AS (SELECT PRO_CODIGO, SUM(PRECO_DESCONTO) AS VALOR, SUM(QTDE) AS QTD FROM [TI-VENDAS_25-Desconto] WHERE PDV_DATA BETWEEN @D0 AND @D1 GROUP BY PRO_CODIGO),
-        ecommerce  AS (SELECT TRY_CAST(PRO_CODIGO AS INT) AS PRO_CODIGO, SUM(VALORTOTALITEM) AS VALOR, SUM(PVI_QUANTIDADE) AS QTD FROM [TI-MARKETING_95-VendaEcommerce] WHERE EMP LIKE '%FULL%' AND PDV_DATA BETWEEN @D0 AND @D1 GROUP BY TRY_CAST(PRO_CODIGO AS INT)),
-        todos      AS (SELECT CODIGO AS PRO_CODIGO FROM [TI-COMERCIAL_62-ControleEP] WHERE DATA BETWEEN @D0 AND @D1 UNION SELECT PRO_CODIGO FROM [TI-VENDAS_25-Desconto] WHERE PDV_DATA BETWEEN @D0 AND @D1 UNION SELECT TRY_CAST(PRO_CODIGO AS INT) FROM [TI-MARKETING_95-VendaEcommerce] WHERE EMP LIKE '%FULL%' AND PDV_DATA BETWEEN @D0 AND @D1 AND TRY_CAST(PRO_CODIGO AS INT) IS NOT NULL),
-        consolidado AS (SELECT t.PRO_CODIGO, COALESCE(c.VALOR,0)+COALESCE(d.VALOR,0)+COALESCE(e.VALOR,0) AS VENDA_TOTAL, COALESCE(c.QTD,0)+COALESCE(d.QTD,0)+COALESCE(e.QTD,0) AS QTD_TOTAL FROM todos t LEFT JOIN comercial c ON t.PRO_CODIGO=c.PRO_CODIGO LEFT JOIN desconto d ON t.PRO_CODIGO=d.PRO_CODIGO LEFT JOIN ecommerce e ON t.PRO_CODIGO=e.PRO_CODIGO),
-        grand      AS (SELECT SUM(VENDA_TOTAL) AS TOTAL FROM consolidado WHERE VENDA_TOTAL>0)
-        SELECT c.PRO_CODIGO, c.VENDA_TOTAL, c.QTD_TOTAL, g.TOTAL AS GRAND_TOTAL
-        FROM consolidado c CROSS JOIN grand g WHERE c.VENDA_TOTAL > 0
+        comercial  AS (SELECT CODIGO AS PRO_CODIGO, SUM(VALORTOTAL) AS VALOR, SUM(QTD) AS QTD FROM [TI-COMERCIAL_62-ControleEP] WHERE DATA BETWEEN @D0 AND @D1 AND ISNULL(VENDEDOR,'') <> 'RESERVA MATERIAL' GROUP BY CODIGO),
+        desconto   AS (SELECT PRO_CODIGO, SUM(PRECO_DESCONTO) AS VALOR FROM [TI-VENDAS_25-Desconto] WHERE PDV_DATA BETWEEN @D0 AND @D1 GROUP BY PRO_CODIGO),
+        ecom_total AS (SELECT COALESCE(SUM(VALORTOTALITEM),0) AS VALOR FROM [TI-MARKETING_95-VendaEcommerce] WHERE EMP LIKE '%FULL%' AND PDV_DATA BETWEEN @D0 AND @D1),
+        grand      AS (SELECT (SELECT COALESCE(SUM(VALORTOTAL),0) FROM [TI-COMERCIAL_62-ControleEP] WHERE DATA BETWEEN @D0 AND @D1) + (SELECT COALESCE(SUM(PRECO_DESCONTO),0) FROM [TI-VENDAS_25-Desconto] WHERE PDV_DATA BETWEEN @D0 AND @D1) + (SELECT COALESCE(SUM(VALORTOTALITEM),0) FROM [TI-MARKETING_95-VendaEcommerce] WHERE EMP LIKE '%FULL%' AND PDV_DATA BETWEEN @D0 AND @D1) AS TOTAL),
+        filtro     AS (SELECT DISTINCT CODIGO AS PRO_CODIGO FROM [TI-COMERCIAL_62-ControleEP] WHERE DATA BETWEEN @D0 AND @D1 AND ISNULL(VENDEDOR,'') <> 'RESERVA MATERIAL')
+        SELECT f.PRO_CODIGO, COALESCE(c.VALOR,0)+COALESCE(d.VALOR,0)+et.VALOR AS VENDA_TOTAL, COALESCE(c.QTD,0) AS QTD_TOTAL, g.TOTAL AS GRAND_TOTAL
+        FROM filtro f LEFT JOIN comercial c ON f.PRO_CODIGO=c.PRO_CODIGO LEFT JOIN desconto d ON f.PRO_CODIGO=d.PRO_CODIGO CROSS JOIN ecom_total et CROSS JOIN grand g
+        WHERE COALESCE(c.VALOR,0)+COALESCE(d.VALOR,0) > 0
       `);
 
-      const produtosPermitidos = await queryEcommerceFirebird<any>(
-        `SELECT pro.pro_codigo
-         FROM produtos pro
-         WHERE pro.pro_tipo IN ('PA', 'PR')`
-      );
-      const codigosPermitidos = new Set<number>(
-        produtosPermitidos
-          .map((row) => Number(row.PRO_CODIGO ?? row.pro_codigo))
-          .filter((codigo) => Number.isFinite(codigo))
-      );
-
-      const itensFiltrados = result.recordset.filter((row) => {
-        if (row.PRO_CODIGO == null) return false;
-        const codigo = Number(row.PRO_CODIGO);
-        return Number.isFinite(codigo) && codigosPermitidos.has(codigo);
-      });
-      const grandTotalFiltrado = itensFiltrados.reduce((acc, row) => acc + (Number(row.VENDA_TOTAL) || 0), 0);
-
       const base: typeof custoCache.base = {};
-      for (const row of itensFiltrados) {
+      for (const row of result.recordset) {
+        if (row.PRO_CODIGO == null) continue;
         base[row.PRO_CODIGO] = {
           venda_total: Number(row.VENDA_TOTAL) || 0,
           qtd_total:   Number(row.QTD_TOTAL)   || 0,
-          grand_total: grandTotalFiltrado,
+          grand_total: Number(row.GRAND_TOTAL) || 0,
         };
       }
       custoCache = { base, ts: Date.now() };

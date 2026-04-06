@@ -6,9 +6,11 @@ interface SellerCardProps {
   seller: Seller;
   rank: number;
   showValues?: boolean;
+  loja?: string;
 }
 
-export function SellerCard({ seller, rank, showValues = true }: SellerCardProps) {
+export function SellerCard({ seller, rank, showValues = true, loja }: SellerCardProps) {
+  const tvBig = loja === "bh";
   const rawPercentage = seller.goal > 0 ? (seller.sales / seller.goal) * 100 : 0;
   const isGoalReached = rawPercentage >= 100;
   const isOverGoal = rawPercentage > 100;
@@ -59,24 +61,26 @@ export function SellerCard({ seller, rank, showValues = true }: SellerCardProps)
 
         {/* Rank */}
         <div className={`
-          shrink-0 w-10 h-10 rounded-lg flex items-center justify-center font-mono text-sm font-bold
+          shrink-0 rounded-lg flex items-center justify-center font-mono font-bold
+          ${tvBig ? "w-14 h-14 text-lg" : "w-10 h-10 text-sm"}
           ${badgeBg}
         `}>
           #{rank}
         </div>
 
         {/* Avatar + Nome */}
-        <div className="flex items-center gap-3 w-44 shrink-0">
+        <div className={`flex items-center gap-3 shrink-0 ${tvBig ? "w-64" : "w-44"}`}>
           <div className={`
-            w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold shrink-0
+            rounded-lg flex items-center justify-center font-bold shrink-0
+            ${tvBig ? "w-14 h-14 text-lg" : "w-10 h-10 text-sm"}
             ${badgeBg}
           `}>
             {seller.avatar}
           </div>
           <div className="min-w-0">
-            <h3 className="font-semibold text-foreground leading-tight truncate">{seller.name}</h3>
-            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-              <Key className="w-3 h-3 shrink-0" />
+            <h3 className={`font-semibold text-foreground leading-tight truncate ${tvBig ? "text-2xl" : ""}`}>{seller.name}</h3>
+            <div className={`flex items-center gap-1 text-muted-foreground ${tvBig ? "text-sm" : "text-xs"}`}>
+              <Key className={`shrink-0 ${tvBig ? "w-4 h-4" : "w-3 h-3"}`} />
               <span className="truncate">{seller.category}</span>
             </div>
           </div>
@@ -98,11 +102,11 @@ export function SellerCard({ seller, rank, showValues = true }: SellerCardProps)
 
         {/* Percentual em destaque — só quando valores ocultos (manager) */}
         {!showValues && (
-          <div className="shrink-0 flex flex-col items-center justify-center w-28">
-            <span className={`font-mono text-3xl font-black leading-none ${textColor} ${isOverGoal ? "drop-shadow-[0_0_10px_rgba(251,191,36,0.9)]" : ""}`}>
+          <div className={`shrink-0 flex flex-col items-center justify-center ${tvBig ? "w-36" : "w-28"}`}>
+            <span className={`font-mono font-black leading-none ${tvBig ? "text-5xl" : "text-3xl"} ${textColor} ${isOverGoal ? "drop-shadow-[0_0_10px_rgba(251,191,36,0.9)]" : ""}`}>
               {rawPercentage.toFixed(0)}%
             </span>
-            <span className="text-[10px] uppercase tracking-widest text-muted-foreground dark:text-slate-300 mt-1">da meta</span>
+            <span className={`uppercase tracking-widest text-muted-foreground dark:text-slate-300 mt-1 ${tvBig ? "text-xs" : "text-[10px]"}`}>da meta</span>
           </div>
         )}
 

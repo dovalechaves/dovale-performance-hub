@@ -322,7 +322,7 @@ const Index = () => {
               <div className="flex flex-col gap-3">
                 <AnimatePresence mode="popLayout">
                   {sorted.map((seller, i) => (
-                    <SellerCard key={seller.id} seller={seller} rank={i + 1} showValues={user?.role === "manager" ? !tvMode : can("view:salesValues")} />
+                    <SellerCard key={seller.id} seller={seller} rank={i + 1} showValues={user?.role === "manager" ? !tvMode : can("view:salesValues")} loja={loja} />
                   ))}
                 </AnimatePresence>
               </div>

@@ -147,6 +147,11 @@ export async function fetchEtiquetasChatwoot(): Promise<string[]> {
   return r.ok ? r.json() : [];
 }
 
+export async function fetchChatwootTimes(): Promise<{ id: number; name: string }[]> {
+  const r = await authFetch(`${API_BASE}/api/disparo/chatwoot/times`);
+  return r.ok ? r.json() : [];
+}
+
 export async function fetchTemplateEtiquetas(): Promise<Record<string, string>> {
   const r = await authFetch(`${API_BASE}/api/disparo/template-etiquetas`);
   return r.ok ? r.json() : {};

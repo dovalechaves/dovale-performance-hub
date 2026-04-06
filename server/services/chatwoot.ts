@@ -213,6 +213,19 @@ export async function buscarConversasContato(contatoId: number): Promise<any[]> 
   }
 }
 
+export async function listarTimes(): Promise<{ id: number; name: string }[]> {
+  try {
+    const r = await fetch(`${BASE_URL()}/api/v1/accounts/1/teams`, {
+      headers: { api_access_token: API_KEY() },
+    });
+    if (!r.ok) return [];
+    const payload: any[] = (await r.json()) ?? [];
+    return payload.map((t) => ({ id: t.id, name: t.name })).filter((t) => t.name);
+  } catch {
+    return [];
+  }
+}
+
 export async function listarEtiquetasChatwoot(): Promise<string[]> {
   try {
     const r = await fetch(`${BASE_URL()}/api/v1/accounts/1/labels`, {

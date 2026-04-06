@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { io, Socket } from "socket.io-client";
-import { ArrowLeft, Upload, Send, Pause, Play, X, Sun, Moon, FileText, Settings, RefreshCw, Loader2, Check, ShieldX } from "lucide-react";
+import { ArrowLeft, Upload, Send, Pause, Play, X, Sun, Moon, FileText, Settings, RefreshCw, Loader2, Check, ShieldX, ChevronDown, ChevronRight, Image, Video, File, Clock, CheckCircle2, XCircle, AlertCircle, Plus } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +11,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import * as api from "@/lib/disparo-api";
 import logoBlue from "@/assets/logo-blue.png";
@@ -31,7 +33,20 @@ export default function Disparo() {
 
   // Templates
   const [templates, setTemplates] = useState<api.TemplateMeta[]>([]);
+  const [templatesGerenciar, setTemplatesGerenciar] = useState<api.TemplateGerenciar[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState("");
+  const [expandedTemplate, setExpandedTemplate] = useState<string | null>(null);
+  const [templateDetalhe, setTemplateDetalhe] = useState<Record<string, any> | null>(null);
+  const [detalheLoading, setDetalheLoading] = useState(false);
+  const [criarDialogOpen, setCriarDialogOpen] = useState(false);
+  const [criarLoading, setCriarLoading] = useState(false);
+  const [novoTemplate, setNovoTemplate] = useState({
+    name: "", category: "MARKETING", language_code: "pt_BR",
+    header_type: "NONE", header_text: "", header_media_example_url: "",
+    body_text: "", footer_text: "", etiqueta: "",
+  });
+  const [etiquetasChatwoot, setEtiquetasChatwoot] = useState<string[]>([]);
+  const [templateEtiquetas, setTemplateEtiquetas] = useState<Record<string, string>>({});
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [mediaUrl, setMediaUrl] = useState("");
   const [inboxId, setInboxId] = useState("1");
@@ -106,6 +121,9 @@ export default function Disparo() {
   useEffect(() => {
     if (!ready) return;
     api.fetchTemplates().then(setTemplates).catch(() => {});
+    api.fetchTemplatesGerenciar().then(setTemplatesGerenciar).catch(() => {});
+    api.fetchEtiquetasChatwoot().then(setEtiquetasChatwoot).catch(() => {});
+    api.fetchTemplateEtiquetas().then(setTemplateEtiquetas).catch(() => {});
     api.fetchDisparoAtivo().then((d) => {
       if (d.ativo) {
         setDisparoId(d.disparo_id);
@@ -233,6 +251,71 @@ export default function Disparo() {
       addLog("Disparo NEGADO manualmente");
       toast.error("Disparo negado");
     } catch (e: any) { toast.error(e.message); }
+  };
+
+  // ── Template expand/detail ──────────────────────────────────────────────────
+
+  const handleToggleTemplate = async (t: api.TemplateGerenciar) => {
+    const key = `${t.name}__${t.language}`;
+    if (expandedTemplate === key) {
+      setExpandedTemplate(null);
+      setTemplateDetalhe(null);
+      return;
+    }
+    setExpandedTemplate(key);
+    setTemplateDetalhe(null);
+    setDetalheLoading(true);
+    try {
+      const det = await api.fetchTemplateDetalhe(t.name, t.language);
+      setTemplateDetalhe(det);
+    } catch {
+      setTemplateDetalhe(null);
+    } finally {
+      setDetalheLoading(false);
+    }
+  };
+
+  const statusBadge = (status: string) => {
+    const s = status?.toUpperCase() ?? "";
+    if (s === "APPROVED") return <Badge className="bg-green-600 text-white gap-1"><CheckCircle2 className="h-3 w-3" />Aprovado</Badge>;
+    if (s === "PENDING") return <Badge className="bg-yellow-500 text-white gap-1"><Clock className="h-3 w-3" />Pendente</Badge>;
+    if (s === "REJECTED") return <Badge className="bg-red-600 text-white gap-1"><XCircle className="h-3 w-3" />Rejeitado</Badge>;
+    if (s === "PAUSED") return <Badge className="bg-gray-500 text-white gap-1"><AlertCircle className="h-3 w-3" />Pausado</Badge>;
+    return <Badge variant="outline">{status}</Badge>;
+  };
+
+  const headerIcon = (fmt: string) => {
+    const f = (fmt ?? "").toUpperCase();
+    if (f === "IMAGE") return <Image className="h-4 w-4 text-blue-500" />;
+    if (f === "VIDEO") return <Video className="h-4 w-4 text-purple-500" />;
+    if (f === "DOCUMENT") return <File className="h-4 w-4 text-orange-500" />;
+    return null;
+  };
+
+  // ── Create template ─────────────────────────────────────────────────────────
+
+  const updateNovo = (field: string, value: string) =>
+    setNovoTemplate((prev) => ({ ...prev, [field]: value }));
+
+  const handleCriarTemplate = async () => {
+    setCriarLoading(true);
+    try {
+      await api.criarTemplate(novoTemplate);
+      toast.success("Template enviado para aprovação na Meta!");
+      setCriarDialogOpen(false);
+      setNovoTemplate({
+        name: "", category: "MARKETING", language_code: "pt_BR",
+        header_type: "NONE", header_text: "", header_media_example_url: "",
+        body_text: "", footer_text: "", etiqueta: "",
+      });
+      api.fetchTemplatesGerenciar().then(setTemplatesGerenciar);
+      api.fetchTemplates().then(setTemplates);
+      api.fetchTemplateEtiquetas().then(setTemplateEtiquetas);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setCriarLoading(false);
+    }
   };
 
   // ── Loading while exchanging token ──────────────────────────────────────────
@@ -394,28 +477,110 @@ export default function Disparo() {
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-base">Templates da Meta</CardTitle>
-                    <Button size="sm" variant="ghost" onClick={() => api.fetchTemplates().then(setTemplates)}>
-                      <RefreshCw className="h-4 w-4" />
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button size="sm" variant="default" onClick={() => setCriarDialogOpen(true)}>
+                        <Plus className="h-4 w-4 mr-1" />Criar Template
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => {
+                        api.fetchTemplatesGerenciar().then(setTemplatesGerenciar);
+                        api.fetchTemplates().then(setTemplates);
+                      }}>
+                        <RefreshCw className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {templates.length === 0 ? (
+                  {templatesGerenciar.length === 0 ? (
                     <p className="text-sm text-muted-foreground">Nenhum template encontrado</p>
                   ) : (
                     <div className="space-y-2">
-                      {templates.map((t) => (
-                        <div key={`${t.id}`} className="flex items-center justify-between p-2 rounded border text-sm">
-                          <div>
-                            <span className="font-medium">{t.name}</span>
-                            <span className="text-muted-foreground ml-2">({t.language_code})</span>
+                      {templatesGerenciar.map((t) => {
+                        const key = `${t.name}__${t.language}`;
+                        const isExpanded = expandedTemplate === key;
+                        return (
+                          <div key={key} className="rounded border overflow-hidden">
+                            <button
+                              onClick={() => handleToggleTemplate(t)}
+                              className="w-full flex items-center justify-between p-3 text-sm hover:bg-muted/50 transition-colors cursor-pointer text-left"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                {isExpanded ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
+                                {headerIcon(t.header_format)}
+                                <span className="font-medium truncate">{t.name}</span>
+                                <span className="text-muted-foreground shrink-0">({t.language})</span>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0 ml-2">
+                                {templateEtiquetas[t.name] && (
+                                  <Badge className="bg-indigo-600 text-white text-xs">{templateEtiquetas[t.name]}</Badge>
+                                )}
+                                <Badge variant="outline" className="text-xs">{t.category}</Badge>
+                                {statusBadge(t.status)}
+                              </div>
+                            </button>
+                            {isExpanded && (
+                              <div className="border-t bg-muted/30 p-4 space-y-3">
+                                {detalheLoading ? (
+                                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                    <Loader2 className="h-4 w-4 animate-spin" /> Carregando detalhes...
+                                  </div>
+                                ) : templateDetalhe ? (
+                                  <>
+                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                                      <div>
+                                        <span className="text-muted-foreground block">ID</span>
+                                        <span className="font-mono">{templateDetalhe.id}</span>
+                                      </div>
+                                      <div>
+                                        <span className="text-muted-foreground block">Categoria</span>
+                                        <span>{templateDetalhe.category}</span>
+                                      </div>
+                                      <div>
+                                        <span className="text-muted-foreground block">Idioma</span>
+                                        <span>{templateDetalhe.language_code}</span>
+                                      </div>
+                                      <div>
+                                        <span className="text-muted-foreground block">Header</span>
+                                        <span className="flex items-center gap-1">{headerIcon(templateDetalhe.header_type)} {templateDetalhe.header_type || "Nenhum"}</span>
+                                      </div>
+                                    </div>
+
+                                    {templateDetalhe.header_text && (
+                                      <div className="space-y-1">
+                                        <span className="text-xs font-medium text-muted-foreground">Cabeçalho (Texto)</span>
+                                        <div className="bg-background rounded p-2 text-sm border">{templateDetalhe.header_text}</div>
+                                      </div>
+                                    )}
+
+                                    {templateDetalhe.header_media_example_url && (
+                                      <div className="space-y-1">
+                                        <span className="text-xs font-medium text-muted-foreground">Mídia de Exemplo</span>
+                                        <img src={templateDetalhe.header_media_example_url} alt="Header media" className="max-h-40 rounded border object-contain" />
+                                      </div>
+                                    )}
+
+                                    {templateDetalhe.body_text && (
+                                      <div className="space-y-1">
+                                        <span className="text-xs font-medium text-muted-foreground">Corpo</span>
+                                        <div className="bg-background rounded p-2 text-sm border whitespace-pre-wrap">{templateDetalhe.body_text}</div>
+                                      </div>
+                                    )}
+
+                                    {templateDetalhe.footer_text && (
+                                      <div className="space-y-1">
+                                        <span className="text-xs font-medium text-muted-foreground">Rodapé</span>
+                                        <div className="bg-background rounded p-2 text-xs border text-muted-foreground italic">{templateDetalhe.footer_text}</div>
+                                      </div>
+                                    )}
+                                  </>
+                                ) : (
+                                  <p className="text-sm text-muted-foreground">Não foi possível carregar os detalhes</p>
+                                )}
+                              </div>
+                            )}
                           </div>
-                          <div className="flex gap-2">
-                            {t.requires_media && <Badge variant="outline">Mídia</Badge>}
-                            {t.body_params_count > 0 && <Badge variant="secondary">{t.body_params_count} params</Badge>}
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </CardContent>
@@ -440,6 +605,136 @@ export default function Disparo() {
           </Tabs>
         </div>
       </main>
+
+      {/* ── Dialog: Criar Template ──────────────────────────────────────── */}
+      <Dialog open={criarDialogOpen} onOpenChange={setCriarDialogOpen}>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Criar Template</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Nome *</Label>
+                <Input
+                  placeholder="meu_template"
+                  value={novoTemplate.name}
+                  onChange={(e) => updateNovo("name", e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))}
+                />
+                <span className="text-xs text-muted-foreground">Minúsculas, números e _</span>
+              </div>
+              <div>
+                <Label>Categoria *</Label>
+                <Select value={novoTemplate.category} onValueChange={(v) => updateNovo("category", v)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="MARKETING">Marketing</SelectItem>
+                    <SelectItem value="UTILITY">Utility</SelectItem>
+                    <SelectItem value="AUTHENTICATION">Authentication</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Idioma</Label>
+                <Select value={novoTemplate.language_code} onValueChange={(v) => updateNovo("language_code", v)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pt_BR">Português (BR)</SelectItem>
+                    <SelectItem value="en_US">English (US)</SelectItem>
+                    <SelectItem value="es">Español</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Tipo de Header</Label>
+                <Select value={novoTemplate.header_type} onValueChange={(v) => updateNovo("header_type", v)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="NONE">Nenhum</SelectItem>
+                    <SelectItem value="TEXT">Texto</SelectItem>
+                    <SelectItem value="IMAGE">Imagem</SelectItem>
+                    <SelectItem value="VIDEO">Vídeo</SelectItem>
+                    <SelectItem value="DOCUMENT">Documento</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {novoTemplate.header_type === "TEXT" && (
+              <div>
+                <Label>Texto do Header *</Label>
+                <Input
+                  placeholder="Ex: Olá {{1}}!"
+                  value={novoTemplate.header_text}
+                  onChange={(e) => updateNovo("header_text", e.target.value)}
+                />
+              </div>
+            )}
+
+            {["IMAGE", "VIDEO", "DOCUMENT"].includes(novoTemplate.header_type) && (
+              <div>
+                <Label>URL da Mídia de Exemplo *</Label>
+                <Input
+                  placeholder="https://exemplo.com/imagem.png"
+                  value={novoTemplate.header_media_example_url}
+                  onChange={(e) => updateNovo("header_media_example_url", e.target.value)}
+                />
+                <span className="text-xs text-muted-foreground">URL pública da mídia para aprovação da Meta</span>
+              </div>
+            )}
+
+            <div>
+              <Label>Corpo da Mensagem *</Label>
+              <Textarea
+                placeholder={"Olá {{1}}, sua compra #{{2}} foi confirmada!"}
+                rows={4}
+                value={novoTemplate.body_text}
+                onChange={(e) => updateNovo("body_text", e.target.value)}
+              />
+              <span className="text-xs text-muted-foreground">Use {"{{1}}"}, {"{{2}}"}, etc. para parâmetros dinâmicos</span>
+            </div>
+
+            <div>
+              <Label>Rodapé (opcional)</Label>
+              <Input
+                placeholder="Ex: Dovale Indústria"
+                value={novoTemplate.footer_text}
+                onChange={(e) => updateNovo("footer_text", e.target.value)}
+              />
+            </div>
+
+            <div>
+              <Label>Setor *</Label>
+              {etiquetasChatwoot.length > 0 ? (
+                <Select value={novoTemplate.etiqueta} onValueChange={(v) => updateNovo("etiqueta", v)}>
+                  <SelectTrigger><SelectValue placeholder="Selecione o setor..." /></SelectTrigger>
+                  <SelectContent>
+                    {etiquetasChatwoot.map((e) => (
+                      <SelectItem key={e} value={e}>{e}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  placeholder="Ex: comercial, marketing, pós-venda"
+                  value={novoTemplate.etiqueta}
+                  onChange={(e) => updateNovo("etiqueta", e.target.value)}
+                />
+              )}
+              <span className="text-xs text-muted-foreground">Etiqueta do Chatwoot — identifica o setor responsável pelas respostas</span>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCriarDialogOpen(false)}>Cancelar</Button>
+            <Button onClick={handleCriarTemplate} disabled={criarLoading || !novoTemplate.name || !novoTemplate.body_text || !novoTemplate.etiqueta}>
+              {criarLoading ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Criando...</> : <><Plus className="h-4 w-4 mr-2" />Criar Template</>}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

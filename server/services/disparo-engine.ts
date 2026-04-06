@@ -149,12 +149,14 @@ export async function processarDisparo(disparoId: number, inboxId: number) {
     }
   }
 
-  // Busca etiquetas do Supabase
+  // Busca etiquetas do Supabase + times do Chatwoot
   const etiquetaMap: Record<string, string> = {};
   const timesMap: Record<string, number> = {};
   try {
     const { data: cfgs } = await supa.from("template_configs").select("*");
     for (const r of cfgs ?? []) { if (r.etiqueta) etiquetaMap[r.template_nome] = r.etiqueta; }
+    const times = await cw.listarTimes();
+    for (const t of times) { timesMap[t.name.toLowerCase()] = t.id; }
   } catch {}
 
   let sucessos = logsExistentes.filter((l: any) => l.status === "SENT").length;

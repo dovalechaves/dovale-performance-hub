@@ -209,6 +209,17 @@ router.post("/templates", async (req: Request, res: Response) => {
 
   const { data, error } = await meta.criarTemplate(payload!);
   if (!data) return res.status(502).json({ erro: error || "Falha ao criar template" });
+
+  // Salvar etiqueta/setor automaticamente
+  const etiqueta = String(req.body.etiqueta ?? "").trim();
+  if (etiqueta) {
+    const supa = getSupa();
+    await supa.from("template_configs").upsert(
+      { template_nome: payload!.name, etiqueta, atualizado_em: new Date().toISOString() },
+      { onConflict: "template_nome" },
+    );
+  }
+
   res.status(201).json({ mensagem: "Template enviado para aprovação na Meta", resultado: data });
 });
 
@@ -244,6 +255,11 @@ router.get("/templates/detalhe", async (req: Request, res: Response) => {
 router.get("/chatwoot/etiquetas", async (_req: Request, res: Response) => {
   const labels = await cw.listarEtiquetasChatwoot();
   res.json(labels);
+});
+
+router.get("/chatwoot/times", async (_req: Request, res: Response) => {
+  const times = await cw.listarTimes();
+  res.json(times);
 });
 
 router.get("/template-etiquetas", async (_req: Request, res: Response) => {

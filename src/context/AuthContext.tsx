@@ -21,6 +21,11 @@ interface AuthUser {
       role: Role;
       loja: string | null;
     };
+    disparo: {
+      canAccess: boolean;
+      role: Role;
+      loja: string | null;
+    };
   };
 }
 
@@ -38,6 +43,7 @@ interface AuthContextValue {
     apps?: {
       dashboard?: { role?: string; loja?: string | null; can_access?: boolean };
       calculadora?: { role?: string; loja?: string | null; can_access?: boolean };
+      disparo?: { role?: string; loja?: string | null; can_access?: boolean };
     }
   ) => void;
   logout: () => void;
@@ -56,6 +62,7 @@ function buildUser(
   apiApps?: {
     dashboard?: { role?: string; loja?: string | null; can_access?: boolean };
     calculadora?: { role?: string; loja?: string | null; can_access?: boolean };
+    disparo?: { role?: string; loja?: string | null; can_access?: boolean };
   }
 ): AuthUser {
   const dashboardRole = resolveRole(usuario, apiApps?.dashboard?.role ?? apiRole);
@@ -63,6 +70,8 @@ function buildUser(
   const dashboardAccess = apiApps?.dashboard?.can_access ?? canAccessDashboard;
   const calculadoraRole = resolveRole(usuario, apiApps?.calculadora?.role ?? apiRole);
   const calculadoraAccess = apiApps?.calculadora?.can_access ?? (dashboardRole !== "viewer");
+  const disparoRole = resolveRole(usuario, apiApps?.disparo?.role ?? apiRole);
+  const disparoAccess = apiApps?.disparo?.can_access ?? false;
 
   return {
     usuario,
@@ -84,6 +93,11 @@ function buildUser(
         role: calculadoraRole,
         loja: null,
       },
+      disparo: {
+        canAccess: disparoAccess,
+        role: disparoRole,
+        loja: null,
+      },
     },
   };
 }
@@ -99,6 +113,8 @@ function loadFromStorage(): AuthUser | null {
     const dashboardLoja = parsed.apps?.dashboard?.loja ?? parsed.loja ?? null;
     const calculadoraRole = parsed.apps?.calculadora?.role ?? parsed.role;
     const calculadoraAccess = parsed.apps?.calculadora?.canAccess ?? (dashboardRole !== "viewer");
+    const disparoRole = parsed.apps?.disparo?.role ?? parsed.role;
+    const disparoAccess = parsed.apps?.disparo?.canAccess ?? false;
 
     return {
       usuario: parsed.usuario,
@@ -118,6 +134,11 @@ function loadFromStorage(): AuthUser | null {
         calculadora: {
           canAccess: calculadoraAccess,
           role: calculadoraRole,
+          loja: null,
+        },
+        disparo: {
+          canAccess: disparoAccess,
+          role: disparoRole,
           loja: null,
         },
       },
@@ -141,6 +162,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     apps?: {
       dashboard?: { role?: string; loja?: string | null; can_access?: boolean };
       calculadora?: { role?: string; loja?: string | null; can_access?: boolean };
+      disparo?: { role?: string; loja?: string | null; can_access?: boolean };
     }
   ) => {
     const authUser = buildUser(usuario, displayName, token, apiRole, loja, canAccessDashboard, canAccessHub, apps);
@@ -151,6 +173,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     localStorage.removeItem("dovale_auth");
     localStorage.removeItem("dovale_token");
+    localStorage.removeItem("disparo_token");
+    localStorage.removeItem("disparo_usuario");
     setUser(null);
   }, []);
 

@@ -1,0 +1,14 @@
+node_modules
+dist
+dist-ssr
+.git
+.gitignore
+.env
+disparo/
+uploads/
+uploads_media/
+*.log
+*.md
+.vscode
+.idea
+.DS_Store

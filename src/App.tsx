@@ -10,6 +10,7 @@ import Login from "./pages/Login.tsx";
 import Gestao from "./pages/Gestao.tsx";
 import Calculadora from "./pages/Calculadora.tsx";
 import NotFound from "./pages/NotFound.tsx";
+import Disparo from "./pages/Disparo.tsx";
 
 const queryClient = new QueryClient();
 
@@ -36,6 +37,14 @@ function CalculadoraRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function DisparoRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.canAccessHub) return <Navigate to="/login" replace />;
+  if (!user.apps.disparo.canAccess) return <Navigate to="/hub" replace />;
+  return <>{children}</>;
+}
+
 function AdminManagerRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
@@ -59,6 +68,7 @@ const App = () => (
             <Route path="/dashboard" element={<DashboardRoute><Index /></DashboardRoute>} />
             <Route path="/gestao" element={<AdminManagerRoute><Gestao /></AdminManagerRoute>} />
             <Route path="/calculadora" element={<CalculadoraRoute><Calculadora /></CalculadoraRoute>} />
+            <Route path="/disparo" element={<DisparoRoute><Disparo /></DisparoRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

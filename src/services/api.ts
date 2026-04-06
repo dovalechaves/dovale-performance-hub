@@ -59,6 +59,12 @@ export interface AuthManagedUser {
       loja: string | null;
       can_access: boolean;
     };
+    disparo: {
+      app_key: "disparo";
+      role: "admin" | "manager" | "viewer";
+      loja: string | null;
+      can_access: boolean;
+    };
   };
 }
 

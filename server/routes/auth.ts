@@ -4,7 +4,7 @@ import { getPool } from "../db/sqlserver";
 
 const router = Router();
 const VALID_ROLES = ["admin", "manager", "viewer"] as const;
-const MANAGED_APPS = ["dashboard", "calculadora"] as const;
+const MANAGED_APPS = ["dashboard", "calculadora", "disparo"] as const;
 
 type Role = typeof VALID_ROLES[number];
 type AppKey = typeof MANAGED_APPS[number];
@@ -82,6 +82,12 @@ function buildDefaultApps(usuario: string, localRole: unknown, localLoja: unknow
       loja: null,
       can_access: calculadoraDefaultAccess,
     },
+    disparo: {
+      app_key: "disparo" as AppKey,
+      role: baseRole,
+      loja: null,
+      can_access: false,
+    },
   };
 }
 
@@ -96,6 +102,7 @@ function mergeApps(
   const merged: ManagedUser["apps"] = {
     dashboard: { ...defaults.dashboard },
     calculadora: { ...defaults.calculadora },
+    disparo: { ...defaults.disparo },
   };
 
   for (const row of appRows) {
@@ -134,6 +141,7 @@ function normalizeAppsPayload(
       can_access: legacyCanAccessDashboard === false ? false : defaults.dashboard.can_access,
     },
     calculadora: { ...defaults.calculadora },
+    disparo: { ...defaults.disparo },
   };
 
   if (payload && typeof payload === "object") {
@@ -308,7 +316,7 @@ router.get("/users", async (req, res) => {
       pool.request().query(`
         SELECT usuario, app_key, role, loja, ativo
         FROM dbo.USUARIOS_APPS
-        WHERE app_key IN ('dashboard', 'calculadora')
+        WHERE app_key IN ('dashboard', 'calculadora', 'disparo')
       `),
     ]);
 

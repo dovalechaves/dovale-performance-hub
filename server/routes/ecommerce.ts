@@ -185,7 +185,6 @@ router.get("/custo-operacional", async (req, res) => {
   }
 });
 
-/** GET /api/ecommerce/token-salvo */
 router.get("/token-salvo", async (_req, res) => {
   try {
     const pool = await getPool();

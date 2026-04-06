@@ -104,7 +104,7 @@ router.post("/auth/hub-exchange", async (req: Request, res: Response) => {
     const result = await pool.request()
       .input("usuario", usuario.trim())
       .query(`
-        SELECT ua.ativo
+        SELECT ua.ativo, ua.role AS disparo_role
         FROM dbo.USUARIOS_APPS ua
         INNER JOIN dbo.USUARIOS_LOJAS ul ON LOWER(ul.usuario) = LOWER(ua.usuario)
         WHERE LOWER(ua.usuario) = LOWER(@usuario)
@@ -115,6 +115,7 @@ router.post("/auth/hub-exchange", async (req: Request, res: Response) => {
     if (!result.recordset.length) {
       return res.status(403).json({ erro: "Usuário sem acesso ao Disparo" });
     }
+    const disparoRole = result.recordset[0].disparo_role ?? "user";
     const payload = {
       usuario: usuario.trim(),
       nome: displayName || usuario,
@@ -122,9 +123,10 @@ router.post("/auth/hub-exchange", async (req: Request, res: Response) => {
       departamento: "",
       escritorio: "",
       nivel: "0",
+      role: disparoRole,
     };
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: `${JWT_EXPIRY_HOURS}h` });
-    res.json({ token, usuario: { nome: payload.nome, email: payload.email, departamento: payload.departamento, escritorio: payload.escritorio } });
+    res.json({ token, usuario: { nome: payload.nome, email: payload.email, departamento: payload.departamento, escritorio: payload.escritorio, role: disparoRole } });
   } catch (e: any) {
     res.status(500).json({ erro: `Falha ao gerar token: ${e.message}` });
   }
@@ -324,6 +326,23 @@ router.post("/disparar", async (req: Request, res: Response) => {
   }
 
   const supa = getSupa();
+  const usuarioAtual = (req as any).usuarioLogado ?? {};
+
+  // Bloqueia se já existe disparo ativo
+  const { data: ativos } = await supa.from("disparos").select("id, status, configuracao")
+    .in("status", ["AWAITING_APPROVAL", "PROCESSING", "PAUSING", "PAUSED"])
+    .limit(1);
+  if (ativos?.length) {
+    const lblMap: Record<string, string> = { AWAITING_APPROVAL: "aguardando aprovação", PROCESSING: "em andamento", PAUSING: "pausando", PAUSED: "pausado" };
+    let solicitante = "";
+    try { solicitante = JSON.parse(ativos[0].configuracao ?? "{}").solicitante ?? ""; } catch {}
+    const porQuem = solicitante ? ` de "${solicitante}"` : "";
+    return res.status(409).json({ erro: `Já existe um disparo ${lblMap[ativos[0].status] ?? ativos[0].status}${porQuem} (#${ativos[0].id}). Aguarde a conclusão ou cancele-o antes de iniciar outro.` });
+  }
+
+  // Salva o nome do solicitante na configuração
+  cfg.solicitante = usuarioAtual.nome ?? usuarioAtual.usuario ?? "";
+
   const { count } = await supa.from("contatos_lista").select("id", { count: "exact", head: true }).eq("lista_id", lista_id);
   const totalContatos = count ?? 0;
 

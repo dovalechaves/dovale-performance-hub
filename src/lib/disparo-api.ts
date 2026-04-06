@@ -22,6 +22,12 @@ export interface DisparoUsuario {
   email: string;
   departamento: string;
   escritorio: string;
+  role?: string;
+}
+
+export function isDisparoAdmin(): boolean {
+  const u = getUsuarioSalvo();
+  return u?.role === "admin";
 }
 
 export async function login(usuario: string, senha: string): Promise<{ token: string; usuario: DisparoUsuario }> {

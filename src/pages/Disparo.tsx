@@ -23,6 +23,7 @@ export default function Disparo() {
   const { user } = useAuth();
   const [dark, setDark] = useState(() => localStorage.getItem("dovale_theme") !== "light");
   const [ready, setReady] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [tab, setTab] = useState("disparos");
 
   // Upload
@@ -82,10 +83,12 @@ export default function Disparo() {
     const exchange = async () => {
       try {
         if (api.isLoggedIn()) {
+          setIsAdmin(api.isDisparoAdmin());
           setReady(true);
           return;
         }
         await api.exchangeHubToken(user.usuario, user.displayName);
+        setIsAdmin(api.isDisparoAdmin());
         setReady(true);
       } catch {
         toast.error("Falha ao autenticar no módulo de disparo");
@@ -104,7 +107,8 @@ export default function Disparo() {
     socket.on("connect", () => addLog("Socket conectado"));
     socket.on("disconnect", () => addLog("Socket desconectado"));
     socket.on("status_disparo", (data: any) => {
-      addLog(`Status disparo ${data.id}: ${data.status}`);
+      const lblMap: Record<string, string> = { AWAITING_APPROVAL: "Aguardando Aprovação", PROCESSING: "Processando", COMPLETED: "Concluído", PAUSING: "Pausando", PAUSED: "Pausado", REJECTED: "Negado", FAILED: "Falhou" };
+      addLog(`Status disparo #${data.id}: ${lblMap[data.status] ?? data.status}`);
       setDisparoStatus(data.status);
     });
     socket.on("progresso_disparo", (data: any) => {
@@ -330,6 +334,19 @@ export default function Disparo() {
 
   // ── Main App ────────────────────────────────────────────────────────────────
 
+  const statusLabel = (s: string) => {
+    const map: Record<string, string> = {
+      AWAITING_APPROVAL: "Aguardando Aprovação",
+      PROCESSING: "Processando",
+      COMPLETED: "Concluído",
+      PAUSING: "Pausando",
+      PAUSED: "Pausado",
+      REJECTED: "Negado",
+      FAILED: "Falhou",
+    };
+    return map[s] ?? s;
+  };
+
   const statusColor = (s: string) => {
     if (["COMPLETED"].includes(s)) return "bg-green-500";
     if (["PROCESSING"].includes(s)) return "bg-blue-500 animate-pulse";
@@ -387,7 +404,7 @@ export default function Disparo() {
           {disparoId && (
             <Card>
               <CardContent className="py-3 flex items-center gap-4 flex-wrap">
-                <Badge className={statusColor(disparoStatus)}>{disparoStatus || "—"}</Badge>
+                <Badge className={statusColor(disparoStatus)}>{statusLabel(disparoStatus) || "—"}</Badge>
                 <span className="text-sm">Disparo #{disparoId}</span>
                 <div className="flex-1 min-w-[200px]">
                   <Progress value={progresso} className="h-2" />
@@ -401,7 +418,7 @@ export default function Disparo() {
                   {disparoStatus === "PAUSED" && (
                     <Button size="sm" variant="outline" onClick={handleRetomar}><Play className="h-3 w-3 mr-1" />Retomar</Button>
                   )}
-                  {disparoStatus === "AWAITING_APPROVAL" && (
+                  {disparoStatus === "AWAITING_APPROVAL" && isAdmin && (
                     <>
                       <Button size="sm" variant="default" onClick={handleAprovar}><Check className="h-3 w-3 mr-1" />Aprovar</Button>
                       <Button size="sm" variant="destructive" onClick={handleNegar}><ShieldX className="h-3 w-3 mr-1" />Negar</Button>

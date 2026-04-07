@@ -4,7 +4,7 @@ import { getPool } from "../db/sqlserver";
 
 const router = Router();
 const VALID_ROLES = ["admin", "manager", "viewer"] as const;
-const MANAGED_APPS = ["dashboard", "calculadora", "disparo"] as const;
+const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento"] as const;
 
 type Role = typeof VALID_ROLES[number];
 type AppKey = typeof MANAGED_APPS[number];
@@ -88,6 +88,12 @@ function buildDefaultApps(usuario: string, localRole: unknown, localLoja: unknow
       loja: null,
       can_access: false,
     },
+    fechamento: {
+      app_key: "fechamento" as AppKey,
+      role: baseRole,
+      loja: dashboardRole === "manager" ? dashboardLoja : null,
+      can_access: false,
+    },
   };
 }
 
@@ -103,6 +109,7 @@ function mergeApps(
     dashboard: { ...defaults.dashboard },
     calculadora: { ...defaults.calculadora },
     disparo: { ...defaults.disparo },
+    fechamento: { ...defaults.fechamento },
   };
 
   for (const row of appRows) {
@@ -112,7 +119,7 @@ function mergeApps(
     merged[appKey] = {
       app_key: appKey,
       role,
-      loja: appKey === "dashboard" && role === "manager" ? (row?.loja ? String(row.loja) : "bh") : null,
+      loja: (appKey === "dashboard" || appKey === "fechamento") && role === "manager" ? (row?.loja ? String(row.loja) : null) : null,
       can_access: isEnabledFlag(row?.ativo),
     };
   }
@@ -142,6 +149,7 @@ function normalizeAppsPayload(
     },
     calculadora: { ...defaults.calculadora },
     disparo: { ...defaults.disparo },
+    fechamento: { ...defaults.fechamento },
   };
 
   if (payload && typeof payload === "object") {
@@ -153,7 +161,7 @@ function normalizeAppsPayload(
       merged[appKey] = {
         app_key: appKey,
         role,
-        loja: appKey === "dashboard" && role === "manager" ? (raw.loja ? String(raw.loja) : "bh") : null,
+        loja: (appKey === "dashboard" || appKey === "fechamento") && role === "manager" ? (raw.loja ? String(raw.loja) : null) : null,
         can_access: typeof raw.can_access === "boolean" ? raw.can_access : merged[appKey].can_access,
       };
     }
@@ -316,7 +324,7 @@ router.get("/users", async (req, res) => {
       pool.request().query(`
         SELECT usuario, app_key, role, loja, ativo
         FROM dbo.USUARIOS_APPS
-        WHERE app_key IN ('dashboard', 'calculadora', 'disparo')
+        WHERE app_key IN ('dashboard', 'calculadora', 'disparo', 'fechamento')
       `),
     ]);
 

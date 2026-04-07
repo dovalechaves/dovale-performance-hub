@@ -1,24 +1,38 @@
 import { useState, useEffect } from "react";
-import { X, Users } from "lucide-react";
-import { STATIC_USER_ROLES, ROLE_LABELS } from "@/lib/rbac";
+import { X, Users, Loader2, RefreshCw } from "lucide-react";
+import { ROLE_LABELS } from "@/lib/rbac";
 import { CalcRole, CALC_ROLE_LABELS, getCalcRole, setCalcRole } from "@/lib/calc-roles";
+import { useAuth } from "@/context/AuthContext";
+import { getAuthUsers, type AuthManagedUser } from "@/services/api";
 
 interface Props {
   onClose: () => void;
 }
 
-const ALL_USERS = Object.entries(STATIC_USER_ROLES).map(([usuario, role]) => ({ usuario, role }));
-
 export default function GerenciamentoCalc({ onClose }: Props) {
+  const { user } = useAuth();
+  const [managedUsers, setManagedUsers] = useState<AuthManagedUser[]>([]);
+  const [loading, setLoading] = useState(true);
   const [calcRoles, setCalcRoles] = useState<Record<string, CalcRole>>({});
 
-  useEffect(() => {
-    const map: Record<string, CalcRole> = {};
-    for (const { usuario } of ALL_USERS) {
-      map[usuario] = getCalcRole(usuario);
+  const loadUsers = async () => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      const data = await getAuthUsers(user.usuario);
+      const filtered = data.filter((u) => u.apps.calculadora.can_access);
+      setManagedUsers(filtered);
+      const map: Record<string, CalcRole> = {};
+      for (const u of filtered) {
+        map[u.usuario] = getCalcRole(u.usuario);
+      }
+      setCalcRoles(map);
+    } catch { /* ignore */ } finally {
+      setLoading(false);
     }
-    setCalcRoles(map);
-  }, []);
+  };
+
+  useEffect(() => { loadUsers(); }, []);
 
   const handleChange = (usuario: string, role: CalcRole) => {
     setCalcRole(usuario, role);
@@ -46,12 +60,22 @@ export default function GerenciamentoCalc({ onClose }: Props) {
               Admin
             </span>
           </div>
-          <button
-            onClick={onClose}
-            className="w-7 h-7 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-destructive/10 transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={loadUsers}
+              disabled={loading}
+              className="w-7 h-7 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-primary/10 transition-colors disabled:opacity-40"
+              title="Atualizar"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+            </button>
+            <button
+              onClick={onClose}
+              className="w-7 h-7 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-destructive/10 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* Body */}
@@ -65,53 +89,70 @@ export default function GerenciamentoCalc({ onClose }: Props) {
               <thead>
                 <tr className="border-b border-border bg-muted/50">
                   <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Usuário</th>
+                  <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Nome</th>
                   <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role</th>
                   <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Calculadora</th>
                 </tr>
               </thead>
               <tbody>
-                {ALL_USERS.map(({ usuario, role }) => {
-                  const isAdmin = role === "admin";
-                  return (
-                    <tr
-                      key={usuario}
-                      className="border-b border-border/50 last:border-0 hover:bg-muted/30 transition-colors"
-                    >
-                      <td className="px-4 py-3 font-mono text-xs text-foreground">{usuario}</td>
-                      <td className="px-4 py-3">
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest
-                          ${role === "admin"   ? "bg-primary/15 text-primary" :
-                            role === "manager" ? "bg-blue-500/15 text-blue-400" :
-                            "bg-muted text-muted-foreground"}`}>
-                          {ROLE_LABELS[role]}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        {isAdmin ? (
-                          <span className="text-[10px] font-semibold text-primary uppercase tracking-widest">
-                            Ambas
+                {loading ? (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">
+                      <Loader2 className="w-5 h-5 animate-spin mx-auto" />
+                    </td>
+                  </tr>
+                ) : managedUsers.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-8 text-center text-xs text-muted-foreground">
+                      Nenhum usuário com acesso à Calculadora.
+                    </td>
+                  </tr>
+                ) : (
+                  managedUsers.map((u) => {
+                    const role = u.apps.calculadora.role;
+                    const isAdmin = role === "admin";
+                    return (
+                      <tr
+                        key={u.usuario}
+                        className="border-b border-border/50 last:border-0 hover:bg-muted/30 transition-colors"
+                      >
+                        <td className="px-4 py-3 font-mono text-xs text-foreground">{u.usuario}</td>
+                        <td className="px-4 py-3 text-foreground text-xs">{u.displayname || "—"}</td>
+                        <td className="px-4 py-3">
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest
+                            ${role === "admin"   ? "bg-primary/15 text-primary" :
+                              role === "manager" ? "bg-blue-500/15 text-blue-400" :
+                              "bg-muted text-muted-foreground"}`}>
+                            {ROLE_LABELS[role]}
                           </span>
-                        ) : (
-                          <div className="inline-flex rounded-lg border border-border overflow-hidden">
-                            {(Object.entries(CALC_ROLE_LABELS) as [CalcRole, string][]).map(([cr, label]) => (
-                              <button
-                                key={cr}
-                                onClick={() => handleChange(usuario, cr)}
-                                className={`px-3 py-1 text-[10px] font-semibold uppercase tracking-widest transition-colors
-                                  ${calcRoles[usuario] === cr
-                                    ? "bg-primary text-primary-foreground"
-                                    : "text-muted-foreground hover:text-foreground hover:bg-secondary"
-                                  }`}
-                              >
-                                {label}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {isAdmin ? (
+                            <span className="text-[10px] font-semibold text-primary uppercase tracking-widest">
+                              Ambas
+                            </span>
+                          ) : (
+                            <div className="inline-flex rounded-lg border border-border overflow-hidden">
+                              {(Object.entries(CALC_ROLE_LABELS) as [CalcRole, string][]).map(([cr, label]) => (
+                                <button
+                                  key={cr}
+                                  onClick={() => handleChange(u.usuario, cr)}
+                                  className={`px-3 py-1 text-[10px] font-semibold uppercase tracking-widest transition-colors
+                                    ${calcRoles[u.usuario] === cr
+                                      ? "bg-primary text-primary-foreground"
+                                      : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+                                    }`}
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>

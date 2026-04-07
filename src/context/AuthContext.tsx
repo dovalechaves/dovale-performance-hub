@@ -26,6 +26,11 @@ interface AuthUser {
       role: Role;
       loja: string | null;
     };
+    fechamento: {
+      canAccess: boolean;
+      role: Role;
+      loja: string | null;
+    };
   };
 }
 
@@ -44,6 +49,7 @@ interface AuthContextValue {
       dashboard?: { role?: string; loja?: string | null; can_access?: boolean };
       calculadora?: { role?: string; loja?: string | null; can_access?: boolean };
       disparo?: { role?: string; loja?: string | null; can_access?: boolean };
+      fechamento?: { role?: string; loja?: string | null; can_access?: boolean };
     }
   ) => void;
   logout: () => void;
@@ -63,6 +69,7 @@ function buildUser(
     dashboard?: { role?: string; loja?: string | null; can_access?: boolean };
     calculadora?: { role?: string; loja?: string | null; can_access?: boolean };
     disparo?: { role?: string; loja?: string | null; can_access?: boolean };
+    fechamento?: { role?: string; loja?: string | null; can_access?: boolean };
   }
 ): AuthUser {
   const dashboardRole = resolveRole(usuario, apiApps?.dashboard?.role ?? apiRole);
@@ -72,6 +79,9 @@ function buildUser(
   const calculadoraAccess = apiApps?.calculadora?.can_access ?? (dashboardRole !== "viewer");
   const disparoRole = resolveRole(usuario, apiApps?.disparo?.role ?? apiRole);
   const disparoAccess = apiApps?.disparo?.can_access ?? false;
+  const fechamentoRole = resolveRole(usuario, apiApps?.fechamento?.role ?? apiRole);
+  const fechamentoAccess = apiApps?.fechamento?.can_access ?? false;
+  const fechamentoLoja = apiApps?.fechamento?.loja ?? (fechamentoRole === "manager" ? (loja ?? null) : null);
 
   return {
     usuario,
@@ -98,6 +108,11 @@ function buildUser(
         role: disparoRole,
         loja: null,
       },
+      fechamento: {
+        canAccess: fechamentoAccess,
+        role: fechamentoRole,
+        loja: fechamentoLoja,
+      },
     },
   };
 }
@@ -115,6 +130,9 @@ function loadFromStorage(): AuthUser | null {
     const calculadoraAccess = parsed.apps?.calculadora?.canAccess ?? (dashboardRole !== "viewer");
     const disparoRole = parsed.apps?.disparo?.role ?? parsed.role;
     const disparoAccess = parsed.apps?.disparo?.canAccess ?? false;
+    const fechamentoRole = (parsed.apps as any)?.fechamento?.role ?? parsed.role;
+    const fechamentoAccess = (parsed.apps as any)?.fechamento?.canAccess ?? false;
+    const fechamentoLoja = (parsed.apps as any)?.fechamento?.loja ?? null;
 
     return {
       usuario: parsed.usuario,
@@ -141,6 +159,11 @@ function loadFromStorage(): AuthUser | null {
           role: disparoRole,
           loja: null,
         },
+        fechamento: {
+          canAccess: fechamentoAccess,
+          role: fechamentoRole,
+          loja: fechamentoLoja,
+        },
       },
     };
   } catch {
@@ -163,6 +186,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       dashboard?: { role?: string; loja?: string | null; can_access?: boolean };
       calculadora?: { role?: string; loja?: string | null; can_access?: boolean };
       disparo?: { role?: string; loja?: string | null; can_access?: boolean };
+      fechamento?: { role?: string; loja?: string | null; can_access?: boolean };
     }
   ) => {
     const authUser = buildUser(usuario, displayName, token, apiRole, loja, canAccessDashboard, canAccessHub, apps);

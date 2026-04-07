@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import { BarChart3, Calculator, LogOut, Sun, Moon, Users, RefreshCw, Loader2, ChevronDown, Settings2, Send } from "lucide-react";
+import { BarChart3, Calculator, LogOut, Sun, Moon, Users, RefreshCw, Loader2, ChevronDown, Settings2, Send, Archive } from "lucide-react";
 import logoBlue from "@/assets/logo-blue.png";
 import logoWhite from "@/assets/logo-white.png";
 import { LOJAS, getAuthUsers, updateAuthUserRole, type AuthManagedUser } from "@/services/api";
@@ -37,12 +37,20 @@ const APPS: AppCard[] = [
     route: "/disparo",
     color: "from-purple-500/20 to-purple-600/10 border-purple-500/30 hover:border-purple-500/60",
   },
+  {
+    title: "Fechamento Estoque",
+    description: "Acompanhe o fechamento mensal de estoque, vendas e recebimentos por loja.",
+    icon: <Archive className="w-8 h-8" />,
+    route: "/fechamento",
+    color: "from-orange-500/20 to-orange-600/10 border-orange-500/30 hover:border-orange-500/60",
+  },
 ];
 
 const APP_BY_ROUTE: Record<string, keyof AuthManagedUser["apps"]> = {
   "/dashboard": "dashboard",
   "/calculadora": "calculadora",
   "/disparo": "disparo",
+  "/fechamento": "fechamento",
 };
 
 export default function Hub() {
@@ -280,7 +288,7 @@ export default function Hub() {
             </div>
 
             <div className="rounded-xl border border-border overflow-x-auto">
-              <table className="w-full text-sm min-w-[1200px]">
+              <table className="w-full text-sm min-w-[1500px]">
                 <thead>
                   <tr className="border-b border-border bg-muted/50">
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Usuário</th>
@@ -294,19 +302,22 @@ export default function Hub() {
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Calculadora</th>
                     <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Disparo</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Disparo</th>
+                    <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Fechamento</th>
+                    <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Fech.</th>
+                    <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Loja Fech.</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {usersLoading ? (
                     <tr>
-                      <td colSpan={12} className="px-4 py-8 text-center text-muted-foreground">
+                      <td colSpan={15} className="px-4 py-8 text-center text-muted-foreground">
                         <Loader2 className="w-5 h-5 animate-spin mx-auto" />
                       </td>
                     </tr>
                   ) : filteredManagedUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={12} className="px-4 py-8 text-center text-muted-foreground text-xs">
+                      <td colSpan={15} className="px-4 py-8 text-center text-muted-foreground text-xs">
                         {appUserFilter === "all"
                           ? "Nenhum usuário encontrado para a busca informada."
                           : "Nenhum usuário habilitado no Hub e no app selecionado."}
@@ -339,6 +350,10 @@ export default function Hub() {
                                   disparo: {
                                     ...u.apps.disparo,
                                     can_access: enabled ? u.apps.disparo.can_access : false,
+                                  },
+                                  fechamento: {
+                                    ...u.apps.fechamento,
+                                    can_access: enabled ? u.apps.fechamento.can_access : false,
                                   },
                                 },
                                 can_access_dashboard: enabled ? u.apps.dashboard.can_access : false,
@@ -539,6 +554,90 @@ export default function Hub() {
                             </select>
                             <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
                           </div>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={u.apps.fechamento.can_access}
+                            onChange={async (e) => {
+                              const next: AuthManagedUser = {
+                                ...u,
+                                apps: {
+                                  ...u.apps,
+                                  fechamento: {
+                                    ...u.apps.fechamento,
+                                    can_access: e.target.checked,
+                                  },
+                                },
+                              };
+                              updateManagedUser(u.usuario, () => next);
+                              await persistUser(next);
+                            }}
+                            disabled={savingUser === u.usuario || !u.can_access_hub}
+                            className="h-4 w-4 rounded border-border bg-muted text-primary focus:ring-primary/50 disabled:opacity-40"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="relative inline-block">
+                            <select
+                              value={u.apps.fechamento.role}
+                              onChange={async (e) => {
+                                const nextRole = e.target.value as Role;
+                                const next: AuthManagedUser = {
+                                  ...u,
+                                  apps: {
+                                    ...u.apps,
+                                    fechamento: {
+                                      ...u.apps.fechamento,
+                                      role: nextRole,
+                                      loja: nextRole === "manager" ? (u.apps.fechamento.loja ?? u.loja ?? "CAMPINAS") : null,
+                                    },
+                                  },
+                                };
+                                updateManagedUser(u.usuario, () => next);
+                                await persistUser(next);
+                              }}
+                              disabled={savingUser === u.usuario || !u.can_access_hub}
+                              className="appearance-none rounded-lg border border-border bg-muted px-3 py-1.5 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40"
+                            >
+                              {(Object.keys(ROLE_LABELS) as Role[]).map((r) => (
+                                <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                              ))}
+                            </select>
+                            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          {u.apps.fechamento.role === "manager" ? (
+                            <div className="relative inline-block">
+                              <select
+                                value={u.apps.fechamento.loja ?? "CAMPINAS"}
+                                onChange={async (e) => {
+                                  const next: AuthManagedUser = {
+                                    ...u,
+                                    apps: {
+                                      ...u.apps,
+                                      fechamento: {
+                                        ...u.apps.fechamento,
+                                        loja: e.target.value,
+                                      },
+                                    },
+                                  };
+                                  updateManagedUser(u.usuario, () => next);
+                                  await persistUser(next);
+                                }}
+                                disabled={savingUser === u.usuario || !u.can_access_hub}
+                                className="appearance-none rounded-lg border border-border bg-muted px-3 py-1.5 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40"
+                              >
+                                {["CAMPINAS", "FORTALEZA", "BELO HORIZONTE", "RIO DE JANEIRO", "SANTANA", "UBERLANDIA"].map((l) => (
+                                  <option key={l} value={l}>{l}</option>
+                                ))}
+                              </select>
+                              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-muted-foreground">—</span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-xs">
                           {savingUser === u.usuario && <span className="text-muted-foreground">Salvando...</span>}

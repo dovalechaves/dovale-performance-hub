@@ -11,6 +11,8 @@ import authRouter from "./routes/auth";
 import ecommerceRouter from "./routes/ecommerce";
 import disparoRouter, { setSocketIO } from "./routes/disparo";
 import { startSyncJob } from "./jobs/syncJob";
+import { startStockSnapshotJob, runStockSnapshotManual, getStockSnapshotStatus } from "./jobs/stockSnapshotJob";
+import { setupSwagger } from "./swagger";
 
 const app = express();
 const PORT = Number(process.env.SERVER_PORT) || 3001;
@@ -30,6 +32,40 @@ app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
+// ── Stock Snapshot (Fechamento Histórico Estoque) ───────────────────────────
+app.get("/api/stock-snapshot/status", (_req, res) => {
+  res.json(getStockSnapshotStatus());
+});
+
+app.post("/api/stock-snapshot/run", async (_req, res) => {
+  try {
+    const result = await runStockSnapshotManual(true);
+    res.json({ ok: true, ...result });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, erro: err.message || String(err) });
+  }
+});
+
+app.get("/api/stock-snapshot/history", async (_req, res) => {
+  try {
+    const { getPool: getP } = await import("./db/sqlserver");
+    const pool = await getP();
+    const result = await pool.request().query(`
+      SELECT EMP, VALORESTOQUE, VENDASRECEBIDAS, VENDASLOJASINDUSTRIA,
+             CAR, LUCROBRUTO, LUCROREAL, LUCROREALINDUSTRIA, LUCROFINAL, DESPESAS, CAP,
+             MESREFERENCIA, ANOREFERENCIA
+      FROM DOVALE.dbo.[TI-FINANCEIRO_131-FechamentoLojas_Historico]
+      WHERE MESREFERENCIA IS NOT NULL AND ANOREFERENCIA IS NOT NULL
+      ORDER BY ANOREFERENCIA DESC, MESREFERENCIA DESC, EMP
+    `);
+    res.json(result.recordset);
+  } catch (err: any) {
+    res.status(500).json({ erro: err.message || String(err) });
+  }
+});
+
+setupSwagger(app);
+
 const httpServer = createServer(app);
 const io = new SocketServer(httpServer, { cors: { origin: "*" } });
 setSocketIO(io);
@@ -41,4 +77,5 @@ io.on("connection", (socket) => {
 
 httpServer.listen(PORT, "0.0.0.0", () => {
   console.log(`[server] rodando em http://0.0.0.0:${PORT}`);
+  startStockSnapshotJob().catch((err) => console.error("[stock-snapshot] Erro ao iniciar:", err));
 });

@@ -274,7 +274,6 @@ router.post("/simulate", async (req, res) => {
     } catch {}
   }
 
-  // Shipping
   if (price >= 79 || freeShip) {
     let gotShipping = false;
     if (token && sellerId) {

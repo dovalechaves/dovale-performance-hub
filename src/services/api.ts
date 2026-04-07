@@ -65,6 +65,12 @@ export interface AuthManagedUser {
       loja: string | null;
       can_access: boolean;
     };
+    fechamento: {
+      app_key: "fechamento";
+      role: "admin" | "manager" | "viewer";
+      loja: string | null;
+      can_access: boolean;
+    };
   };
 }
 

@@ -111,6 +111,31 @@ function estimateShipping(price: number, weightGrams: number) {
   return row.costs[7];
 }
 
+// ── Hidden sheet builders for Excel frete formulas ──────────────────────────
+function buildFreteMLSheet(descFreteRate: number): XLSX.WorkSheet {
+  const reversed = [...SHIPPING_TABLE_GREEN].reverse(); // descending for MATCH -1
+  const data: (string | number)[][] = [
+    ["Peso (kg)", 0, 19, 49, 79, 100, 120, 150, 200],
+    ...reversed.map((r) => [r.max_weight, ...r.costs]),
+    [],
+    ["Desc. Frete", descFreteRate],
+  ];
+  return XLSX.utils.aoa_to_sheet(data);
+}
+
+function buildFreteAmazonSheet(descFreteRate: number): XLSX.WorkSheet {
+  const reversed = [...AMAZON_SHIPPING_TABLE].reverse();
+  const data: (string | number)[][] = [
+    ["Peso (g)", 0, 30, 50, 79, 100, 120, 150, 200],
+    ...reversed.map((r) => [r.max_weight_g, ...r.costs.map((c) => c ?? 0)]),
+    [],
+    ["Adic./kg", ...AMAZON_ADDITIONAL_PER_KG.map((c) => c ?? 0)],
+    [],
+    ["Desc. Frete", descFreteRate],
+  ];
+  return XLSX.utils.aoa_to_sheet(data);
+}
+
 const selectClass =
   "appearance-none bg-secondary border-0 rounded-lg px-4 py-3.5 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary transition-all duration-200 cursor-pointer w-full";
 const labelClass = "text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2 block";
@@ -304,28 +329,150 @@ const ProductsTable = () => {
       "Lucro R$", "Margem c/ Imp. (%)", "Peso (g)",
     ];
 
-    const rows = visibleRows.map(({ product, values, custoOpUnit }) => {
-      return [
-        product.codigo,
-        product.descricao,
-        product.percentualDesconto,
-        product.precoFinal,
-        values.recebimento,
-        values.taxa,
-        ...(showFrete ? [values.frete] : []),
-        values.imposto,
-        product.custo,
-        custoOpUnit ?? "",
-        values.custoReal,
-        values.lucro,
-        parseFloat(values.margemComImposto.toFixed(2)),
-        product.peso,
-      ];
-    });
+    // Build static data rows (formulas will be overlaid)
+    const rows = visibleRows.map(({ product, values, custoOpUnit }) => [
+      product.codigo,
+      product.descricao,
+      product.percentualDesconto / 100,
+      product.precoFinal,
+      values.recebimento,
+      values.taxa,
+      ...(showFrete ? [values.frete] : []),
+      values.imposto,
+      product.custo,
+      custoOpUnit ?? 0,
+      values.custoReal,
+      values.lucro,
+      values.margemComImposto / 100,
+      product.peso,
+    ]);
 
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+
+    // ── Column map (letters) depending on whether Frete column exists ──
+    //        A        B       C      D          E             F          G?        ...
+    //    Código  Descrição  %Desc  PrFinal  PrçComDesc     Taxa     (Frete)    Imposto ...
+    const colPrecoDesc = "E";
+    const colTaxa      = "F";
+    const colFrete     = showFrete ? "G" : null;
+    const colImposto   = showFrete ? "H" : "G";
+    const colCusto     = showFrete ? "I" : "H";
+    const colCustoOp   = showFrete ? "J" : "I";
+    const colCustoReal = showFrete ? "K" : "J";
+    const colLucro     = showFrete ? "L" : "K";
+    const colMargem    = showFrete ? "M" : "L";
+
+    const numFmt2 = '#,##0.00';
+    const numFmtPct = '0.0%';
+
+    for (let i = 0; i < visibleRows.length; i++) {
+      const r = i + 2; // data starts at row 2
+
+      // C: % Desc (format as %)
+      ws[`C${r}`] = { ...ws[`C${r}`], z: '0%' };
+
+      // E: Preço c/ Desc = PreçoFinal * (1 - %Desc)
+      ws[`${colPrecoDesc}${r}`] = { t: 'n', v: visibleRows[i].values.recebimento, f: `D${r}*(1-C${r})`, z: numFmt2 };
+
+      // F: Taxa (fórmula depende do marketplace)
+      const taxaVal = visibleRows[i].values.taxa;
+      if (marketplace === "mercadolivre") {
+        ws[`${colTaxa}${r}`] = { t: 'n', v: taxaVal, f: `${colPrecoDesc}${r}*0.165`, z: numFmt2 };
+      } else if (marketplace === "amazon") {
+        ws[`${colTaxa}${r}`] = { t: 'n', v: taxaVal, f: `${colPrecoDesc}${r}*0.11`, z: numFmt2 };
+      } else {
+        // Shopee: faixas escalonadas
+        ws[`${colTaxa}${r}`] = {
+          t: 'n', v: taxaVal,
+          f: `IF(${colPrecoDesc}${r}<=79.99,${colPrecoDesc}${r}*0.2+4,IF(${colPrecoDesc}${r}<=99.99,${colPrecoDesc}${r}*0.14+16,IF(${colPrecoDesc}${r}<=199.99,${colPrecoDesc}${r}*0.14+20,${colPrecoDesc}${r}*0.14+26)))`,
+          z: numFmt2,
+        };
+      }
+
+      // Frete: fórmula INDEX/MATCH contra aba oculta
+      if (colFrete) {
+        const colPeso = "N"; // peso is always the last column when frete exists
+        const freteVal = visibleRows[i].values.frete;
+        if (marketplace === "mercadolivre") {
+          // ML: frete grátis se preço < 79; senão lookup na tabela (12 rows desc, 8 price cols)
+          const tbl = "FreteML!$B$2:$I$13";
+          const wCol = "FreteML!$A$2:$A$13";
+          const pCol = "FreteML!$B$1:$I$1";
+          const fallback = "FreteML!$B$2:$I$2"; // row 30kg (first in desc)
+          const descCell = "FreteML!$B$15";
+          ws[`${colFrete}${r}`] = {
+            t: 'n', v: freteVal,
+            f: `IF(${colPrecoDesc}${r}<79,0,IFERROR(INDEX(${tbl},MATCH(${colPeso}${r}/1000,${wCol},-1),MATCH(${colPrecoDesc}${r},${pCol},1)),INDEX(${fallback},1,MATCH(${colPrecoDesc}${r},${pCol},1))))*(1-${descCell})`,
+            z: numFmt2,
+          };
+        } else {
+          // Amazon: lookup + adicional por kg acima de 10kg (17 rows desc, 8 price cols)
+          const tbl = "FreteAmazon!$B$2:$I$18";
+          const wCol = "FreteAmazon!$A$2:$A$18";
+          const pCol = "FreteAmazon!$B$1:$I$1";
+          const baseRow = "FreteAmazon!$B$2:$I$2"; // 10000g row
+          const addRow = "FreteAmazon!$B$20:$I$20";
+          const descCell = "FreteAmazon!$B$22";
+          const pm = `MATCH(${colPrecoDesc}${r},${pCol},1)`;
+          ws[`${colFrete}${r}`] = {
+            t: 'n', v: freteVal,
+            f: `IF(${colPeso}${r}<=10000,IFERROR(INDEX(${tbl},MATCH(${colPeso}${r},${wCol},-1),${pm}),INDEX(${baseRow},1,${pm})),INDEX(${baseRow},1,${pm})+INDEX(${addRow},1,${pm})*ROUNDUP((${colPeso}${r}-10000)/1000,0))*(1-${descCell})`,
+            z: numFmt2,
+          };
+        }
+      }
+
+      // Imposto = PreçoComDesc * 21%
+      ws[`${colImposto}${r}`] = { t: 'n', v: visibleRows[i].values.imposto, f: `${colPrecoDesc}${r}*0.21`, z: numFmt2 };
+
+      // Custo e Custo Op. format
+      ws[`${colCusto}${r}`] = { ...ws[`${colCusto}${r}`], z: numFmt2 };
+      ws[`${colCustoOp}${r}`] = { ...ws[`${colCustoOp}${r}`], z: numFmt2 };
+
+      // Custo Real = Custo + Custo Op.
+      ws[`${colCustoReal}${r}`] = { t: 'n', v: visibleRows[i].values.custoReal, f: `${colCusto}${r}+${colCustoOp}${r}`, z: numFmt2 };
+
+      // Lucro = PreçoComDesc - Taxa - Frete? - Imposto - CustoReal
+      const lucroFormula = colFrete
+        ? `${colPrecoDesc}${r}-${colTaxa}${r}-${colFrete}${r}-${colImposto}${r}-${colCustoReal}${r}`
+        : `${colPrecoDesc}${r}-${colTaxa}${r}-${colImposto}${r}-${colCustoReal}${r}`;
+      ws[`${colLucro}${r}`] = { t: 'n', v: visibleRows[i].values.lucro, f: lucroFormula, z: numFmt2 };
+
+      // Margem c/ Imp. (%) = IF(CustoReal>0, Lucro/CustoReal, 0)
+      ws[`${colMargem}${r}`] = {
+        t: 'n', v: visibleRows[i].values.margemComImposto / 100,
+        f: `IF(${colCustoReal}${r}>0,${colLucro}${r}/${colCustoReal}${r},0)`,
+        z: numFmtPct,
+      };
+
+      // Preço Final format
+      ws[`D${r}`] = { ...ws[`D${r}`], z: numFmt2 };
+    }
+
+    // Column widths
+    ws["!cols"] = [
+      { wch: 10 }, { wch: 40 }, { wch: 8 }, { wch: 12 }, { wch: 14 },
+      { wch: 14 }, ...(showFrete ? [{ wch: 12 }] : []),
+      { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 },
+      { wch: 12 }, { wch: 14 }, { wch: 10 },
+    ];
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Produtos");
+
+    // Hidden frete lookup sheets
+    if (marketplace === "mercadolivre") {
+      XLSX.utils.book_append_sheet(wb, buildFreteMLSheet(descontoFrete / 100), "FreteML");
+    } else if (marketplace === "amazon") {
+      XLSX.utils.book_append_sheet(wb, buildFreteAmazonSheet(descontoFrete / 100), "FreteAmazon");
+    }
+    if (showFrete) {
+      if (!wb.Workbook) wb.Workbook = {};
+      if (!wb.Workbook.Sheets) wb.Workbook.Sheets = [];
+      while (wb.Workbook.Sheets.length < wb.SheetNames.length) wb.Workbook.Sheets.push({});
+      wb.Workbook.Sheets[1].Hidden = 1; // hide frete sheet
+    }
+
     XLSX.writeFile(wb, `produtos_${MARKETPLACE_LABELS[marketplace].toLowerCase().replace(" ", "_")}.xlsx`);
   };
 

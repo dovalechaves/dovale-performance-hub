@@ -4,15 +4,56 @@ function getToken(): string | null {
   return localStorage.getItem("disparo_token");
 }
 
+let _reExchanging: Promise<boolean> | null = null;
+
+async function tryReExchange(): Promise<boolean> {
+  try {
+    const raw = localStorage.getItem("dovale_auth");
+    if (!raw) return false;
+    const hub = JSON.parse(raw);
+    if (!hub?.usuario) return false;
+    const r = await fetch(`${API_BASE}/api/disparo/auth/hub-exchange`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ usuario: hub.usuario, displayName: hub.displayName ?? hub.usuario }),
+    });
+    if (!r.ok) return false;
+    const json = await r.json();
+    localStorage.setItem("disparo_token", json.token);
+    localStorage.setItem("disparo_usuario", JSON.stringify(json.usuario));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const token = getToken();
-  return fetch(url, {
+  const r = await fetch(url, {
     ...options,
     headers: {
       ...options.headers,
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
+  if (r.status === 401) {
+    // Tenta renovar o token uma vez
+    if (!_reExchanging) _reExchanging = tryReExchange().finally(() => { _reExchanging = null; });
+    const ok = await _reExchanging;
+    if (ok) {
+      const newToken = getToken();
+      return fetch(url, {
+        ...options,
+        headers: {
+          ...options.headers,
+          ...(newToken ? { Authorization: `Bearer ${newToken}` } : {}),
+        },
+      });
+    }
+    // Não conseguiu renovar — emite evento para a página tratar
+    window.dispatchEvent(new CustomEvent("disparo-session-expired"));
+  }
+  return r;
 }
 
 // ── Auth ─────────────────────────────────────────────────────────────────────

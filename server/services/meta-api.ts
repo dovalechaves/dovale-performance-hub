@@ -171,17 +171,28 @@ export async function obterTemplates(
     access_token: getAccessToken(),
     fields: "id,name,language,status,category,components",
     format: "json",
+    limit: "1000",
   });
   if (nome) params.set("name", nome);
   if (lingua) params.set("language", lingua);
-  const url = `https://graph.facebook.com/${API_VERSION}/${getContaId()}/message_templates?${params}`;
-  const r = await fetch(url);
-  if (r.ok) return { data: await r.json(), error: "" };
-  return { data: null, error: `Meta API ${r.status}: ${await r.text()}` };
+  let url: string | null = `https://graph.facebook.com/${API_VERSION}/${getWabaId()}/message_templates?${params}`;
+  const allItems: any[] = [];
+  while (url) {
+    const r = await fetch(url);
+    if (!r.ok) {
+      const errText = await r.text();
+      console.error(`[meta-api] obterTemplates erro ${r.status}: ${errText}`);
+      return { data: null, error: `Meta API ${r.status}: ${errText}` };
+    }
+    const json = await r.json();
+    allItems.push(...(json.data ?? []));
+    url = json.paging?.next ?? null;
+  }
+  return { data: { data: allItems }, error: "" };
 }
 
 export async function criarTemplate(payload: any): Promise<{ data: any | null; error: string }> {
-  const url = `https://graph.facebook.com/${API_VERSION}/${getContaId()}/message_templates`;
+  const url = `https://graph.facebook.com/${API_VERSION}/${getWabaId()}/message_templates`;
   const r = await fetch(url, {
     method: "POST",
     headers: {

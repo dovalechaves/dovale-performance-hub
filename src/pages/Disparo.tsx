@@ -98,6 +98,17 @@ export default function Disparo() {
     exchange();
   }, [user, navigate]);
 
+  // Listen for session expiry (when auto-re-exchange also fails)
+  useEffect(() => {
+    const handler = () => {
+      toast.error("Sessão expirada. Redirecionando...");
+      api.logout();
+      navigate("/hub");
+    };
+    window.addEventListener("disparo-session-expired", handler);
+    return () => window.removeEventListener("disparo-session-expired", handler);
+  }, [navigate]);
+
   // Socket.IO connection
   useEffect(() => {
     if (!ready) return;
@@ -124,8 +135,8 @@ export default function Disparo() {
   // Fetch templates + active dispatch once ready
   useEffect(() => {
     if (!ready) return;
-    api.fetchTemplates().then(setTemplates).catch(() => {});
-    api.fetchTemplatesGerenciar().then(setTemplatesGerenciar).catch(() => {});
+    api.fetchTemplates().then(setTemplates).catch((e) => { console.error("[disparo] fetchTemplates:", e); toast.error("Falha ao carregar templates"); });
+    api.fetchTemplatesGerenciar().then(setTemplatesGerenciar).catch((e) => { console.error("[disparo] fetchTemplatesGerenciar:", e); });
     api.fetchEtiquetasChatwoot().then(setEtiquetasChatwoot).catch(() => {});
     api.fetchTemplateEtiquetas().then(setTemplateEtiquetas).catch(() => {});
     api.fetchDisparoAtivo().then((d) => {

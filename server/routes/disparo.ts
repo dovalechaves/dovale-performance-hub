@@ -187,8 +187,13 @@ function normalizeTemplateMeta(item: any) {
 
 router.get("/templates", async (_req: Request, res: Response) => {
   const { data, error } = await meta.obterTemplates();
-  if (!data) return res.status(502).json({ erro: error || "Falha ao buscar templates na Meta" });
-  res.json((data.data ?? []).map(normalizeTemplateMeta));
+  if (!data) {
+    console.error("[disparo] GET /templates erro:", error);
+    return res.status(502).json({ erro: error || "Falha ao buscar templates na Meta" });
+  }
+  const items = (data.data ?? []).map(normalizeTemplateMeta);
+  console.log(`[disparo] GET /templates: ${items.length} templates retornados`);
+  res.json(items);
 });
 
 router.post("/templates", async (req: Request, res: Response) => {

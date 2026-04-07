@@ -1,15 +1,18 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { fetchProduto, fetchTokenSalvo, authToken, simulate, fetchMyItems, fetchCustoOperacional, type SimulateResults } from "@/lib/ecommerce-api";
 
-type Marketplace = "" | "shopee" | "mercadolivre";
+type Marketplace = "" | "mercadolivre" | "amazon" | "shopee" | "tiktok" | "magalu";
 type ListingType = "gold_pro" | "gold_special" | "free";
 
 const TAX_RATE = 0.21; // 21% fixo
 
 const MARKETPLACE_LABELS: Record<Marketplace, string> = {
   "": "Selecionar",
-  shopee: "Shopee",
   mercadolivre: "Mercado Livre",
+  amazon: "Amazon",
+  shopee: "Shopee",
+  tiktok: "TikTok",
+  magalu: "Magalu",
 };
 
 const LISTING_FEES: Record<ListingType, number> = {
@@ -53,6 +56,85 @@ function estimateShipping(price: number, weightGrams: number) {
   return row.costs[7];
 }
 
+function shopeeFee(price: number): number {
+  if (price <= 79.99) return price * 0.20 + 4;
+  if (price <= 99.99) return price * 0.14 + 16;
+  if (price <= 199.99) return price * 0.14 + 20;
+  if (price <= 499.99) return price * 0.14 + 26;
+  return price * 0.14 + 26;
+}
+
+const AMAZON_SHIPPING_TABLE: { max_weight_g: number; costs: (number | null)[] }[] = [
+  { max_weight_g: 100,  costs: [null, null, null, 10.05, 12.05, 14.05, 15.05, 15.55] },
+  { max_weight_g: 200,  costs: [null, null, null, 10.45, 12.45, 14.45, 15.45, 16.05] },
+  { max_weight_g: 300,  costs: [null, null, null, 10.95, 12.95, 14.95, 15.95, 16.55] },
+  { max_weight_g: 400,  costs: [null, null, null, 11.45, 13.45, 15.45, 16.95, 17.15] },
+  { max_weight_g: 500,  costs: [null, null, null, 11.95, 13.95, 15.95, 17.05, 17.85] },
+  { max_weight_g: 750,  costs: [null, null, null, 12.05, 14.05, 16.05, 18.45, 18.55] },
+  { max_weight_g: 1000, costs: [null, null, null, 12.45, 14.45, 16.45, 19.05, 19.25] },
+  { max_weight_g: 1500, costs: [5.65, 5.85, 6.05, 12.95, 14.95, 16.95, 19.45, 20.35] },
+  { max_weight_g: 2000, costs: [null, null, null, 13.05, 15.05, 17.05, 19.95, 21.35] },
+  { max_weight_g: 3000, costs: [null, null, null, 14.05, 16.05, 18.05, 20.05, 22.35] },
+  { max_weight_g: 4000, costs: [null, null, null, 15.05, 17.05, 19.05, 21.95, 23.35] },
+  { max_weight_g: 5000, costs: [null, null, null, 16.05, 18.05, 20.05, 22.95, 24.35] },
+  { max_weight_g: 6000, costs: [null, null, null, 24.05, 27.05, 29.05, 30.05, 30.35] },
+  { max_weight_g: 7000, costs: [null, null, null, 25.05, 28.05, 30.05, 31.05, 33.35] },
+  { max_weight_g: 8000, costs: [null, null, null, 26.05, 29.05, 31.05, 32.05, 35.35] },
+  { max_weight_g: 9000, costs: [null, null, null, 27.05, 30.05, 32.05, 33.05, 37.35] },
+  { max_weight_g: 10000,costs: [null, null, null, 35.05, 40.05, 46.05, 51.05, 51.35] },
+];
+const AMAZON_ADDITIONAL_PER_KG = [null, null, null, 3.05, 3.05, 3.05, 3.50, 3.50];
+
+function amazonPriceColIndex(price: number): number {
+  if (price < 30) return 0;
+  if (price < 50) return 1;
+  if (price < 79) return 2;
+  if (price < 100) return 3;
+  if (price < 120) return 4;
+  if (price < 150) return 5;
+  if (price < 200) return 6;
+  return 7;
+}
+
+function estimateAmazonShipping(price: number, weightGrams: number): number {
+  const col = amazonPriceColIndex(price);
+  const row = AMAZON_SHIPPING_TABLE.find((r) => weightGrams <= r.max_weight_g);
+  if (row) return row.costs[col] ?? 0;
+  const base = AMAZON_SHIPPING_TABLE[AMAZON_SHIPPING_TABLE.length - 1].costs[col] ?? 0;
+  const extra = AMAZON_ADDITIONAL_PER_KG[col] ?? 0;
+  const extraKg = Math.ceil((weightGrams - 10000) / 1000);
+  return base + extra * extraKg;
+}
+
+const MAGALU_SHIPPING_TABLE: { max_weight_g: number; base: number }[] = [
+  { max_weight_g: 500,   base: 35.90 },
+  { max_weight_g: 1000,  base: 40.90 },
+  { max_weight_g: 2000,  base: 42.90 },
+  { max_weight_g: 5000,  base: 50.90 },
+  { max_weight_g: 9000,  base: 77.90 },
+  { max_weight_g: 13000, base: 98.90 },
+  { max_weight_g: 17000, base: 111.90 },
+  { max_weight_g: 23000, base: 134.90 },
+  { max_weight_g: 30000, base: 148.90 },
+  { max_weight_g: 40000, base: 159.90 },
+  { max_weight_g: 50000, base: 189.90 },
+];
+
+type MagaluTier = "base" | "silver" | "gold" | "fulfillment";
+const MAGALU_TIER_LABELS: Record<MagaluTier, string> = {
+  base: "<92% (sem desconto)",
+  silver: "92\u201397% (25% desc.)",
+  gold: ">97% (50% desc.)",
+  fulfillment: "Fulfillment (75% desc.)",
+};
+const MAGALU_TIER_DISCOUNT: Record<MagaluTier, number> = { base: 0, silver: 0.25, gold: 0.50, fulfillment: 0.75 };
+
+function estimateMagaluShipping(weightGrams: number, tierDiscount: number): number {
+  const row = MAGALU_SHIPPING_TABLE.find((r) => weightGrams <= r.max_weight_g)
+    ?? MAGALU_SHIPPING_TABLE[MAGALU_SHIPPING_TABLE.length - 1];
+  return row.base * (1 - tierDiscount);
+}
+
 const inputClass =
   "w-full bg-secondary border-0 rounded-lg px-4 py-3.5 text-sm font-medium text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary transition-all duration-200";
 const labelClass = "text-xs font-semibold uppercase tracking-widest text-muted-foreground";
@@ -85,6 +167,7 @@ const MarketplaceCalculator = () => {
   const [codigoProduto, setCodigoProduto] = useState("");
   const [custoProduto, setCustoProduto] = useState("");
   const [taxaPlataforma, setTaxaPlataforma] = useState("");
+  const [magaluTier, setMagaluTier] = useState<MagaluTier>("silver");
   
   // New calculation states
   const [precoVenda, setPrecoVenda] = useState("");
@@ -124,7 +207,16 @@ const MarketplaceCalculator = () => {
   const [simErro, setSimErro] = useState<string | null>(null);
 
   const isML = marketplace === "mercadolivre";
-  const effectiveTaxa = isML ? LISTING_FEES[listingType] : parseFloat(taxaPlataforma) || 0;
+  const hasFrete = marketplace !== "" && marketplace !== "shopee";
+
+  const effectiveTaxaLabel = useMemo(() => {
+    if (isML) return `${LISTING_FEES[listingType]}%`;
+    if (marketplace === "amazon") return "11%";
+    if (marketplace === "shopee") return "14%~20% + fixo";
+    if (marketplace === "tiktok") return "6% + R$4";
+    if (marketplace === "magalu") return "14% + R$5";
+    return "—";
+  }, [marketplace, isML, listingType]);
 
   // Auto-load ML token on mount
   useEffect(() => {
@@ -153,32 +245,47 @@ const MarketplaceCalculator = () => {
     const cost = custoBase + (custoOpUnit ?? 0);
     const basePrice = parseFloat(precoVenda) || 0;
     const price = basePrice * (1 - desconto / 100);
-    let profit = 0;
+    const peso = parseInt(pesoGramas) || 0;
+    let taxa = 0;
     let shipping = 0;
-    let calculatedMargin = 0;
 
-    if (isML) {
-      const taxRate = TAX_RATE;
-      const feeRate = LISTING_FEES[listingType] / 100;
-      if (price >= 79) {
-        const freteBase = estimateShipping(price, parseInt(pesoGramas) || 0);
-        shipping = freteBase * (1 - descontoFrete / 100);
-      }
-      profit = price - cost - shipping - (price * feeRate) - (price * taxRate);
-      calculatedMargin = cost > 0 ? (profit / cost) * 100 : 0;
-    } else {
-      const taxRate = (parseFloat(taxaPlataforma) || 0) / 100;
-      profit = price - cost - (price * taxRate) - (price * TAX_RATE);
-      calculatedMargin = cost > 0 ? (profit / cost) * 100 : 0;
+    // Taxa (comissão) por marketplace
+    if (marketplace === "mercadolivre") {
+      taxa = price * (LISTING_FEES[listingType] / 100);
+    } else if (marketplace === "amazon") {
+      taxa = price * 0.11;
+    } else if (marketplace === "shopee") {
+      taxa = shopeeFee(price);
+    } else if (marketplace === "tiktok") {
+      taxa = price * 0.06 + 4;
+    } else if (marketplace === "magalu") {
+      taxa = price * 0.14 + 5;
     }
+
+    // Frete por marketplace
+    if (marketplace === "mercadolivre" && price >= 79) {
+      shipping = estimateShipping(price, peso) * (1 - descontoFrete / 100);
+    } else if (marketplace === "amazon") {
+      shipping = estimateAmazonShipping(price, peso) * (1 - descontoFrete / 100);
+    } else if (marketplace === "tiktok") {
+      shipping = price * 0.06 * (1 - descontoFrete / 100);
+    } else if (marketplace === "magalu") {
+      shipping = estimateMagaluShipping(peso, MAGALU_TIER_DISCOUNT[magaluTier]) * (1 - descontoFrete / 100);
+    }
+
+    const imposto = price * TAX_RATE;
+    const profit = price - taxa - shipping - imposto - cost;
+    const calculatedMargin = cost > 0 ? (profit / cost) * 100 : 0;
 
     return {
       valorFinal: price,
       lucroPorVenda: profit,
+      taxa,
       frete: shipping,
+      imposto,
       margemCalculada: calculatedMargin,
     };
-  }, [precoVenda, desconto, descontoFrete, custoProduto, custoOpUnit, taxaPlataforma, isML, listingType, pesoGramas]);
+  }, [precoVenda, desconto, descontoFrete, custoProduto, custoOpUnit, marketplace, isML, listingType, pesoGramas, magaluTier]);
 
   const buscarProduto = async () => {
     if (!codigoProduto.trim()) return;
@@ -443,7 +550,7 @@ const MarketplaceCalculator = () => {
             </div>
           </div>
 
-          {isML && (
+          {hasFrete && (
             <div className="space-y-2 mb-6">
               <label className={labelClass}>Desconto no Frete (%)</label>
               <input
@@ -456,6 +563,24 @@ const MarketplaceCalculator = () => {
                 placeholder="0,0"
                 className={inputClass}
               />
+            </div>
+          )}
+
+          {marketplace === "magalu" && (
+            <div className="space-y-2 mb-6">
+              <label className={labelClass}>Reputação Magalu</label>
+              <div className="relative">
+                <select
+                  value={magaluTier}
+                  onChange={(e) => setMagaluTier(e.target.value as MagaluTier)}
+                  className={selectClass}
+                >
+                  {Object.entries(MAGALU_TIER_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+                <ChevronIcon />
+              </div>
             </div>
           )}
 
@@ -559,18 +684,16 @@ const MarketplaceCalculator = () => {
             <ResultRow label="Desconto" value={`${desconto}%`} />
             <ResultRow label="Quantidade" value={String(quantidade)} />
 
-            {isML ? (
+            {marketplace && (
               <>
-                <ResultRow label="Tipo de Anúncio" value={LISTING_LABELS[listingType]} />
-                <ResultRow label="Imposto" value="21%" />
+                {isML && <ResultRow label="Tipo de Anúncio" value={LISTING_LABELS[listingType]} />}
+                <ResultRow label="Taxa da Plataforma" value={effectiveTaxaLabel} />
+                <ResultRow label="Taxa (R$)" value={fmt(results.taxa)} />
+                <ResultRow label="Imposto (21%)" value={fmt(results.imposto)} />
                 <ResultRow label="Peso" value={`${pesoGramas}g`} />
-                <ResultRow label="Desconto no Frete" value={`${descontoFrete}%`} />
-                <ResultRow label="Custo de Frete (Estimado)" value={fmt(results.frete)} />
-              </>
-            ) : (
-              <>
-                <ResultRow label="Taxa da Plataforma" value={`${effectiveTaxa}%`} />
-                <ResultRow label="Imposto" value="21%" />
+                {hasFrete && <ResultRow label="Desconto no Frete" value={`${descontoFrete}%`} />}
+                {marketplace === "magalu" && <ResultRow label="Reputação" value={MAGALU_TIER_LABELS[magaluTier]} />}
+                {hasFrete && <ResultRow label="Custo de Frete (Estimado)" value={fmt(results.frete)} />}
               </>
             )}
 

@@ -13,18 +13,22 @@ interface Product {
   peso: number;
 }
 
-type Marketplace = "mercadolivre" | "amazon" | "shopee";
+type Marketplace = "mercadolivre" | "amazon" | "shopee" | "tiktok" | "magalu";
 
 const MARKETPLACE_LABELS: Record<Marketplace, string> = {
   mercadolivre: "Mercado Livre",
   amazon: "Amazon",
   shopee: "Shopee",
+  tiktok: "TikTok",
+  magalu: "Magalu",
 };
 
 const MARKETPLACE_FEES: Record<Marketplace, number> = {
   mercadolivre: 16.5,
   amazon: 11,
   shopee: 0,
+  tiktok: 6,
+  magalu: 14,
 };
 
 function shopeeFee(price: number): number {
@@ -67,6 +71,36 @@ function amazonPriceColIndex(price: number): number {
   if (price < 150)   return 5;
   if (price < 200)   return 6;
   return 7;
+}
+
+// ── Magalu shipping table (base costs = <92% tier, sem desconto) ─────────
+const MAGALU_SHIPPING_TABLE: { max_weight_g: number; base: number }[] = [
+  { max_weight_g: 500,   base: 35.90 },
+  { max_weight_g: 1000,  base: 40.90 },
+  { max_weight_g: 2000,  base: 42.90 },
+  { max_weight_g: 5000,  base: 50.90 },
+  { max_weight_g: 9000,  base: 77.90 },
+  { max_weight_g: 13000, base: 98.90 },
+  { max_weight_g: 17000, base: 111.90 },
+  { max_weight_g: 23000, base: 134.90 },
+  { max_weight_g: 30000, base: 148.90 },
+  { max_weight_g: 40000, base: 159.90 },
+  { max_weight_g: 50000, base: 189.90 },
+];
+
+type MagaluTier = "base" | "silver" | "gold" | "fulfillment";
+const MAGALU_TIER_LABELS: Record<MagaluTier, string> = {
+  base: "<92% (sem desconto)",
+  silver: "92–97% (25% desc.)",
+  gold: ">97% (50% desc.)",
+  fulfillment: "Fulfillment (75% desc.)",
+};
+const MAGALU_TIER_DISCOUNT: Record<MagaluTier, number> = { base: 0, silver: 0.25, gold: 0.50, fulfillment: 0.75 };
+
+function estimateMagaluShipping(weightGrams: number, tierDiscount: number): number {
+  const row = MAGALU_SHIPPING_TABLE.find((r) => weightGrams <= r.max_weight_g)
+    ?? MAGALU_SHIPPING_TABLE[MAGALU_SHIPPING_TABLE.length - 1];
+  return row.base * (1 - tierDiscount);
 }
 
 function estimateAmazonShipping(price: number, weightGrams: number): number {
@@ -131,6 +165,18 @@ function buildFreteAmazonSheet(descFreteRate: number): XLSX.WorkSheet {
     [],
     ["Adic./kg", ...AMAZON_ADDITIONAL_PER_KG.map((c) => c ?? 0)],
     [],
+    ["Desc. Frete", descFreteRate],
+  ];
+  return XLSX.utils.aoa_to_sheet(data);
+}
+
+function buildFreteMagaluSheet(tierDiscount: number, descFreteRate: number): XLSX.WorkSheet {
+  const reversed = [...MAGALU_SHIPPING_TABLE].reverse(); // descending for MATCH -1
+  const data: (string | number)[][] = [
+    ["Peso (g)", "Base (R$)"],
+    ...reversed.map((r) => [r.max_weight_g, r.base]),
+    [],
+    ["Desc. Tier", tierDiscount],
     ["Desc. Frete", descFreteRate],
   ];
   return XLSX.utils.aoa_to_sheet(data);
@@ -218,6 +264,7 @@ const ProductsTable = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [marketplace, setMarketplace] = useState<Marketplace>("mercadolivre");
   const [descontoFrete, setDescontoFrete] = useState(0);
+  const [magaluTier, setMagaluTier] = useState<MagaluTier>("silver");
   const [currentPage, setCurrentPage] = useState(1);
 
   const effectiveFeeRate = useMemo(() => {
@@ -227,19 +274,32 @@ const ProductsTable = () => {
     return MARKETPLACE_FEES[marketplace] / 100;
   }, [marketplace]);
 
+  const TIKTOK_FIXED_FEE = 4;
+  const MAGALU_FIXED_FEE = 5;
+
   const taxRate = 0.21;
 
   const getCalculatedValues = useCallback(
     (product: Product) => {
       const recebimento = product.precoFinal * (1 - product.percentualDesconto / 100);
-      const taxa = marketplace === "shopee" ? shopeeFee(recebimento) : recebimento * effectiveFeeRate;
+      const taxa = marketplace === "shopee"
+        ? shopeeFee(recebimento)
+        : marketplace === "tiktok"
+          ? recebimento * effectiveFeeRate + TIKTOK_FIXED_FEE
+          : marketplace === "magalu"
+            ? recebimento * effectiveFeeRate + MAGALU_FIXED_FEE
+            : recebimento * effectiveFeeRate;
 
       const freteBase =
         marketplace === "mercadolivre" && recebimento >= 79
           ? estimateShipping(recebimento, product.peso)
           : marketplace === "amazon"
             ? estimateAmazonShipping(recebimento, product.peso)
-            : 0;
+            : marketplace === "tiktok"
+              ? recebimento * 0.06
+              : marketplace === "magalu"
+                ? estimateMagaluShipping(product.peso, MAGALU_TIER_DISCOUNT[magaluTier])
+                : 0;
       const frete = freteBase * (1 - descontoFrete / 100);
 
       const imposto = recebimento * taxRate;
@@ -254,7 +314,7 @@ const ProductsTable = () => {
 
       return { recebimento, taxa, frete, imposto, custoReal, lucro, margem, margemComImposto };
     },
-    [effectiveFeeRate, marketplace, taxRate, custoOp, descontoFrete]
+    [effectiveFeeRate, marketplace, taxRate, custoOp, descontoFrete, magaluTier]
   );
 
   const updateProduct = useCallback((codigo: string, updates: Partial<Product>) => {
@@ -320,7 +380,7 @@ const ProductsTable = () => {
   const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
   const exportToExcel = () => {
-    const showFrete = marketplace === "mercadolivre" || marketplace === "amazon";
+    const showFrete = marketplace !== "shopee";
     const headers = [
       "Código", "Descrição", "% Desc", "Preço Final", "Preço c/ Desc",
       `Taxa (${MARKETPLACE_LABELS[marketplace]})`,
@@ -380,6 +440,10 @@ const ProductsTable = () => {
         ws[`${colTaxa}${r}`] = { t: 'n', v: taxaVal, f: `${colPrecoDesc}${r}*0.165`, z: numFmt2 };
       } else if (marketplace === "amazon") {
         ws[`${colTaxa}${r}`] = { t: 'n', v: taxaVal, f: `${colPrecoDesc}${r}*0.11`, z: numFmt2 };
+      } else if (marketplace === "tiktok") {
+        ws[`${colTaxa}${r}`] = { t: 'n', v: taxaVal, f: `${colPrecoDesc}${r}*0.06+4`, z: numFmt2 };
+      } else if (marketplace === "magalu") {
+        ws[`${colTaxa}${r}`] = { t: 'n', v: taxaVal, f: `${colPrecoDesc}${r}*0.14+5`, z: numFmt2 };
       } else {
         // Shopee: faixas escalonadas
         ws[`${colTaxa}${r}`] = {
@@ -405,7 +469,7 @@ const ProductsTable = () => {
             f: `IF(${colPrecoDesc}${r}<79,0,IFERROR(INDEX(${tbl},MATCH(${colPeso}${r}/1000,${wCol},-1),MATCH(${colPrecoDesc}${r},${pCol},1)),INDEX(${fallback},1,MATCH(${colPrecoDesc}${r},${pCol},1))))*(1-${descCell})`,
             z: numFmt2,
           };
-        } else {
+        } else if (marketplace === "amazon") {
           // Amazon: lookup + adicional por kg acima de 10kg (17 rows desc, 8 price cols)
           const tbl = "FreteAmazon!$B$2:$I$18";
           const wCol = "FreteAmazon!$A$2:$A$18";
@@ -417,6 +481,24 @@ const ProductsTable = () => {
           ws[`${colFrete}${r}`] = {
             t: 'n', v: freteVal,
             f: `IF(${colPeso}${r}<=10000,IFERROR(INDEX(${tbl},MATCH(${colPeso}${r},${wCol},-1),${pm}),INDEX(${baseRow},1,${pm})),INDEX(${baseRow},1,${pm})+INDEX(${addRow},1,${pm})*ROUNDUP((${colPeso}${r}-10000)/1000,0))*(1-${descCell})`,
+            z: numFmt2,
+          };
+        } else if (marketplace === "tiktok") {
+          // TikTok: frete = 6% do preço com desconto
+          ws[`${colFrete}${r}`] = {
+            t: 'n', v: freteVal,
+            f: `${colPrecoDesc}${r}*0.06`,
+            z: numFmt2,
+          };
+        } else if (marketplace === "magalu") {
+          // Magalu: lookup na tabela de frete com desconto de tier
+          const tbl = "FreteMagalu!$B$2:$B$13";
+          const wCol = "FreteMagalu!$A$2:$A$13";
+          const tierCell = "FreteMagalu!$B$15";
+          const descCell = "FreteMagalu!$B$16";
+          ws[`${colFrete}${r}`] = {
+            t: 'n', v: freteVal,
+            f: `IFERROR(INDEX(${tbl},MATCH(${colPeso}${r},${wCol},-1)),INDEX(${tbl},1,MATCH(${colPeso}${r},${wCol},-1)))*(1-${tierCell})*(1-${descCell})`,
             z: numFmt2,
           };
         }
@@ -465,6 +547,8 @@ const ProductsTable = () => {
       XLSX.utils.book_append_sheet(wb, buildFreteMLSheet(descontoFrete / 100), "FreteML");
     } else if (marketplace === "amazon") {
       XLSX.utils.book_append_sheet(wb, buildFreteAmazonSheet(descontoFrete / 100), "FreteAmazon");
+    } else if (marketplace === "magalu") {
+      XLSX.utils.book_append_sheet(wb, buildFreteMagaluSheet(MAGALU_TIER_DISCOUNT[magaluTier], descontoFrete / 100), "FreteMagalu");
     }
     if (showFrete) {
       if (!wb.Workbook) wb.Workbook = {};
@@ -481,7 +565,11 @@ const ProductsTable = () => {
       ? "Taxa ML (Premium 16,5%)"
       : marketplace === "amazon"
         ? "Amazon (11%)"
-        : "Shopee (14%~20% + fixo)";
+        : marketplace === "tiktok"
+          ? "TikTok (6% + R$4)"
+          : marketplace === "magalu"
+            ? "Magalu (14% + R$5)"
+            : "Shopee (14%~20% + fixo)";
 
   return (
     <div className="bg-card rounded-2xl p-8 shadow-sm">
@@ -530,6 +618,27 @@ const ProductsTable = () => {
               <ChevronIcon />
             </div>
           </div>
+
+          {/* Magalu Tier (só aparece quando Magalu está selecionado) */}
+          {marketplace === "magalu" && (
+            <div>
+              <label className={labelClass}>Reputação Magalu</label>
+              <div className="relative">
+                <select
+                  value={magaluTier}
+                  onChange={(e) => setMagaluTier(e.target.value as MagaluTier)}
+                  className={selectClass}
+                >
+                  {Object.entries(MAGALU_TIER_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronIcon />
+              </div>
+            </div>
+          )}
 
           {/* Valor de Participação */}
           <div>
@@ -580,7 +689,7 @@ const ProductsTable = () => {
                 <th className="px-2 py-2 text-right font-semibold text-foreground uppercase tracking-wider">Preço Final</th>
                 <th className="px-2 py-2 text-right font-semibold text-muted-foreground uppercase tracking-wider">Preço</th>
                 <th className="px-2 py-2 text-right font-semibold text-muted-foreground uppercase tracking-wider">{taxaLabel}</th>
-                {(marketplace === "mercadolivre" || marketplace === "amazon") && (
+                {marketplace !== "shopee" && (
                   <th className="px-2 py-2 text-right font-semibold text-muted-foreground uppercase tracking-wider">Frete (est.)</th>
                 )}
                 <th className="px-2 py-2 text-right font-semibold text-muted-foreground uppercase tracking-wider">Imposto</th>
@@ -622,7 +731,7 @@ const ProductsTable = () => {
                     </td>
                     <td className="px-2 py-2 text-right text-muted-foreground">{fmt(values.recebimento)}</td>
                     <td className="px-2 py-2 text-right text-muted-foreground">{fmt(values.taxa)}</td>
-                    {(marketplace === "mercadolivre" || marketplace === "amazon") && (
+                    {marketplace !== "shopee" && (
                       <td className="px-2 py-2 text-right text-muted-foreground">{fmt(values.frete)}</td>
                     )}
                     <td className="px-2 py-2 text-right text-muted-foreground">{fmt(values.imposto)}</td>
@@ -702,7 +811,7 @@ const ProductsTable = () => {
                     <p className="text-sm text-foreground">{fmt(values.taxa)}</p>
                   </div>
 
-                  {(marketplace === "mercadolivre" || marketplace === "amazon") && (
+                  {marketplace !== "shopee" && (
                     <div>
                       <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Frete (est.)</p>
                       <p className="text-sm text-foreground">{fmt(values.frete)}</p>

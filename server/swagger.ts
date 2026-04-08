@@ -23,6 +23,7 @@ const spec: object = {
     { name: "Calculadora — Ecommerce", description: "Produtos, simulação ML e custo operacional" },
     { name: "Disparo em Massa", description: "WhatsApp bulk messaging via Meta + Chatwoot" },
     { name: "Fechamento Estoque", description: "Snapshot mensal de estoque, vendas e recebimentos" },
+    { name: "AI Assistant", description: "Chatbot de coleta de requisitos e geração de PRD" },
   ],
 
   paths: {
@@ -601,6 +602,60 @@ const spec: object = {
             content: { "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/FechamentoRow" } } } },
           },
         },
+      },
+    },
+
+    // ══════════════════════════════════════════════════════════════════════════
+    //  AI ASSISTANT
+    // ══════════════════════════════════════════════════════════════════════════
+    "/ai-assistant/chat": {
+      post: {
+        tags: ["AI Assistant"],
+        summary: "Enviar mensagem ou iniciar nova conversa",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  conversation_id: { type: "string", nullable: true, description: "Null para iniciar nova conversa" },
+                  message: { type: "string" },
+                  usuario: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: "Resposta do assistente com estado da conversa" },
+        },
+      },
+    },
+    "/ai-assistant/restart": {
+      post: {
+        tags: ["AI Assistant"],
+        summary: "Reiniciar conversa",
+        requestBody: {
+          content: { "application/json": { schema: { type: "object", properties: { conversation_id: { type: "string" }, usuario: { type: "string" } } } } },
+        },
+        responses: { 200: { description: "Nova conversa iniciada" } },
+      },
+    },
+    "/ai-assistant/conversation/{id}": {
+      get: {
+        tags: ["AI Assistant"],
+        summary: "Obter estado de uma conversa",
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        responses: { 200: { description: "Estado da conversa" }, 404: { description: "Não encontrada" } },
+      },
+    },
+    "/ai-assistant/export/{id}": {
+      get: {
+        tags: ["AI Assistant"],
+        summary: "Exportar PRD como JSON",
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        responses: { 200: { description: "Documento exportado" }, 400: { description: "Conversa incompleta" } },
       },
     },
   },

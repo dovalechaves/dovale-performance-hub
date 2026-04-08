@@ -10,6 +10,7 @@ import representantesRouter from "./routes/representantes";
 import authRouter from "./routes/auth";
 import ecommerceRouter from "./routes/ecommerce";
 import disparoRouter, { setSocketIO } from "./routes/disparo";
+import aiAssistantRouter from "./routes/ai-assistant";
 import { startSyncJob } from "./jobs/syncJob";
 import { startStockSnapshotJob, runStockSnapshotManual, getStockSnapshotStatus } from "./jobs/stockSnapshotJob";
 import { setupSwagger } from "./swagger";
@@ -27,6 +28,7 @@ app.use("/api/sync",            syncRouter);
 app.use("/api/representantes",  representantesRouter);
 app.use("/api/ecommerce",       ecommerceRouter);
 app.use("/api/disparo",         disparoRouter);
+app.use("/api/ai-assistant",    aiAssistantRouter);
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });

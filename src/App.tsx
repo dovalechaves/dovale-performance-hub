@@ -12,6 +12,7 @@ import Calculadora from "./pages/Calculadora.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import Disparo from "./pages/Disparo.tsx";
 import Fechamento from "./pages/Fechamento.tsx";
+import AiAssistant from "./pages/AiAssistant.tsx";
 
 const queryClient = new QueryClient();
 
@@ -54,6 +55,14 @@ function FechamentoRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function AssistenteRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.canAccessHub) return <Navigate to="/login" replace />;
+  if (!user.apps.assistente.canAccess) return <Navigate to="/hub" replace />;
+  return <>{children}</>;
+}
+
 function AdminManagerRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
@@ -79,6 +88,7 @@ const App = () => (
             <Route path="/calculadora" element={<CalculadoraRoute><Calculadora /></CalculadoraRoute>} />
             <Route path="/disparo" element={<DisparoRoute><Disparo /></DisparoRoute>} />
             <Route path="/fechamento" element={<FechamentoRoute><Fechamento /></FechamentoRoute>} />
+            <Route path="/ai-assistant" element={<AssistenteRoute><AiAssistant /></AssistenteRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

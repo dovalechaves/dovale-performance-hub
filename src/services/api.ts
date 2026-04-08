@@ -71,6 +71,12 @@ export interface AuthManagedUser {
       loja: string | null;
       can_access: boolean;
     };
+    assistente: {
+      app_key: "assistente";
+      role: "admin" | "manager" | "viewer";
+      loja: string | null;
+      can_access: boolean;
+    };
   };
 }
 

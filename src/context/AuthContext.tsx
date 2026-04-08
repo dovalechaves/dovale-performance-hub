@@ -31,6 +31,11 @@ interface AuthUser {
       role: Role;
       loja: string | null;
     };
+    assistente: {
+      canAccess: boolean;
+      role: Role;
+      loja: string | null;
+    };
   };
 }
 
@@ -50,6 +55,7 @@ interface AuthContextValue {
       calculadora?: { role?: string; loja?: string | null; can_access?: boolean };
       disparo?: { role?: string; loja?: string | null; can_access?: boolean };
       fechamento?: { role?: string; loja?: string | null; can_access?: boolean };
+      assistente?: { role?: string; loja?: string | null; can_access?: boolean };
     }
   ) => void;
   logout: () => void;
@@ -70,6 +76,7 @@ function buildUser(
     calculadora?: { role?: string; loja?: string | null; can_access?: boolean };
     disparo?: { role?: string; loja?: string | null; can_access?: boolean };
     fechamento?: { role?: string; loja?: string | null; can_access?: boolean };
+    assistente?: { role?: string; loja?: string | null; can_access?: boolean };
   }
 ): AuthUser {
   const dashboardRole = resolveRole(usuario, apiApps?.dashboard?.role ?? apiRole);
@@ -82,6 +89,8 @@ function buildUser(
   const fechamentoRole = resolveRole(usuario, apiApps?.fechamento?.role ?? apiRole);
   const fechamentoAccess = apiApps?.fechamento?.can_access ?? false;
   const fechamentoLoja = apiApps?.fechamento?.loja ?? (fechamentoRole === "manager" ? (loja ?? null) : null);
+  const assistenteRole = resolveRole(usuario, apiApps?.assistente?.role ?? apiRole);
+  const assistenteAccess = apiApps?.assistente?.can_access ?? false;
 
   return {
     usuario,
@@ -113,6 +122,11 @@ function buildUser(
         role: fechamentoRole,
         loja: fechamentoLoja,
       },
+      assistente: {
+        canAccess: assistenteAccess,
+        role: assistenteRole,
+        loja: null,
+      },
     },
   };
 }
@@ -133,6 +147,8 @@ function loadFromStorage(): AuthUser | null {
     const fechamentoRole = (parsed.apps as any)?.fechamento?.role ?? parsed.role;
     const fechamentoAccess = (parsed.apps as any)?.fechamento?.canAccess ?? false;
     const fechamentoLoja = (parsed.apps as any)?.fechamento?.loja ?? null;
+    const assistenteRole = (parsed.apps as any)?.assistente?.role ?? parsed.role;
+    const assistenteAccess = (parsed.apps as any)?.assistente?.canAccess ?? false;
 
     return {
       usuario: parsed.usuario,
@@ -164,6 +180,11 @@ function loadFromStorage(): AuthUser | null {
           role: fechamentoRole,
           loja: fechamentoLoja,
         },
+        assistente: {
+          canAccess: assistenteAccess,
+          role: assistenteRole,
+          loja: null,
+        },
       },
     };
   } catch {
@@ -187,6 +208,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       calculadora?: { role?: string; loja?: string | null; can_access?: boolean };
       disparo?: { role?: string; loja?: string | null; can_access?: boolean };
       fechamento?: { role?: string; loja?: string | null; can_access?: boolean };
+      assistente?: { role?: string; loja?: string | null; can_access?: boolean };
     }
   ) => {
     const authUser = buildUser(usuario, displayName, token, apiRole, loja, canAccessDashboard, canAccessHub, apps);

@@ -1,0 +1,675 @@
+import { Router } from "express";
+import crypto from "crypto";
+import OpenAI from "openai";
+import sql from "mssql";
+import { getPool } from "../db/sqlserver";
+
+const router = Router();
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const TOTAL_STAGES = 8;
+const PRD_MARKER = "<<<PRD_START>>>";
+const PRD_MARKER_END = "<<<PRD_END>>>";
+
+const SYSTEM_PROMPT = `Você é o Assistente de Requisitos da Dovale, um chatbot interno que ajuda funcionários a montar documentos de requisitos (PRD).
+
+REGRAS:
+- Fale em português do Brasil, tom profissional mas amigável
+- Faça UMA pergunta por vez
+- Seja conversacional e adapte-se às respostas
+- Peça mais detalhes quando a resposta for vaga ou curta
+- NÃO pule etapas, colete informação suficiente antes de avançar
+
+FLUXO DE COLETA (8 etapas):
+1. Objetivo: O que quer melhorar, automatizar ou criar?
+2. Contexto: Área, departamento, sistema, usuários envolvidos
+3. Problema atual: Dificuldades, gargalos, dores
+4. Processo atual: Passo a passo de como funciona hoje
+5. Solução desejada: Como deveria funcionar
+6. Regras de negócio: Validações, permissões, exceções
+7. Integrações: WhatsApp, APIs, banco de dados, ERP, etc
+8. Impacto e urgência: Pessoas afetadas, prejuízo, prazo
+
+Após cada resposta do usuário, avalie internamente em qual etapa está (1-8) e inclua no início da sua resposta a tag: [STAGE:N] onde N é a etapa atual (1-8).
+
+Quando tiver coletado TODAS as informações, gere o PRD completo entre os marcadores ${PRD_MARKER} e ${PRD_MARKER_END}.
+
+O PRD deve seguir EXATAMENTE este formato:
+${PRD_MARKER}
+# Documento de Requisitos
+
+## 📌 Problema
+(descrição)
+
+## 🎯 Objetivo
+(descrição)
+
+## 📍 Contexto
+(descrição)
+
+## 🔄 Processo Atual
+(passo a passo)
+
+## 💡 Solução Proposta
+(descrição detalhada)
+
+## 📋 Requisitos
+### Funcionais
+- (lista)
+### Não Funcionais
+- (lista)
+
+## 📏 Regras de Negócio
+(lista)
+
+## 🔌 Integrações
+(lista)
+
+## ✅ Critérios de Aceitação
+- [ ] (lista)
+
+## 🚀 Prioridade & Impacto
+(descrição)
+${PRD_MARKER_END}
+
+Comece se apresentando e fazendo a primeira pergunta.`;
+
+// ── Conversation store (in-memory, keyed by conversation ID) ────────────────
+interface Message {
+  role: "user" | "bot";
+  content: string;
+  timestamp: string;
+}
+
+interface Conversation {
+  id: string;
+  usuario: string;
+  stage: number;
+  openaiHistory: { role: "system" | "user" | "assistant"; content: string }[];
+  messages: Message[];
+  completed: boolean;
+  prd: string | null;
+  createdAt: string;
+}
+
+const conversations = new Map<string, Conversation>();
+
+setInterval(() => {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  for (const [id, conv] of conversations) {
+    if (new Date(conv.createdAt).getTime() < cutoff) conversations.delete(id);
+  }
+}, 60 * 60 * 1000);
+
+function now(): string {
+  return new Date().toISOString();
+}
+
+function parseStage(text: string): { stage: number; clean: string } {
+  const match = text.match(/\[STAGE:(\d+)\]\s*/);
+  if (match) {
+    return { stage: parseInt(match[1], 10), clean: text.replace(match[0], "").trim() };
+  }
+  return { stage: 0, clean: text };
+}
+
+function extractPRD(text: string): { prd: string | null; displayText: string } {
+  const startIdx = text.indexOf(PRD_MARKER);
+  const endIdx = text.indexOf(PRD_MARKER_END);
+  if (startIdx !== -1 && endIdx !== -1) {
+    const prd = text.substring(startIdx + PRD_MARKER.length, endIdx).trim();
+    const before = text.substring(0, startIdx).trim();
+    const after = text.substring(endIdx + PRD_MARKER_END.length).trim();
+    const display = [before, prd, after].filter(Boolean).join("\n\n");
+    return { prd, displayText: display };
+  }
+  return { prd: null, displayText: text };
+}
+
+async function callOpenAI(history: Conversation["openaiHistory"]): Promise<string> {
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: history,
+    temperature: 0.7,
+    max_tokens: 4096,
+  });
+  return response.choices[0]?.message?.content ?? "Desculpe, não consegui processar. Tente novamente.";
+}
+
+// ── Routes ──────────────────────────────────────────────────────────────────
+
+router.post("/chat", async (req, res) => {
+  try {
+    const { conversation_id, message, usuario } = req.body ?? {};
+
+    if (!conversation_id) {
+      const id = crypto.randomUUID();
+      const history: Conversation["openaiHistory"] = [
+        { role: "system", content: SYSTEM_PROMPT },
+      ];
+      const aiReply = await callOpenAI(history);
+      const { stage, clean } = parseStage(aiReply);
+
+      history.push({ role: "assistant", content: aiReply });
+
+      const conv: Conversation = {
+        id,
+        usuario: usuario || "anonymous",
+        stage: Math.max(stage, 1),
+        openaiHistory: history,
+        messages: [{ role: "bot", content: clean, timestamp: now() }],
+        completed: false,
+        prd: null,
+        createdAt: now(),
+      };
+      conversations.set(id, conv);
+      return res.json({
+        conversation_id: id,
+        messages: conv.messages,
+        completed: false,
+        prd: null,
+        stage: conv.stage,
+        totalStages: TOTAL_STAGES,
+      });
+    }
+
+    const conv = conversations.get(conversation_id);
+    if (!conv) {
+      return res.status(404).json({ error: "Conversa não encontrada. Inicie uma nova." });
+    }
+    if (conv.completed) {
+      return res.json({
+        conversation_id: conv.id,
+        messages: conv.messages,
+        completed: true,
+        prd: conv.prd,
+        stage: conv.stage,
+        totalStages: TOTAL_STAGES,
+      });
+    }
+
+    const userMsg = String(message || "").trim();
+    if (!userMsg) {
+      return res.status(400).json({ error: "Mensagem não pode ser vazia." });
+    }
+
+    conv.messages.push({ role: "user", content: userMsg, timestamp: now() });
+    conv.openaiHistory.push({ role: "user", content: userMsg });
+
+    const aiReply = await callOpenAI(conv.openaiHistory);
+    conv.openaiHistory.push({ role: "assistant", content: aiReply });
+
+    const { stage, clean } = parseStage(aiReply);
+    const { prd, displayText } = extractPRD(clean);
+
+    if (stage > 0) conv.stage = stage;
+
+    if (prd) {
+      conv.completed = true;
+      conv.prd = prd;
+      conv.stage = TOTAL_STAGES;
+    }
+
+    conv.messages.push({ role: "bot", content: displayText, timestamp: now() });
+
+    return res.json({
+      conversation_id: conv.id,
+      messages: conv.messages,
+      completed: conv.completed,
+      prd: conv.prd,
+      stage: conv.stage,
+      totalStages: TOTAL_STAGES,
+    });
+  } catch (err: any) {
+    console.error("[ai-assistant] OpenAI error:", err?.message || err);
+    return res.status(500).json({ error: "Erro ao processar com IA. Tente novamente." });
+  }
+});
+
+router.post("/restart", async (req, res) => {
+  try {
+    const { conversation_id } = req.body ?? {};
+    if (conversation_id) conversations.delete(conversation_id);
+
+    const id = crypto.randomUUID();
+    const history: Conversation["openaiHistory"] = [
+      { role: "system", content: SYSTEM_PROMPT },
+    ];
+    const aiReply = await callOpenAI(history);
+    const { stage, clean } = parseStage(aiReply);
+    history.push({ role: "assistant", content: aiReply });
+
+    const conv: Conversation = {
+      id,
+      usuario: req.body?.usuario || "anonymous",
+      stage: Math.max(stage, 1),
+      openaiHistory: history,
+      messages: [{ role: "bot", content: clean, timestamp: now() }],
+      completed: false,
+      prd: null,
+      createdAt: now(),
+    };
+    conversations.set(id, conv);
+
+    res.json({
+      conversation_id: id,
+      messages: conv.messages,
+      completed: false,
+      prd: null,
+      stage: conv.stage,
+      totalStages: TOTAL_STAGES,
+    });
+  } catch (err: any) {
+    console.error("[ai-assistant] OpenAI error:", err?.message || err);
+    res.status(500).json({ error: "Erro ao iniciar conversa." });
+  }
+});
+
+router.get("/conversation/:id", (req, res) => {
+  const conv = conversations.get(req.params.id);
+  if (!conv) return res.status(404).json({ error: "Conversa não encontrada." });
+
+  res.json({
+    conversation_id: conv.id,
+    messages: conv.messages,
+    completed: conv.completed,
+    prd: conv.prd,
+    stage: conv.stage,
+    totalStages: TOTAL_STAGES,
+  });
+});
+
+router.get("/export/:id", (req, res) => {
+  const conv = conversations.get(req.params.id);
+  if (!conv) return res.status(404).json({ error: "Conversa não encontrada." });
+  if (!conv.completed) return res.status(400).json({ error: "Conversa ainda não foi concluída." });
+
+  res.json({
+    conversation_id: conv.id,
+    usuario: conv.usuario,
+    created_at: conv.createdAt,
+    prd: conv.prd,
+  });
+});
+
+// ── Project Workflow ────────────────────────────────────────────────────────
+
+const STATUS_TRANSITIONS: Record<string, string[]> = {
+  em_analise_ti: ["feedback_ti", "aprovado"],
+  feedback_ti: ["em_analise_ti"],
+};
+
+async function ensureProjectTables(): Promise<void> {
+  const pool = await getPool();
+  await pool.request().query(`
+    IF OBJECT_ID('dbo.AI_REQUESTS', 'U') IS NULL
+    CREATE TABLE dbo.AI_REQUESTS (
+      id INT IDENTITY(1,1) PRIMARY KEY,
+      conversation_id VARCHAR(100),
+      usuario VARCHAR(100) NOT NULL,
+      display_name NVARCHAR(200),
+      titulo NVARCHAR(500),
+      status VARCHAR(50) DEFAULT 'em_analise_ti',
+      prd_content NVARCHAR(MAX),
+      prazo_entrega DATE NULL,
+      aprovado_por VARCHAR(100) NULL,
+      aprovado_em DATETIME NULL,
+      created_at DATETIME DEFAULT GETDATE(),
+      updated_at DATETIME DEFAULT GETDATE(),
+      trello_card_id VARCHAR(100) NULL,
+      trello_url VARCHAR(500) NULL
+    )
+  `);
+  // Add columns if table already exists
+  await pool.request().query(`
+    IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.AI_REQUESTS') AND name = 'trello_card_id')
+    ALTER TABLE dbo.AI_REQUESTS ADD trello_card_id VARCHAR(100) NULL, trello_url VARCHAR(500) NULL
+  `);
+  await pool.request().query(`
+    IF OBJECT_ID('dbo.AI_REQUEST_COMMENTS', 'U') IS NULL
+    CREATE TABLE dbo.AI_REQUEST_COMMENTS (
+      id INT IDENTITY(1,1) PRIMARY KEY,
+      request_id INT NOT NULL,
+      usuario VARCHAR(100) NOT NULL,
+      display_name NVARCHAR(200),
+      content NVARCHAR(MAX),
+      tipo VARCHAR(50) DEFAULT 'comentario',
+      created_at DATETIME DEFAULT GETDATE(),
+      FOREIGN KEY (request_id) REFERENCES dbo.AI_REQUESTS(id)
+    )
+  `);
+}
+
+ensureProjectTables().catch((err) =>
+  console.error("[ai-assistant] DB table setup error:", err?.message)
+);
+
+// ── Trello Integration ──────────────────────────────────────────────────────
+
+function parsePrdChecklists(prd: string): { name: string; items: string[] }[] {
+  const lines = prd.split("\n");
+  const checklists: { name: string; items: string[] }[] = [];
+  let currentSection = "";
+  let currentItems: string[] = [];
+
+  const flushSection = () => {
+    if (currentSection && currentItems.length > 0) {
+      checklists.push({ name: currentSection, items: [...currentItems] });
+    }
+    currentItems = [];
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("## ") || trimmed.startsWith("### ")) {
+      flushSection();
+      currentSection = trimmed.replace(/^#{2,3}\s*/, "").replace(/[📌🎯📍🔄💡📋📏🔌✅🚀]/g, "").trim();
+    } else if (trimmed.startsWith("- [ ] ") || trimmed.startsWith("- [x] ")) {
+      currentItems.push(trimmed.slice(6).trim());
+    } else if (trimmed.startsWith("- ") && currentSection) {
+      currentItems.push(trimmed.slice(2).trim());
+    }
+  }
+  flushSection();
+  return checklists;
+}
+
+async function trelloPost(path: string, params: Record<string, string>): Promise<any> {
+  const key = process.env.TRELLO_API_KEY!;
+  const token = process.env.TRELLO_TOKEN!;
+  const qs = new URLSearchParams({ key, token, ...params }).toString();
+  const resp = await fetch(`https://api.trello.com/1${path}?${qs}`, { method: "POST" });
+  if (!resp.ok) {
+    const errText = await resp.text();
+    console.error(`[ai-assistant] Trello POST ${path} error:`, resp.status, errText);
+    return null;
+  }
+  return resp.json();
+}
+
+async function createTrelloCard(proj: {
+  titulo: string;
+  display_name: string;
+  prd_content: string;
+  prazo_entrega?: string | null;
+}): Promise<{ id: string; url: string } | null> {
+  const key = process.env.TRELLO_API_KEY;
+  const token = process.env.TRELLO_TOKEN;
+  const listId = process.env.TRELLO_LIST_ID;
+  if (!key || !token || !listId) {
+    console.warn("[ai-assistant] Trello env vars not set, skipping card creation.");
+    return null;
+  }
+
+  const desc = `**Solicitante:** ${proj.display_name}\n\n---\n\n${proj.prd_content?.substring(0, 16000) || ""}`;
+  const params: Record<string, string> = {
+    key,
+    token,
+    idList: listId,
+    name: proj.titulo,
+    desc,
+    pos: "top",
+  };
+  if (proj.prazo_entrega) {
+    params.due = new Date(proj.prazo_entrega + "T12:00:00").toISOString();
+  }
+
+  const qs = new URLSearchParams(params).toString();
+  const resp = await fetch(`https://api.trello.com/1/cards?${qs}`, { method: "POST" });
+  if (!resp.ok) {
+    const errText = await resp.text();
+    console.error("[ai-assistant] Trello create card error:", resp.status, errText);
+    return null;
+  }
+  const card = await resp.json() as { id: string; shortUrl: string };
+  console.log("[ai-assistant] Trello card created:", card.shortUrl);
+
+  // Create checklists from PRD sections
+  const checklists = parsePrdChecklists(proj.prd_content || "");
+  for (const cl of checklists) {
+    const checklist = await trelloPost("/checklists", { idCard: card.id, name: cl.name });
+    if (checklist?.id) {
+      for (const item of cl.items) {
+        await trelloPost(`/checklists/${checklist.id}/checkItems`, { name: item });
+      }
+    }
+  }
+
+  return { id: card.id, url: card.shortUrl };
+}
+
+async function getTrelloCardStatus(cardId: string): Promise<{ list: string; board: string } | null> {
+  const key = process.env.TRELLO_API_KEY;
+  const token = process.env.TRELLO_TOKEN;
+  if (!key || !token || !cardId) return null;
+  try {
+    const qs = new URLSearchParams({ key, token, fields: "idList,name", list: "true", list_fields: "name" }).toString();
+    const resp = await fetch(`https://api.trello.com/1/cards/${cardId}?${qs}`);
+    if (!resp.ok) return null;
+    const data = await resp.json() as { list?: { name: string }; name?: string };
+    return { list: data.list?.name || "Desconhecida", board: "TI Dovale SJC-MG" };
+  } catch { return null; }
+}
+
+/** POST /projects — create project from approved conversation */
+router.post("/projects", async (req, res) => {
+  try {
+    const { conversation_id, usuario, display_name, titulo, prd_content } = req.body ?? {};
+    if (!usuario || !prd_content) {
+      return res.status(400).json({ error: "usuario e prd_content são obrigatórios." });
+    }
+    const pool = await getPool();
+    const result = await pool
+      .request()
+      .input("conversation_id", sql.VarChar(100), conversation_id || null)
+      .input("usuario", sql.VarChar(100), usuario)
+      .input("display_name", sql.NVarChar(200), display_name || usuario)
+      .input("titulo", sql.NVarChar(500), titulo || "Novo Requisito")
+      .input("prd_content", sql.NVarChar(sql.MAX), prd_content)
+      .query(`
+        INSERT INTO dbo.AI_REQUESTS (conversation_id, usuario, display_name, titulo, status, prd_content)
+        OUTPUT INSERTED.id
+        VALUES (@conversation_id, @usuario, @display_name, @titulo, 'em_analise_ti', @prd_content)
+      `);
+    const id = result.recordset[0]?.id;
+
+    await pool
+      .request()
+      .input("request_id", sql.Int, id)
+      .input("usuario", sql.VarChar(100), usuario)
+      .input("display_name", sql.NVarChar(200), display_name || usuario)
+      .input("content", sql.NVarChar(sql.MAX), "Projeto criado e enviado para análise do TI.")
+      .input("tipo", sql.VarChar(50), "sistema")
+      .query(`
+        INSERT INTO dbo.AI_REQUEST_COMMENTS (request_id, usuario, display_name, content, tipo)
+        VALUES (@request_id, @usuario, @display_name, @content, @tipo)
+      `);
+
+    res.json({ id, status: "em_analise_ti" });
+  } catch (err: any) {
+    console.error("[ai-assistant] Create project error:", err?.message);
+    res.status(500).json({ error: "Erro ao criar projeto." });
+  }
+});
+
+/** GET /projects — list projects (role=viewer → only own, admin/manager → all) */
+router.get("/projects", async (req, res) => {
+  try {
+    const { usuario, role } = req.query;
+    const pool = await getPool();
+    const request = pool.request();
+    let query = `
+      SELECT id, conversation_id, usuario, display_name, titulo, status,
+             prazo_entrega, aprovado_por, aprovado_em, created_at, updated_at
+      FROM dbo.AI_REQUESTS
+    `;
+    if (role === "viewer" && usuario) {
+      request.input("usuario", sql.VarChar(100), String(usuario));
+      query += ` WHERE usuario = @usuario`;
+    }
+    query += ` ORDER BY updated_at DESC`;
+    const result = await request.query(query);
+    res.json(result.recordset);
+  } catch (err: any) {
+    console.error("[ai-assistant] List projects error:", err?.message);
+    res.status(500).json({ error: "Erro ao listar projetos." });
+  }
+});
+
+/** GET /projects/:id — single project with comments */
+router.get("/projects/:id", async (req, res) => {
+  try {
+    const pool = await getPool();
+    const projectId = parseInt(req.params.id);
+    const [projRes, commRes] = await Promise.all([
+      pool.request().input("id", sql.Int, projectId)
+        .query(`SELECT * FROM dbo.AI_REQUESTS WHERE id = @id`),
+      pool.request().input("rid", sql.Int, projectId)
+        .query(`SELECT * FROM dbo.AI_REQUEST_COMMENTS WHERE request_id = @rid ORDER BY created_at ASC`),
+    ]);
+    if (projRes.recordset.length === 0) {
+      return res.status(404).json({ error: "Projeto não encontrado." });
+    }
+    const proj = projRes.recordset[0];
+    let trello_status: { list: string; board: string } | null = null;
+    if (proj.trello_card_id) {
+      trello_status = await getTrelloCardStatus(proj.trello_card_id);
+    }
+    res.json({ ...proj, trello_status, comments: commRes.recordset });
+  } catch (err: any) {
+    console.error("[ai-assistant] Get project error:", err?.message);
+    res.status(500).json({ error: "Erro ao buscar projeto." });
+  }
+});
+
+/** PATCH /projects/:id/status — change status with transition validation */
+router.patch("/projects/:id/status", async (req, res) => {
+  try {
+    const { status, usuario, display_name, comment, prazo_entrega } = req.body ?? {};
+    if (!status || !usuario) {
+      return res.status(400).json({ error: "status e usuario são obrigatórios." });
+    }
+    const pool = await getPool();
+    const projectId = parseInt(req.params.id);
+    const current = await pool.request().input("id", sql.Int, projectId)
+      .query(`SELECT status FROM dbo.AI_REQUESTS WHERE id = @id`);
+    if (current.recordset.length === 0) {
+      return res.status(404).json({ error: "Projeto não encontrado." });
+    }
+
+    const curStatus = current.recordset[0].status;
+    const allowed = STATUS_TRANSITIONS[curStatus];
+    if (!allowed || !allowed.includes(status)) {
+      return res.status(400).json({ error: `Transição de '${curStatus}' para '${status}' não permitida.` });
+    }
+
+    const upd = pool.request()
+      .input("id", sql.Int, projectId)
+      .input("status", sql.VarChar(50), status)
+      .input("updated_at", sql.DateTime, new Date());
+    let updQ = `UPDATE dbo.AI_REQUESTS SET status = @status, updated_at = @updated_at`;
+
+    if (status === "aprovado") {
+      upd.input("aprovado_por", sql.VarChar(100), usuario);
+      upd.input("aprovado_em", sql.DateTime, new Date());
+      updQ += `, aprovado_por = @aprovado_por, aprovado_em = @aprovado_em`;
+      if (prazo_entrega) {
+        upd.input("prazo_entrega", sql.Date, new Date(prazo_entrega + "T12:00:00"));
+        updQ += `, prazo_entrega = @prazo_entrega`;
+      }
+    }
+    updQ += ` WHERE id = @id`;
+    await upd.query(updQ);
+
+    const statusLabels: Record<string, string> = {
+      em_analise_ti: "Enviado para análise do TI",
+      feedback_ti: "TI enviou feedback",
+      aprovado: "Projeto aprovado" + (prazo_entrega ? ` — Prazo: ${prazo_entrega}` : ""),
+    };
+    const commentContent = comment
+      ? `**${statusLabels[status] || status}**\n\n${comment}`
+      : statusLabels[status] || `Status: ${status}`;
+
+    await pool.request()
+      .input("rid", sql.Int, projectId)
+      .input("usuario", sql.VarChar(100), usuario)
+      .input("display_name", sql.NVarChar(200), display_name || usuario)
+      .input("content", sql.NVarChar(sql.MAX), commentContent)
+      .input("tipo", sql.VarChar(50), status === "aprovado" ? "aprovacao" : status === "feedback_ti" ? "feedback" : "status")
+      .query(`
+        INSERT INTO dbo.AI_REQUEST_COMMENTS (request_id, usuario, display_name, content, tipo)
+        VALUES (@rid, @usuario, @display_name, @content, @tipo)
+      `);
+
+    // Trello integration: create card on approval
+    let trelloUrl: string | null = null;
+    if (status === "aprovado") {
+      const projData = await pool.request().input("pid", sql.Int, projectId)
+        .query(`SELECT titulo, display_name, prd_content, prazo_entrega FROM dbo.AI_REQUESTS WHERE id = @pid`);
+      if (projData.recordset.length > 0) {
+        const p = projData.recordset[0];
+        const trelloResult = await createTrelloCard({
+          titulo: p.titulo,
+          display_name: p.display_name || display_name || usuario,
+          prd_content: p.prd_content,
+          prazo_entrega: prazo_entrega || p.prazo_entrega,
+        });
+        if (trelloResult) {
+          trelloUrl = trelloResult.url;
+          await pool.request()
+            .input("tid", sql.Int, projectId)
+            .input("trello_card_id", sql.VarChar(100), trelloResult.id)
+            .input("trello_url", sql.VarChar(500), trelloResult.url)
+            .query(`UPDATE dbo.AI_REQUESTS SET trello_card_id = @trello_card_id, trello_url = @trello_url WHERE id = @tid`);
+        }
+      }
+    }
+
+    res.json({ id: projectId, status, trelloUrl });
+  } catch (err: any) {
+    console.error("[ai-assistant] Status change error:", err?.message);
+    res.status(500).json({ error: "Erro ao alterar status." });
+  }
+});
+
+/** POST /projects/:id/comments — add comment to a project */
+router.post("/projects/:id/comments", async (req, res) => {
+  try {
+    const { usuario, display_name, content } = req.body ?? {};
+    if (!usuario || !content) {
+      return res.status(400).json({ error: "usuario e content são obrigatórios." });
+    }
+    const pool = await getPool();
+    const projectId = parseInt(req.params.id);
+
+    const check = await pool.request().input("id", sql.Int, projectId)
+      .query(`SELECT id FROM dbo.AI_REQUESTS WHERE id = @id`);
+    if (check.recordset.length === 0) {
+      return res.status(404).json({ error: "Projeto não encontrado." });
+    }
+
+    const result = await pool.request()
+      .input("rid", sql.Int, projectId)
+      .input("usuario", sql.VarChar(100), usuario)
+      .input("display_name", sql.NVarChar(200), display_name || usuario)
+      .input("content", sql.NVarChar(sql.MAX), content)
+      .input("tipo", sql.VarChar(50), "comentario")
+      .query(`
+        INSERT INTO dbo.AI_REQUEST_COMMENTS (request_id, usuario, display_name, content, tipo)
+        OUTPUT INSERTED.id
+        VALUES (@rid, @usuario, @display_name, @content, @tipo)
+      `);
+
+    await pool.request()
+      .input("id", sql.Int, projectId)
+      .input("updated_at", sql.DateTime, new Date())
+      .query(`UPDATE dbo.AI_REQUESTS SET updated_at = @updated_at WHERE id = @id`);
+
+    res.json({ id: result.recordset[0]?.id });
+  } catch (err: any) {
+    console.error("[ai-assistant] Add comment error:", err?.message);
+    res.status(500).json({ error: "Erro ao adicionar comentário." });
+  }
+});
+
+export default router;

@@ -400,7 +400,7 @@ export default function AiAssistant() {
 </style></head><body>
   <div class="header">
     <h1>Documento de Requisitos: ${proj.titulo}</h1>
-    <div class="subtitle">Dovale Performance Hub &mdash; AI Requirement Assistant</div>
+    <div class="subtitle">Dovale Performance Hub &mdash; Bot de Demandas</div>
   </div>
   <div class="content">
     <table class="form-table">
@@ -412,7 +412,7 @@ export default function AiAssistant() {
     </table>
     ${prdHtml}
     <div class="footer">
-      Gerado automaticamente pelo Dovale AI Assistant em ${new Date().toLocaleString("pt-BR")}
+      Gerado automaticamente pelo Bot de Demandas em ${new Date().toLocaleString("pt-BR")}
     </div>
   </div>
 </body></html>`);
@@ -438,10 +438,10 @@ export default function AiAssistant() {
           {/* Tabs */}
           <div className="flex items-center gap-1">
             <button onClick={() => setView("chat")} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${view === "chat" ? "bg-cyan-500/15 text-cyan-600" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}>
-              <MessageSquare className="w-3.5 h-3.5" /> Nova Solicitacao
+              <MessageSquare className="w-3.5 h-3.5" /> Nova Demanda
             </button>
             <button onClick={() => setView("projects")} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${view === "projects" ? "bg-cyan-500/15 text-cyan-600" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}>
-              <FolderOpen className="w-3.5 h-3.5" /> Projetos
+              <FolderOpen className="w-3.5 h-3.5" /> Demandas
             </button>
           </div>
 
@@ -543,7 +543,7 @@ export default function AiAssistant() {
           <div className="flex-1 overflow-y-auto">
             <div className="container mx-auto max-w-5xl px-4 py-6">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-lg font-semibold text-foreground">{isIT ? "Todos os Projetos" : "Meus Projetos"}</h2>
+                <h2 className="text-lg font-semibold text-foreground">{isIT ? "Todas as Demandas" : "Minhas Demandas"}</h2>
                 <button onClick={fetchProjects} disabled={projectsLoading} className="inline-flex items-center gap-2 rounded-lg bg-secondary px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40">
                   <RotateCcw className={`w-3.5 h-3.5 ${projectsLoading ? "animate-spin" : ""}`} /> Atualizar
                 </button>

@@ -45,7 +45,7 @@ const APPS: AppCard[] = [
     color: "from-orange-500/20 to-orange-600/10 border-orange-500/30 hover:border-orange-500/60",
   },
   {
-    title: "AI Assistant",
+    title: "Bot de Demandas",
     description: "Colete requisitos com IA e gere documentos de especificação automaticamente.",
     icon: <Bot className="w-8 h-8" />,
     route: "/ai-assistant",
@@ -313,8 +313,8 @@ export default function Hub() {
                     <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Fechamento</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Fech.</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Loja Fech.</th>
-                    <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Assistente</th>
-                    <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Assist.</th>
+                    <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Bot Demandas</th>
+                    <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Bot</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Status</th>
                   </tr>
                 </thead>

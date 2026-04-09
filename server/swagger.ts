@@ -24,6 +24,7 @@ const spec: object = {
     { name: "Disparo em Massa", description: "WhatsApp bulk messaging via Meta + Chatwoot" },
     { name: "Fechamento Estoque", description: "Snapshot mensal de estoque, vendas e recebimentos" },
     { name: "AI Assistant", description: "Chatbot de coleta de requisitos e geração de PRD" },
+    { name: "Multi-Preço", description: "Sincronização de preços SJC → filiais (Firebird + MySQL)" },
   ],
 
   paths: {
@@ -532,9 +533,13 @@ const spec: object = {
     "/disparo/disparos/{id}/cancelar": {
       post: {
         tags: ["Disparo em Massa"],
-        summary: "Cancelar disparo",
+        summary: "Cancelar disparo (admin — aceita AWAITING_APPROVAL, PAUSING e PAUSED)",
         parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
-        responses: { 200: { description: "Cancelado" } },
+        responses: {
+          200: { description: "Cancelado" },
+          400: { description: "Status não permite cancelamento" },
+          404: { description: "Disparo não encontrado" },
+        },
       },
     },
     "/disparo/disparos/{id}/pausar": {
@@ -658,6 +663,46 @@ const spec: object = {
         responses: { 200: { description: "Documento exportado" }, 400: { description: "Conversa incompleta" } },
       },
     },
+
+    // ══════════════════════════════════════════════════════════════════════════
+    //  MULTI-PREÇO
+    // ══════════════════════════════════════════════════════════════════════════
+    "/multi-preco/sync": {
+      post: {
+        tags: ["Multi-Preço"],
+        summary: "Sincronizar preços SJC → filiais (streaming NDJSON)",
+        parameters: [
+          { name: "usuario", in: "query", schema: { type: "string", default: "Sistema" }, description: "Usuário que iniciou a sync" },
+        ],
+        responses: {
+          200: {
+            description: "Stream NDJSON com eventos de progresso (line-delimited JSON)",
+            content: {
+              "application/x-ndjson": {
+                schema: { $ref: "#/components/schemas/MultiPrecoSyncEvent" },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/multi-preco/history": {
+      get: {
+        tags: ["Multi-Preço"],
+        summary: "Histórico de auditoria (últimos 500 registros)",
+        responses: {
+          200: {
+            description: "Lista de registros de auditoria",
+            content: {
+              "application/json": {
+                schema: { type: "array", items: { $ref: "#/components/schemas/MultiPrecoAuditRow" } },
+              },
+            },
+          },
+          500: { description: "Erro no banco" },
+        },
+      },
+    },
   },
 
   components: {
@@ -705,6 +750,8 @@ const spec: object = {
           calculadora: { $ref: "#/components/schemas/AppPermission" },
           disparo: { $ref: "#/components/schemas/AppPermission" },
           fechamento: { $ref: "#/components/schemas/AppPermission" },
+          assistente: { $ref: "#/components/schemas/AppPermission" },
+          multipreco: { $ref: "#/components/schemas/AppPermission" },
         },
       },
       AppPermission: {
@@ -823,6 +870,30 @@ const spec: object = {
             },
           },
           lastRunError: { type: "string", nullable: true },
+        },
+      },
+      MultiPrecoSyncEvent: {
+        type: "object",
+        properties: {
+          status: { type: "string", enum: ["info", "success", "error", "pending", "clear", "saving_log", "saving_progress", "saved_log", "complete"], description: "Tipo do evento" },
+          message: { type: "string" },
+          storeName: { type: "string", description: "Nome da loja afetada" },
+          productCode: { type: "string" },
+          newPrice: { type: "number" },
+          tableName: { type: "string", enum: ["ATACADO", "DDF"] },
+        },
+      },
+      MultiPrecoAuditRow: {
+        type: "object",
+        properties: {
+          ID: { type: "integer" },
+          CODIGO_PRODUTO: { type: "string" },
+          LOJA: { type: "string" },
+          DATA: { type: "string" },
+          PRECO: { type: "number" },
+          USUARIO: { type: "string" },
+          STATUS: { type: "string", enum: ["SUCESSO", "ERRO"] },
+          TABELA: { type: "string", enum: ["ATACADO", "DDF"] },
         },
       },
       FechamentoRow: {

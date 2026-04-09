@@ -498,8 +498,6 @@ router.post("/sync", async (req: Request, res: Response) => {
   res.end();
 });
 
-// ── Audit history ───────────────────────────────────────────────────────────
-
 router.get("/history", async (_req: Request, res: Response) => {
   try {
     const pool = await getPool();

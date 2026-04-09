@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { BarChart3, Calculator, LogOut, Sun, Moon, Users, RefreshCw, Loader2, ChevronDown, Settings2, Send, Archive, Bot, Database } from "lucide-react";
@@ -81,6 +81,8 @@ export default function Hub() {
   const [managementOpen, setManagementOpen] = useState(false);
   const [userSearch, setUserSearch] = useState("");
   const [appUserFilter, setAppUserFilter] = useState<"all" | keyof AuthManagedUser["apps"]>("all");
+  const [userPage, setUserPage] = useState(1);
+  const USERS_PER_PAGE = 20;
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
@@ -157,7 +159,7 @@ export default function Hub() {
     ...appFilterOptions,
   ];
 
-  const filteredManagedUsers = managedUsers.filter((u) => {
+  const filteredManagedUsers = useMemo(() => managedUsers.filter((u) => {
     const term = userSearch.trim().toLowerCase();
     const matchesSearch = !term || (
       u.usuario.toLowerCase().includes(term) ||
@@ -168,7 +170,17 @@ export default function Hub() {
     if (appUserFilter === "all") return matchesSearch;
 
     return u.can_access_hub && u.apps[appUserFilter].can_access && matchesSearch;
-  });
+  }), [managedUsers, userSearch, appUserFilter]);
+
+  const userTotalPages = Math.max(1, Math.ceil(filteredManagedUsers.length / USERS_PER_PAGE));
+  const safeUserPage = Math.min(userPage, userTotalPages);
+  const userPageStart = (safeUserPage - 1) * USERS_PER_PAGE;
+  const pagedUsers = useMemo(
+    () => filteredManagedUsers.slice(userPageStart, userPageStart + USERS_PER_PAGE),
+    [filteredManagedUsers, userPageStart]
+  );
+
+  useEffect(() => { setUserPage(1); }, [userSearch, appUserFilter]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -344,7 +356,7 @@ export default function Hub() {
                       </td>
                     </tr>
                   ) : (
-                    filteredManagedUsers.map((u) => (
+                    pagedUsers.map((u) => (
                       <tr key={u.usuario} className="border-b border-border/50 last:border-0 hover:bg-muted/30 transition-colors">
                         <td className="px-4 py-3 font-mono text-xs text-foreground">{u.usuario}</td>
                         <td className="px-4 py-3 text-foreground">{u.displayname || "—"}</td>
@@ -779,6 +791,35 @@ export default function Hub() {
                 </tbody>
               </table>
             </div>
+
+            {filteredManagedUsers.length > 0 && (
+              <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs text-muted-foreground">
+                  Mostrando {userPageStart + 1}–{Math.min(userPageStart + USERS_PER_PAGE, filteredManagedUsers.length)} de {filteredManagedUsers.length} usuários
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setUserPage((p) => Math.max(1, p - 1))}
+                    disabled={safeUserPage === 1}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-secondary text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Anterior
+                  </button>
+                  <span className="text-xs text-muted-foreground">
+                    Página {safeUserPage} de {userTotalPages}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setUserPage((p) => Math.min(userTotalPages, p + 1))}
+                    disabled={safeUserPage === userTotalPages}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-secondary text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Próxima
+                  </button>
+                </div>
+              </div>
+            )}
           </section>
         )}
       </main>

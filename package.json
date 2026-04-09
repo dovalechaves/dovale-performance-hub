@@ -64,6 +64,7 @@
     "mime-types": "^3.0.2",
     "mssql": "^12.2.1",
     "multer": "^2.1.1",
+    "mysql2": "^3.21.0",
     "next-themes": "^0.3.0",
     "node-cron": "^4.2.1",
     "node-firebird": "^2.0.2",

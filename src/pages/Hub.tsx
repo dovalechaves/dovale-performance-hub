@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import { BarChart3, Calculator, LogOut, Sun, Moon, Users, RefreshCw, Loader2, ChevronDown, Settings2, Send, Archive, Bot } from "lucide-react";
+import { BarChart3, Calculator, LogOut, Sun, Moon, Users, RefreshCw, Loader2, ChevronDown, Settings2, Send, Archive, Bot, Database } from "lucide-react";
 import logoBlue from "@/assets/logo-blue.png";
 import logoWhite from "@/assets/logo-white.png";
 import { LOJAS, getAuthUsers, updateAuthUserRole, type AuthManagedUser } from "@/services/api";
@@ -51,6 +51,13 @@ const APPS: AppCard[] = [
     route: "/ai-assistant",
     color: "from-cyan-500/20 to-cyan-600/10 border-cyan-500/30 hover:border-cyan-500/60",
   },
+  {
+    title: "Multi-Preço",
+    description: "Sincronize preços da loja SJC para todas as filiais Firebird e MySQL.",
+    icon: <Database className="w-8 h-8" />,
+    route: "/multi-preco",
+    color: "from-amber-500/20 to-amber-600/10 border-amber-500/30 hover:border-amber-500/60",
+  },
 ];
 
 const APP_BY_ROUTE: Record<string, keyof AuthManagedUser["apps"]> = {
@@ -59,6 +66,7 @@ const APP_BY_ROUTE: Record<string, keyof AuthManagedUser["apps"]> = {
   "/disparo": "disparo",
   "/fechamento": "fechamento",
   "/ai-assistant": "assistente",
+  "/multi-preco": "multipreco",
 };
 
 export default function Hub() {
@@ -315,19 +323,21 @@ export default function Hub() {
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Loja Fech.</th>
                     <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Bot Demandas</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Bot</th>
+                    <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Multi-Preço</th>
+                    <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role MP</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {usersLoading ? (
                     <tr>
-                      <td colSpan={17} className="px-4 py-8 text-center text-muted-foreground">
+                      <td colSpan={19} className="px-4 py-8 text-center text-muted-foreground">
                         <Loader2 className="w-5 h-5 animate-spin mx-auto" />
                       </td>
                     </tr>
                   ) : filteredManagedUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={17} className="px-4 py-8 text-center text-muted-foreground text-xs">
+                      <td colSpan={19} className="px-4 py-8 text-center text-muted-foreground text-xs">
                         {appUserFilter === "all"
                           ? "Nenhum usuário encontrado para a busca informada."
                           : "Nenhum usuário habilitado no Hub e no app selecionado."}
@@ -368,6 +378,10 @@ export default function Hub() {
                                   assistente: {
                                     ...u.apps.assistente,
                                     can_access: enabled ? u.apps.assistente.can_access : false,
+                                  },
+                                  multipreco: {
+                                    ...u.apps.multipreco,
+                                    can_access: enabled ? u.apps.multipreco.can_access : false,
                                   },
                                 },
                                 can_access_dashboard: enabled ? u.apps.dashboard.can_access : false,
@@ -687,6 +701,57 @@ export default function Hub() {
                                     ...u.apps,
                                     assistente: {
                                       ...u.apps.assistente,
+                                      role: nextRole,
+                                    },
+                                  },
+                                };
+                                updateManagedUser(u.usuario, () => next);
+                                await persistUser(next);
+                              }}
+                              disabled={savingUser === u.usuario || !u.can_access_hub}
+                              className="appearance-none rounded-lg border border-border bg-muted px-3 py-1.5 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40"
+                            >
+                              {(Object.keys(ROLE_LABELS) as Role[]).map((r) => (
+                                <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                              ))}
+                            </select>
+                            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={u.apps.multipreco.can_access}
+                            onChange={async (e) => {
+                              const next: AuthManagedUser = {
+                                ...u,
+                                apps: {
+                                  ...u.apps,
+                                  multipreco: {
+                                    ...u.apps.multipreco,
+                                    can_access: e.target.checked,
+                                  },
+                                },
+                              };
+                              updateManagedUser(u.usuario, () => next);
+                              await persistUser(next);
+                            }}
+                            disabled={savingUser === u.usuario || !u.can_access_hub}
+                            className="h-4 w-4 rounded border-border bg-muted text-primary focus:ring-primary/50 disabled:opacity-40"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="relative inline-block">
+                            <select
+                              value={u.apps.multipreco.role}
+                              onChange={async (e) => {
+                                const nextRole = e.target.value as Role;
+                                const next: AuthManagedUser = {
+                                  ...u,
+                                  apps: {
+                                    ...u.apps,
+                                    multipreco: {
+                                      ...u.apps.multipreco,
                                       role: nextRole,
                                     },
                                   },

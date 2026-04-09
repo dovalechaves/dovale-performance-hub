@@ -13,6 +13,7 @@ import NotFound from "./pages/NotFound.tsx";
 import Disparo from "./pages/Disparo.tsx";
 import Fechamento from "./pages/Fechamento.tsx";
 import AiAssistant from "./pages/AiAssistant.tsx";
+import MultiPreco from "./pages/MultiPreco.tsx";
 
 const queryClient = new QueryClient();
 
@@ -63,6 +64,14 @@ function AssistenteRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function MultiPrecoRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.canAccessHub) return <Navigate to="/login" replace />;
+  if (!user.apps.multipreco.canAccess) return <Navigate to="/hub" replace />;
+  return <>{children}</>;
+}
+
 function AdminManagerRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
@@ -89,6 +98,7 @@ const App = () => (
             <Route path="/disparo" element={<DisparoRoute><Disparo /></DisparoRoute>} />
             <Route path="/fechamento" element={<FechamentoRoute><Fechamento /></FechamentoRoute>} />
             <Route path="/ai-assistant" element={<AssistenteRoute><AiAssistant /></AssistenteRoute>} />
+            <Route path="/multi-preco" element={<MultiPrecoRoute><MultiPreco /></MultiPrecoRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

@@ -4,7 +4,7 @@ import { getPool } from "../db/sqlserver";
 
 const router = Router();
 const VALID_ROLES = ["admin", "manager", "viewer"] as const;
-const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento", "assistente"] as const;
+const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento", "assistente", "multipreco"] as const;
 
 type Role = typeof VALID_ROLES[number];
 type AppKey = typeof MANAGED_APPS[number];
@@ -100,6 +100,12 @@ function buildDefaultApps(usuario: string, localRole: unknown, localLoja: unknow
       loja: null,
       can_access: false,
     },
+    multipreco: {
+      app_key: "multipreco" as AppKey,
+      role: baseRole,
+      loja: null,
+      can_access: false,
+    },
   };
 }
 
@@ -117,6 +123,7 @@ function mergeApps(
     disparo: { ...defaults.disparo },
     fechamento: { ...defaults.fechamento },
     assistente: { ...defaults.assistente },
+    multipreco: { ...defaults.multipreco },
   };
 
   for (const row of appRows) {
@@ -158,6 +165,7 @@ function normalizeAppsPayload(
     disparo: { ...defaults.disparo },
     fechamento: { ...defaults.fechamento },
     assistente: { ...defaults.assistente },
+    multipreco: { ...defaults.multipreco },
   };
 
   if (payload && typeof payload === "object") {
@@ -369,7 +377,7 @@ router.get("/users", async (req, res) => {
       pool.request().query(`
         SELECT usuario, app_key, role, loja, ativo
         FROM dbo.USUARIOS_APPS
-        WHERE app_key IN ('dashboard', 'calculadora', 'disparo', 'fechamento', 'assistente')
+        WHERE app_key IN ('dashboard', 'calculadora', 'disparo', 'fechamento', 'assistente', 'multipreco')
       `),
     ]);
 

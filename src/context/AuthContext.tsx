@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from "react";
 import { Role, Permission, hasPermission, resolveRole, ROLE_LABELS } from "@/lib/rbac";
 
 interface AuthUser {
@@ -192,8 +192,34 @@ function loadFromStorage(): AuthUser | null {
   }
 }
 
+const API_BASE = (import.meta.env.VITE_API_URL ?? "http://localhost:3001/api").replace(/\/$/, "");
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(loadFromStorage);
+
+  // Silently refresh permissions from DB on every page load
+  useEffect(() => {
+    const stored = loadFromStorage();
+    if (!stored?.usuario || !stored?.token) return;
+    fetch(`${API_BASE}/auth/me?usuario=${encodeURIComponent(stored.usuario)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data?.apps) return;
+        const refreshed = buildUser(
+          stored.usuario,
+          stored.displayName,
+          stored.token,
+          data.role,
+          data.loja,
+          data.can_access_dashboard,
+          data.can_access_hub,
+          data.apps
+        );
+        localStorage.setItem("dovale_auth", JSON.stringify(refreshed));
+        setUser(refreshed);
+      })
+      .catch(() => { /* silent fail — keep cached data */ });
+  }, []);
 
   const login = useCallback((
     usuario: string,

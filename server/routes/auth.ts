@@ -306,6 +306,43 @@ router.post("/login", async (req, res) => {
   }
 });
 
+/** GET /api/auth/me?usuario=xxx — retorna permissões atualizadas do DB */
+router.get("/me", async (req, res) => {
+  try {
+    const usuario = String(req.query.usuario || "").trim();
+    if (!usuario) return res.status(400).json({ error: "usuario é obrigatório." });
+
+    const pool = await getPool();
+    await ensureAppsTable(pool);
+
+    const localResult = await pool.request()
+      .input("usuario", usuario)
+      .query(`SELECT role, loja, ativo FROM dbo.USUARIOS_LOJAS WHERE usuario = @usuario`);
+    const localUser = localResult.recordset[0];
+    if (!localUser) return res.status(404).json({ error: "Usuário não encontrado." });
+
+    const canAccessHub = isEnabledFlag(localUser.ativo);
+
+    const appsResult = await pool.request()
+      .input("usuario", usuario)
+      .query(`SELECT app_key, role, loja, ativo FROM dbo.USUARIOS_APPS WHERE usuario = @usuario`);
+
+    const apps = mergeApps(usuario, localUser.role, localUser.loja, canAccessHub, appsResult.recordset);
+
+    res.json({
+      usuario,
+      role: apps.dashboard.role,
+      loja: apps.dashboard.loja,
+      can_access_hub: canAccessHub,
+      can_access_dashboard: apps.dashboard.can_access,
+      apps,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: message });
+  }
+});
+
 /** GET /api/auth/users — lista usuários AD com acessos do Hub e dos apps */
 router.get("/users", async (req, res) => {
   try {

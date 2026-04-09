@@ -50,11 +50,11 @@ function exportCsv(logs: PriceLog[], userName: string) {
 export default function MultiPreco() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [dark, setDark] = useState(() => document.documentElement.classList.contains("dark"));
+  const [dark, setDark] = useState(() => localStorage.getItem("dovale_theme") !== "light");
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
-    localStorage.setItem("theme", dark ? "dark" : "light");
+    localStorage.setItem("dovale_theme", dark ? "dark" : "light");
   }, [dark]);
 
   // ── Sync state ──

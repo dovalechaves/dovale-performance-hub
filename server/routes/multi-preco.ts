@@ -204,7 +204,6 @@ router.post("/sync", async (req: Request, res: Response) => {
     });
     send({ status: "pending", message: "Produto --- → SJC...", productCode: "---", storeName: "SJC" });
 
-    // ── 2. Process each target store ──
     for (const targetEntry of targetEntries) {
       const parts = targetEntry.split("|");
       let cleanName: string;

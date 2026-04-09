@@ -429,6 +429,9 @@ export default function Disparo() {
                   {disparoStatus === "PAUSED" && (
                     <Button size="sm" variant="outline" onClick={handleRetomar}><Play className="h-3 w-3 mr-1" />Retomar</Button>
                   )}
+                  {(disparoStatus === "PAUSING" || disparoStatus === "PAUSED") && isAdmin && (
+                    <Button size="sm" variant="destructive" onClick={handleCancelar}><XCircle className="h-3 w-3 mr-1" />Cancelar</Button>
+                  )}
                   {disparoStatus === "AWAITING_APPROVAL" && isAdmin && (
                     <>
                       <Button size="sm" variant="default" onClick={handleAprovar}><Check className="h-3 w-3 mr-1" />Aprovar</Button>

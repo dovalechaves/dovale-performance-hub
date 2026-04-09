@@ -513,7 +513,8 @@ router.post("/disparos/:id/cancelar", async (req: Request, res: Response) => {
   const supa = getSupa();
   const { data: d } = await supa.from("disparos").select("*").eq("id", req.params.id).single();
   if (!d) return res.status(404).json({ erro: "Disparo não encontrado" });
-  if (d.status !== "AWAITING_APPROVAL") return res.status(400).json({ erro: `Só é possível cancelar disparos aguardando aprovação (status: ${d.status})` });
+  const cancelable = ["AWAITING_APPROVAL", "PAUSING", "PAUSED"];
+  if (!cancelable.includes(d.status)) return res.status(400).json({ erro: `Não é possível cancelar disparo com status: ${d.status}` });
   await supa.from("disparos").update({ status: "REJECTED" }).eq("id", d.id);
   res.json({ mensagem: "Disparo cancelado", disparo_id: d.id });
 });

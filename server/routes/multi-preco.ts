@@ -494,7 +494,6 @@ router.post("/sync", async (req: Request, res: Response) => {
   } catch (e: any) {
     send({ status: "error", message: `Erro crítico: ${e.message}`, storeName: "API" });
   }
-
   res.end();
 });
 

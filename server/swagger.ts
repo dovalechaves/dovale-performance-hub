@@ -25,6 +25,7 @@ const spec: object = {
     { name: "Fechamento Estoque", description: "Snapshot mensal de estoque, vendas e recebimentos" },
     { name: "AI Assistant", description: "Chatbot de coleta de requisitos e geração de PRD" },
     { name: "Multi-Preço", description: "Sincronização de preços SJC → filiais (Firebird + MySQL)" },
+    { name: "Inventário", description: "Gestão de inventário de estoque por loja" },
   ],
 
   paths: {
@@ -703,6 +704,87 @@ const spec: object = {
         },
       },
     },
+
+    // ══════════════════════════════════════════════════════════════════════════
+    //  INVENTÁRIO
+    // ══════════════════════════════════════════════════════════════════════════
+    "/inventario/sessoes": {
+      get: {
+        tags: ["Inventário"],
+        summary: "Listar sessões de inventário",
+        parameters: [{ name: "loja", in: "query", schema: { type: "string" }, description: "Filtrar por loja" }],
+        responses: { 200: { description: "Lista de sessões", content: { "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/InventarioSessao" } } } } } },
+      },
+      post: {
+        tags: ["Inventário"],
+        summary: "Criar nova sessão de inventário",
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["loja", "nome", "usuario"], properties: { loja: { type: "string" }, nome: { type: "string" }, usuario: { type: "string" } } } } } },
+        responses: { 201: { description: "Sessão criada" }, 400: { description: "Dados inválidos" } },
+      },
+    },
+    "/inventario/sessoes/{id}": {
+      get: {
+        tags: ["Inventário"],
+        summary: "Detalhe da sessão com itens",
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+        responses: { 200: { description: "Sessão + itens" }, 404: { description: "Não encontrada" } },
+      },
+      delete: {
+        tags: ["Inventário"],
+        summary: "Excluir sessão (apenas RASCUNHO)",
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+        responses: { 200: { description: "Excluída" }, 400: { description: "Status não permite exclusão" } },
+      },
+    },
+    "/inventario/sessoes/{id}/status": {
+      patch: {
+        tags: ["Inventário"],
+        summary: "Atualizar status da sessão (fluxo de aprovação)",
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["status", "usuario"], properties: { status: { type: "string", enum: ["EM_ANDAMENTO", "CONCLUIDO", "ENVIADO", "APROVADO", "REJEITADO"] }, usuario: { type: "string" }, feedback: { type: "string" } } } } } },
+        responses: { 200: { description: "Status atualizado" }, 400: { description: "Transição inválida" } },
+      },
+    },
+    "/inventario/sessoes/{id}/itens": {
+      post: {
+        tags: ["Inventário"],
+        summary: "Adicionar item à sessão",
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["pro_codigo", "usuario"], properties: { pro_codigo: { type: "string" }, qtd_contada: { type: "number" }, usuario: { type: "string" } } } } } },
+        responses: { 201: { description: "Item adicionado" }, 409: { description: "Produto já inserido" } },
+      },
+    },
+    "/inventario/itens/{id}": {
+      patch: {
+        tags: ["Inventário"],
+        summary: "Editar quantidade contada (gerentes)",
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["qtd_contada", "usuario"], properties: { qtd_contada: { type: "number" }, usuario: { type: "string" } } } } } },
+        responses: { 200: { description: "Atualizado" }, 400: { description: "Não permitido" } },
+      },
+      delete: {
+        tags: ["Inventário"],
+        summary: "Remover item",
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+        responses: { 200: { description: "Removido" } },
+      },
+    },
+    "/inventario/sessoes/{id}/logs": {
+      get: {
+        tags: ["Inventário"],
+        summary: "Logs de auditoria da sessão",
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+        responses: { 200: { description: "Lista de logs" } },
+      },
+    },
+    "/inventario/produto/{codigo}": {
+      get: {
+        tags: ["Inventário"],
+        summary: "Buscar produto no banco da loja (placeholder)",
+        parameters: [{ name: "codigo", in: "path", required: true, schema: { type: "string" } }],
+        responses: { 200: { description: "Dados do produto" } },
+      },
+    },
   },
 
   components: {
@@ -752,6 +834,7 @@ const spec: object = {
           fechamento: { $ref: "#/components/schemas/AppPermission" },
           assistente: { $ref: "#/components/schemas/AppPermission" },
           multipreco: { $ref: "#/components/schemas/AppPermission" },
+          inventario: { $ref: "#/components/schemas/AppPermission" },
         },
       },
       AppPermission: {
@@ -881,6 +964,23 @@ const spec: object = {
           productCode: { type: "string" },
           newPrice: { type: "number" },
           tableName: { type: "string", enum: ["ATACADO", "DDF"] },
+        },
+      },
+      InventarioSessao: {
+        type: "object",
+        properties: {
+          id: { type: "integer" },
+          loja: { type: "string" },
+          nome: { type: "string" },
+          status: { type: "string", enum: ["RASCUNHO", "EM_ANDAMENTO", "CONCLUIDO", "ENVIADO", "APROVADO", "REJEITADO"] },
+          criado_por: { type: "string" },
+          criado_em: { type: "string", format: "date-time" },
+          enviado_em: { type: "string", format: "date-time", nullable: true },
+          aprovado_por: { type: "string", nullable: true },
+          aprovado_em: { type: "string", format: "date-time", nullable: true },
+          feedback: { type: "string", nullable: true },
+          total_itens: { type: "integer" },
+          total_contados: { type: "integer" },
         },
       },
       MultiPrecoAuditRow: {

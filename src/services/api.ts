@@ -83,6 +83,13 @@ export interface AuthManagedUser {
       loja: string | null;
       can_access: boolean;
     };
+    inventario: {
+      app_key: "inventario";
+      role: "admin" | "manager" | "viewer";
+      loja: string | null;
+      can_access: boolean;
+      usu_codigo_sistema?: number | null;
+    };
   };
 }
 

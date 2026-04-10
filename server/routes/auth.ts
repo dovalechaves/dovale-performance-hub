@@ -4,7 +4,7 @@ import { getPool } from "../db/sqlserver";
 
 const router = Router();
 const VALID_ROLES = ["admin", "manager", "viewer"] as const;
-const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento", "assistente", "multipreco"] as const;
+const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento", "assistente", "multipreco", "inventario"] as const;
 
 type Role = typeof VALID_ROLES[number];
 type AppKey = typeof MANAGED_APPS[number];
@@ -38,6 +38,7 @@ interface ManagedUser {
     role: Role;
     loja: string | null;
     can_access: boolean;
+    usu_codigo_sistema?: number | null;
   }>;
 }
 
@@ -52,8 +53,17 @@ async function ensureAppsTable(pool: any): Promise<void> {
         role VARCHAR(20) NOT NULL DEFAULT 'viewer',
         loja VARCHAR(20) NULL,
         ativo BIT NOT NULL DEFAULT 0,
+        usu_codigo_sistema INT NULL,
         CONSTRAINT UQ_USUARIOS_APPS UNIQUE (usuario, app_key)
       );
+    END
+
+    IF NOT EXISTS (
+      SELECT 1 FROM sys.columns
+      WHERE object_id = OBJECT_ID('dbo.USUARIOS_APPS') AND name = 'usu_codigo_sistema'
+    )
+    BEGIN
+      ALTER TABLE dbo.USUARIOS_APPS ADD usu_codigo_sistema INT NULL;
     END
   `);
 }
@@ -106,6 +116,12 @@ function buildDefaultApps(usuario: string, localRole: unknown, localLoja: unknow
       loja: null,
       can_access: false,
     },
+    inventario: {
+      app_key: "inventario" as AppKey,
+      role: baseRole,
+      loja: null,
+      can_access: false,
+    },
   };
 }
 
@@ -124,6 +140,7 @@ function mergeApps(
     fechamento: { ...defaults.fechamento },
     assistente: { ...defaults.assistente },
     multipreco: { ...defaults.multipreco },
+    inventario: { ...defaults.inventario },
   };
 
   for (const row of appRows) {
@@ -135,6 +152,7 @@ function mergeApps(
       role,
       loja: (appKey === "dashboard" || appKey === "fechamento") && role === "manager" ? (row?.loja ? String(row.loja) : null) : null,
       can_access: isEnabledFlag(row?.ativo),
+      ...(appKey === "inventario" && row?.usu_codigo_sistema != null ? { usu_codigo_sistema: Number(row.usu_codigo_sistema) } : {}),
     };
   }
 
@@ -166,6 +184,7 @@ function normalizeAppsPayload(
     fechamento: { ...defaults.fechamento },
     assistente: { ...defaults.assistente },
     multipreco: { ...defaults.multipreco },
+    inventario: { ...defaults.inventario },
   };
 
   if (payload && typeof payload === "object") {
@@ -238,7 +257,7 @@ router.post("/login", async (req, res) => {
       const testAppsResult = await pool.request()
         .input("usuario", usuario)
         .query(`
-          SELECT app_key, role, loja, ativo
+          SELECT app_key, role, loja, ativo, usu_codigo_sistema
           FROM dbo.USUARIOS_APPS
           WHERE usuario = @usuario
         `);
@@ -283,7 +302,7 @@ router.post("/login", async (req, res) => {
     const appsResult = await pool.request()
       .input("usuario", usuario)
       .query(`
-        SELECT app_key, role, loja, ativo
+        SELECT app_key, role, loja, ativo, usu_codigo_sistema
         FROM dbo.USUARIOS_APPS
         WHERE usuario = @usuario
       `);
@@ -333,7 +352,7 @@ router.get("/me", async (req, res) => {
 
     const appsResult = await pool.request()
       .input("usuario", usuario)
-      .query(`SELECT app_key, role, loja, ativo FROM dbo.USUARIOS_APPS WHERE usuario = @usuario`);
+      .query(`SELECT app_key, role, loja, ativo, usu_codigo_sistema FROM dbo.USUARIOS_APPS WHERE usuario = @usuario`);
 
     const apps = mergeApps(usuario, localUser.role, localUser.loja, canAccessHub, appsResult.recordset);
 
@@ -375,9 +394,9 @@ router.get("/users", async (req, res) => {
     const [localResult, appResult] = await Promise.all([
       pool.request().query(`SELECT usuario, role, loja, ativo FROM dbo.USUARIOS_LOJAS`),
       pool.request().query(`
-        SELECT usuario, app_key, role, loja, ativo
+        SELECT usuario, app_key, role, loja, ativo, usu_codigo_sistema
         FROM dbo.USUARIOS_APPS
-        WHERE app_key IN ('dashboard', 'calculadora', 'disparo', 'fechamento', 'assistente', 'multipreco')
+        WHERE app_key IN ('dashboard', 'calculadora', 'disparo', 'fechamento', 'assistente', 'multipreco', 'inventario')
       `),
     ]);
 
@@ -536,15 +555,33 @@ router.put("/role", async (req, res) => {
           INSERT (usuario, senha_hash, role, loja, ativo) VALUES (@usuario, '', @role, @loja, @ativo);
       `);
 
+    // Extract usu_codigo_sistema from inventario app payload
+    const rawApps = (apps && typeof apps === "object") ? apps as Record<string, any> : {};
+    const invUsuCodigoSistema = rawApps?.inventario?.usu_codigo_sistema ?? null;
+
     for (const appKey of MANAGED_APPS) {
       const app = normalizedApps[appKey];
-      await pool.request()
+      const r = pool.request()
         .input("usuario", usuario)
         .input("app_key", app.app_key)
         .input("role", app.role)
         .input("loja", app.loja ?? null)
-        .input("ativo", app.can_access ? 1 : 0)
-        .query(`
+        .input("ativo", app.can_access ? 1 : 0);
+
+      if (appKey === "inventario") {
+        r.input("usu_codigo_sistema", invUsuCodigoSistema);
+        await r.query(`
+          MERGE dbo.USUARIOS_APPS AS target
+          USING (SELECT @usuario AS usuario, @app_key AS app_key) AS source
+            ON target.usuario = source.usuario AND target.app_key = source.app_key
+          WHEN MATCHED THEN
+            UPDATE SET role = @role, loja = @loja, ativo = @ativo, usu_codigo_sistema = @usu_codigo_sistema
+          WHEN NOT MATCHED THEN
+            INSERT (usuario, app_key, role, loja, ativo, usu_codigo_sistema)
+            VALUES (@usuario, @app_key, @role, @loja, @ativo, @usu_codigo_sistema);
+        `);
+      } else {
+        await r.query(`
           MERGE dbo.USUARIOS_APPS AS target
           USING (SELECT @usuario AS usuario, @app_key AS app_key) AS source
             ON target.usuario = source.usuario AND target.app_key = source.app_key
@@ -554,6 +591,7 @@ router.put("/role", async (req, res) => {
             INSERT (usuario, app_key, role, loja, ativo)
             VALUES (@usuario, @app_key, @role, @loja, @ativo);
         `);
+      }
     }
 
     res.json({ ok: true });

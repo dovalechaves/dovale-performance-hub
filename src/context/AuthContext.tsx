@@ -41,6 +41,11 @@ interface AuthUser {
       role: Role;
       loja: string | null;
     };
+    inventario: {
+      canAccess: boolean;
+      role: Role;
+      loja: string | null;
+    };
   };
 }
 
@@ -62,6 +67,7 @@ interface AuthContextValue {
       fechamento?: { role?: string; loja?: string | null; can_access?: boolean };
       assistente?: { role?: string; loja?: string | null; can_access?: boolean };
       multipreco?: { role?: string; loja?: string | null; can_access?: boolean };
+      inventario?: { role?: string; loja?: string | null; can_access?: boolean };
     }
   ) => void;
   logout: () => void;
@@ -84,6 +90,7 @@ function buildUser(
     fechamento?: { role?: string; loja?: string | null; can_access?: boolean };
     assistente?: { role?: string; loja?: string | null; can_access?: boolean };
     multipreco?: { role?: string; loja?: string | null; can_access?: boolean };
+    inventario?: { role?: string; loja?: string | null; can_access?: boolean };
   }
 ): AuthUser {
   const dashboardRole = resolveRole(usuario, apiApps?.dashboard?.role ?? apiRole);
@@ -100,6 +107,8 @@ function buildUser(
   const assistenteAccess = apiApps?.assistente?.can_access ?? false;
   const multiprecoRole = resolveRole(usuario, apiApps?.multipreco?.role ?? apiRole);
   const multiprecoAccess = apiApps?.multipreco?.can_access ?? false;
+  const inventarioRole = resolveRole(usuario, apiApps?.inventario?.role ?? apiRole);
+  const inventarioAccess = apiApps?.inventario?.can_access ?? false;
 
   return {
     usuario,
@@ -141,6 +150,11 @@ function buildUser(
         role: multiprecoRole,
         loja: null,
       },
+      inventario: {
+        canAccess: inventarioAccess,
+        role: inventarioRole,
+        loja: null,
+      },
     },
   };
 }
@@ -165,6 +179,8 @@ function loadFromStorage(): AuthUser | null {
     const assistenteAccess = (parsed.apps as any)?.assistente?.canAccess ?? false;
     const multiprecoRole = (parsed.apps as any)?.multipreco?.role ?? parsed.role;
     const multiprecoAccess = (parsed.apps as any)?.multipreco?.canAccess ?? false;
+    const inventarioRole = (parsed.apps as any)?.inventario?.role ?? parsed.role;
+    const inventarioAccess = (parsed.apps as any)?.inventario?.canAccess ?? false;
 
     return {
       usuario: parsed.usuario,
@@ -204,6 +220,11 @@ function loadFromStorage(): AuthUser | null {
         multipreco: {
           canAccess: multiprecoAccess,
           role: multiprecoRole,
+          loja: null,
+        },
+        inventario: {
+          canAccess: inventarioAccess,
+          role: inventarioRole,
           loja: null,
         },
       },
@@ -257,6 +278,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       fechamento?: { role?: string; loja?: string | null; can_access?: boolean };
       assistente?: { role?: string; loja?: string | null; can_access?: boolean };
       multipreco?: { role?: string; loja?: string | null; can_access?: boolean };
+      inventario?: { role?: string; loja?: string | null; can_access?: boolean };
     }
   ) => {
     const authUser = buildUser(usuario, displayName, token, apiRole, loja, canAccessDashboard, canAccessHub, apps);

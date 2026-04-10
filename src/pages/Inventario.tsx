@@ -9,8 +9,7 @@ import {
 import logoBlue from "@/assets/logo-blue.png";
 import logoWhite from "@/assets/logo-white.png";
 import { toast } from "sonner";
-
-const API = (import.meta as any).env?.VITE_API_URL || "http://localhost:3001";
+import { API_BASE } from "@/services/api";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -236,7 +235,7 @@ export default function Inventario() {
 
   // ── API helpers ──
   const apiFetch = useCallback(async (path: string, opts?: RequestInit) => {
-    const r = await fetch(`${API}/api/inventario${path}`, {
+    const r = await fetch(`${API_BASE}/inventario${path}`, {
       ...opts,
       headers: { "Content-Type": "application/json", ...opts?.headers },
     });

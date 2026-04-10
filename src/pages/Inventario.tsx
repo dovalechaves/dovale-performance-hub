@@ -173,9 +173,9 @@ export default function Inventario() {
 
   const inventarioApp = (user?.apps as any)?.inventario;
   const invRole: string = inventarioApp?.role ?? "viewer";
-  const isAdmin = invRole === "admin" || user?.apps?.dashboard?.role === "admin";
+  const isAdmin = invRole === "admin";
   const isManager = isAdmin || invRole === "manager";
-  const isViewer = invRole === "viewer";
+  const isViewer = !isAdmin && !isManager;
   const invLoja: string | null = inventarioApp?.loja ?? null;
   const usuario = user?.usuario ?? "Sistema";
 

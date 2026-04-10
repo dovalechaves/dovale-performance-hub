@@ -171,9 +171,12 @@ export default function Inventario() {
     localStorage.setItem("dovale_theme", dark ? "dark" : "light");
   }, [dark]);
 
-  const isAdmin = user?.apps?.dashboard?.role === "admin";
   const inventarioApp = (user?.apps as any)?.inventario;
-  const isManager = isAdmin || inventarioApp?.role === "manager" || inventarioApp?.role === "admin";
+  const invRole: string = inventarioApp?.role ?? "viewer";
+  const isAdmin = invRole === "admin" || user?.apps?.dashboard?.role === "admin";
+  const isManager = isAdmin || invRole === "manager";
+  const isViewer = invRole === "viewer";
+  const invLoja: string | null = inventarioApp?.loja ?? null;
   const usuario = user?.usuario ?? "Sistema";
 
   // ── State ──
@@ -193,6 +196,7 @@ export default function Inventario() {
   const [newNumLocais, setNewNumLocais] = useState(1);
   const [newNomesLocais, setNewNomesLocais] = useState<string[]>(["Local 1"]);
   const [creating, setCreating] = useState(false);
+  const [createProgress, setCreateProgress] = useState<{ show: boolean; message: string; percent: number }>({ show: false, message: "", percent: 0 });
 
   // Add item
   const [addCodigo, setAddCodigo] = useState("");
@@ -294,8 +298,10 @@ export default function Inventario() {
   const handleCreate = async () => {
     if (!newNome.trim()) { toast.error("Informe um nome para a sessão"); return; }
     setCreating(true);
+    setCreateProgress({ show: true, message: "Criando sessão...", percent: 10 });
     try {
-      await apiFetch("/sessoes", {
+      setCreateProgress({ show: true, message: "Importando produtos do Firebird...", percent: 30 });
+      const data = await apiFetch("/sessoes", {
         method: "POST",
         body: JSON.stringify({
           loja: newLoja,
@@ -305,14 +311,15 @@ export default function Inventario() {
           nomes_locais: newNomesLocais,
         }),
       });
-      toast.success("Sessão criada!");
+      setCreateProgress({ show: true, message: "Finalizando...", percent: 90 });
+      toast.success(`Sessão criada com ${data.total_itens ?? 0} itens!`);
       setShowCreate(false);
       setNewNome("");
       setNewNumLocais(1);
       setNewNomesLocais(["Local 1"]);
       loadSessoes();
     } catch (e: any) { toast.error(e.message); }
-    finally { setCreating(false); }
+    finally { setCreating(false); setCreateProgress({ show: false, message: "", percent: 0 }); }
   };
 
   // ── Status change ──
@@ -483,14 +490,21 @@ export default function Inventario() {
     return acc + (i.qtd_contada - i.qtd_sistema) * i.custo_fiscal;
   }, 0);
 
-  // Filtered sessions
+  // Filtered sessions (role-based)
   const filteredSessoes = useMemo(() => {
-    if (sessaoFilter === "all") return sessoes;
-    return sessoes.filter((s) => s.status === sessaoFilter);
-  }, [sessoes, sessaoFilter]);
+    let list = sessoes;
+    // Viewer: only EM_ANDAMENTO sessions
+    if (isViewer) list = list.filter((s) => s.status === "EM_ANDAMENTO");
+    // Manager: only their loja
+    if (invRole === "manager" && invLoja) list = list.filter((s) => s.loja === invLoja);
+    // Status filter
+    if (sessaoFilter !== "all") list = list.filter((s) => s.status === sessaoFilter);
+    return list;
+  }, [sessoes, sessaoFilter, isViewer, invRole, invLoja]);
 
   const canEdit = selectedSessao && ["RASCUNHO", "EM_ANDAMENTO"].includes(selectedSessao.status);
-  const canEditQtd = canEdit && isManager;
+  const canEditQtd = canEdit && (isManager || isViewer);
+  const canInsertContagem = canEdit && selectedSessao?.status === "EM_ANDAMENTO";
 
   // Helper: get contagem for an item at a specific local
   const getContagem = (item: Item, localId: number): Contagem | undefined =>
@@ -543,10 +557,12 @@ export default function Inventario() {
                   </select>
                   <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
                 </div>
-                <button onClick={() => setShowCreate(true)}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors">
-                  <Plus className="w-3.5 h-3.5" /> Nova Sessão
-                </button>
+                {isManager && (
+                  <button onClick={() => setShowCreate(true)}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors">
+                    <Plus className="w-3.5 h-3.5" /> Nova Sessão
+                  </button>
+                )}
               </div>
             </div>
 
@@ -731,7 +747,7 @@ export default function Inventario() {
 
                   {/* Actions */}
                   <div className="flex flex-wrap gap-2">
-                    {selectedSessao.status === "RASCUNHO" && (
+                    {selectedSessao.status === "RASCUNHO" && isManager && (
                       <>
                         <button onClick={() => changeStatus("EM_ANDAMENTO")} className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 transition-colors">
                           <ChevronRight className="w-3 h-3" /> Iniciar Contagem
@@ -741,12 +757,12 @@ export default function Inventario() {
                         </button>
                       </>
                     )}
-                    {selectedSessao.status === "EM_ANDAMENTO" && (
+                    {selectedSessao.status === "EM_ANDAMENTO" && isManager && (
                       <button onClick={() => changeStatus("CONCLUIDO")} className="inline-flex items-center gap-1 rounded-lg bg-yellow-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-yellow-700 transition-colors">
                         <PackageCheck className="w-3 h-3" /> Concluir Inventário
                       </button>
                     )}
-                    {selectedSessao.status === "CONCLUIDO" && (
+                    {selectedSessao.status === "CONCLUIDO" && isManager && (
                       <button onClick={() => changeStatus("ENVIADO")} className="inline-flex items-center gap-1 rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-700 transition-colors">
                         <Send className="w-3 h-3" /> Enviar p/ Aprovação
                       </button>
@@ -761,7 +777,7 @@ export default function Inventario() {
                         </button>
                       </>
                     )}
-                    {selectedSessao.status === "REJEITADO" && (
+                    {selectedSessao.status === "REJEITADO" && isManager && (
                       <button onClick={() => changeStatus("EM_ANDAMENTO")} className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 transition-colors">
                         <RotateCcw className="w-3 h-3" /> Retomar Contagem
                       </button>
@@ -825,7 +841,7 @@ export default function Inventario() {
                 </div>
 
                 {/* Inserir Contagem */}
-                {canEditQtd && (
+                {canInsertContagem && (
                   <div className="rounded-xl border border-teal-500/30 bg-teal-500/5 p-4">
                     <div className="flex items-center justify-between mb-3">
                       <h3 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
@@ -904,12 +920,11 @@ export default function Inventario() {
                         <th className="px-4 py-3 text-right text-[10px] uppercase tracking-widest text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors" onClick={() => toggleSort("vlr_diferenca")}>
                           Vlr Diferença {itemSort.col === "vlr_diferenca" ? (itemSort.dir === "desc" ? "▼" : "▲") : ""}
                         </th>
-                        {canEdit && <th className="px-3 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Ações</th>}
                       </tr>
                     </thead>
                     <tbody>
                       {pagedItems.length === 0 ? (
-                        <tr><td colSpan={7 + locais.length + (canEdit ? 1 : 0)} className="px-4 py-8 text-center text-muted-foreground text-xs">Nenhum item encontrado.</td></tr>
+                        <tr><td colSpan={7 + locais.length} className="px-4 py-8 text-center text-muted-foreground text-xs">Nenhum item encontrado.</td></tr>
                       ) : pagedItems.map((item) => {
                         const diff = item.qtd_contada !== null ? item.qtd_contada - item.qtd_sistema : null;
                         const valorDiff = diff !== null && item.custo_fiscal !== null ? diff * item.custo_fiscal : null;
@@ -939,13 +954,6 @@ export default function Inventario() {
                             <td className={`px-4 py-2 text-xs text-right tabular-nums font-semibold ${valorDiff !== null && valorDiff !== 0 ? (valorDiff > 0 ? "text-green-600" : "text-red-500") : "text-muted-foreground"}`}>
                               {valorDiff !== null ? fmtCurrency(valorDiff) : "—"}
                             </td>
-                            {canEdit && (
-                              <td className="px-3 py-2 text-center">
-                                <button onClick={() => handleDeleteItem(item.id)} className="text-muted-foreground hover:text-red-500" title="Remover item">
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </td>
-                            )}
                           </tr>
                         );
                       })}
@@ -996,6 +1004,26 @@ export default function Inventario() {
           </div>
         )}
       </main>
+
+      {/* Creating progress modal */}
+      {createProgress.show && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-xl space-y-4 mx-4">
+            <div className="flex items-center gap-2">
+              <Loader2 className="w-5 h-5 animate-spin text-primary" />
+              <h3 className="text-sm font-bold text-foreground">Criando Sessão</h3>
+            </div>
+            <p className="text-xs text-muted-foreground">{createProgress.message}</p>
+            <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+              <div
+                className="h-full bg-primary rounded-full transition-all duration-500 ease-out"
+                style={{ width: `${createProgress.percent}%` }}
+              />
+            </div>
+            <p className="text-[10px] text-muted-foreground text-right">{createProgress.percent}%</p>
+          </div>
+        </div>
+      )}
 
       {/* Recount confirmation modal */}
       {showRecontagem && recontagemInfo && (

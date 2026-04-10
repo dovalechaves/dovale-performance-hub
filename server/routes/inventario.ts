@@ -15,11 +15,15 @@ const fbConfig: Firebird.Options = {
   password: process.env.DB_FIREBIRD_INV_PASSWORD || "masterkey",
 };
 
+const FB_TIMEOUT_MS = 5000;
+
 function queryFb<T = Record<string, unknown>>(sqlStr: string, params: unknown[] = []): Promise<T[]> {
   return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Firebird connection timeout")), FB_TIMEOUT_MS);
     Firebird.attach(fbConfig, (err, db) => {
-      if (err) return reject(err);
+      if (err) { clearTimeout(timer); return reject(err); }
       db.query(sqlStr, params, (err2, result) => {
+        clearTimeout(timer);
         db.detach();
         if (err2) return reject(err2);
         resolve((result ?? []) as T[]);
@@ -30,9 +34,11 @@ function queryFb<T = Record<string, unknown>>(sqlStr: string, params: unknown[] 
 
 function executeFb(sqlStr: string, params: unknown[] = []): Promise<void> {
   return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Firebird connection timeout")), FB_TIMEOUT_MS);
     Firebird.attach(fbConfig, (err, db) => {
-      if (err) return reject(err);
+      if (err) { clearTimeout(timer); return reject(err); }
       db.query(sqlStr, params, (err2) => {
+        clearTimeout(timer);
         db.detach();
         if (err2) return reject(err2);
         resolve();
@@ -224,7 +230,8 @@ router.get("/usuarios-sistema", async (_req: Request, res: Response) => {
     );
     res.json(rows.map((r) => ({ codigo: r.USU_CODIGO, nome: r.USU_NOME })));
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error("[inventario] usuarios-sistema error:", err.message);
+    res.status(500).json({ error: err.message, detail: "Não foi possível conectar ao Firebird" });
   }
 });
 

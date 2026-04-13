@@ -145,7 +145,11 @@ export async function processarDisparo(disparoId: number, inboxId: number) {
       compsTemplate = meta.resolverComponentesComMediaId(compsTemplate, result.mediaId);
       console.log(`[Disparo ${disparoId}] Mídia pré-upada: ${result.mediaId}`);
     } else {
-      console.log(`[Disparo ${disparoId}] Aviso mídia: ${result.error}`);
+      const erroMsg = `Falha no upload de mídia: ${result.error}`;
+      console.error(`[Disparo ${disparoId}] ${erroMsg}`);
+      await supa.from("disparos").update({ status: "FAILED", resultado: erroMsg }).eq("id", disparoId);
+      emit("status_disparo", { id: disparoId, status: "FAILED", erro: erroMsg });
+      return;
     }
   }
 

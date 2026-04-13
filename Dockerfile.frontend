@@ -12,7 +12,7 @@ ARG VITE_API_URL=https://backend.dovale.online/api
 ENV VITE_API_URL=$VITE_API_URL
 ARG VITE_ECOMMERCE_API_URL=https://ecommerce-api.dovale.online
 ENV VITE_ECOMMERCE_API_URL=$VITE_ECOMMERCE_API_URL
-ENV NODE_OPTIONS=--max_old_space_size=512
+ENV NODE_OPTIONS=--max_old_space_size=1024
 
 RUN npm run build
 

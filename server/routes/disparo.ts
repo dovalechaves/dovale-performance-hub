@@ -27,7 +27,7 @@ const NUMERO_APROVADOR = process.env.NUMERO_APROVADOR ?? "19981818434";
 const APROVACAO_TIMEOUT_MIN = Number(process.env.APROVACAO_TIMEOUT_MIN) || 10;
 const UPLOAD_DIR = path.resolve("uploads");
 const MEDIA_DIR = path.resolve("uploads_media");
-const MEDIA_MAX_BYTES = 50 * 1024 * 1024;
+const MEDIA_MAX_BYTES = 16 * 1024 * 1024; // Meta limita vídeos a 16 MB
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 fs.mkdirSync(MEDIA_DIR, { recursive: true });

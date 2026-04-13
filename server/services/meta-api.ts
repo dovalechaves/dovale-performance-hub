@@ -222,17 +222,26 @@ export async function obterTemplates(
 }
 
 export async function criarTemplate(payload: any): Promise<{ data: any | null; error: string }> {
-  const url = `https://graph.facebook.com/${API_VERSION}/${getWabaId()}/message_templates`;
-  const r = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${getAccessToken()}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
-  if (r.ok) return { data: await r.json(), error: "" };
-  return { data: null, error: `Meta API ${r.status}: ${await r.text()}` };
+  try {
+    const url = `https://graph.facebook.com/${API_VERSION}/${getWabaId()}/message_templates`;
+    console.log(`[meta] criarTemplate: POST ${url}`);
+    const r = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${getAccessToken()}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(60_000),
+    });
+    const text = await r.text();
+    console.log(`[meta] criarTemplate status=${r.status} body=${text.slice(0, 200)}`);
+    if (r.ok) return { data: JSON.parse(text), error: "" };
+    return { data: null, error: `Meta API ${r.status}: ${text}` };
+  } catch (e: any) {
+    console.error("[meta] criarTemplate erro:", e.message);
+    return { data: null, error: `Exceção ao criar template: ${e.message}` };
+  }
 }
 
 // ── Upload Sessions (para header_handle de template) ─────────────────────────
@@ -260,7 +269,7 @@ async function uploadBytesParaHandle(
           file_type: contentType,
           access_token: token,
         }),
-      { method: "POST" },
+      { method: "POST", signal: AbortSignal.timeout(30_000) },
     );
     const r1Text = await r1.text();
     console.log(`[meta] Upload sessão status=${r1.status} body=${r1Text.slice(0, 200)}`);
@@ -277,6 +286,7 @@ async function uploadBytesParaHandle(
         "Content-Type": contentType,
       },
       body: new Blob([new Uint8Array(conteudo)], { type: contentType }),
+      signal: AbortSignal.timeout(120_000),
     });
     const r2Text = await r2.text();
     console.log(`[meta] Upload bytes status=${r2.status} body=${r2Text.slice(0, 200)}`);
@@ -295,8 +305,10 @@ export async function gerarHandlePorUrl(
   wabaId?: string,
 ): Promise<{ handle: string | null; error: string }> {
   try {
+    console.log(`[meta] gerarHandlePorUrl: baixando ${url}`);
     const r = await fetch(url, {
       headers: { "ngrok-skip-browser-warning": "1", "User-Agent": "curl/8.4.0" },
+      signal: AbortSignal.timeout(30_000),
     });
     if (!r.ok) return { handle: null, error: `Falha ao baixar mídia de exemplo (status ${r.status})` };
     const buf = Buffer.from(await r.arrayBuffer());

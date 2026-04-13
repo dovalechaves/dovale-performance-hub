@@ -161,6 +161,36 @@ export async function enviarTemplate(
   return { data: null, error: lastError };
 }
 
+// ── Enviar texto livre ───────────────────────────────────────────────────────
+
+export async function enviarTextoLivre(
+  telefone: string,
+  texto: string,
+): Promise<{ data: any | null; error: string }> {
+  const endpoint = `${baseUrl()}/messages`;
+  const payload = {
+    messaging_product: "whatsapp",
+    to: telefone,
+    type: "text",
+    text: { preview_url: false, body: texto },
+  };
+  try {
+    const r = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${getAccessToken()}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (r.ok) return { data: await r.json(), error: "" };
+    const errText = await r.text();
+    return { data: null, error: `Meta API ${r.status}: ${errText}` };
+  } catch (e: any) {
+    return { data: null, error: `Exceção Meta API: ${e.message}` };
+  }
+}
+
 // ── Templates CRUD ───────────────────────────────────────────────────────────
 
 export async function obterTemplates(

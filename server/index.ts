@@ -12,7 +12,7 @@ import ecommerceRouter from "./routes/ecommerce";
 import disparoRouter, { setSocketIO } from "./routes/disparo";
 import aiAssistantRouter from "./routes/ai-assistant";
 import multiPrecoRouter from "./routes/multi-preco";
-import inventarioRouter from "./routes/inventario";
+import inventarioRouter, { setInventarioIO } from "./routes/inventario";
 import { startSyncJob } from "./jobs/syncJob";
 import { startStockSnapshotJob, runStockSnapshotManual, getStockSnapshotStatus } from "./jobs/stockSnapshotJob";
 import { setupSwagger } from "./swagger";
@@ -75,6 +75,7 @@ setupSwagger(app);
 const httpServer = createServer(app);
 const io = new SocketServer(httpServer, { cors: { origin: "*" } });
 setSocketIO(io);
+setInventarioIO(io);
 
 io.on("connection", (socket) => {
   console.log(`[socket.io] cliente conectado: ${socket.id}`);

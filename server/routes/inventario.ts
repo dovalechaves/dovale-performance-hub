@@ -2,8 +2,91 @@ import { Router, Request, Response } from "express";
 import sql from "mssql";
 import Firebird from "node-firebird";
 import { getPool } from "../db/sqlserver";
+import type { Server as SocketServer } from "socket.io";
+import * as XLSX from "xlsx";
+import os from "os";
+import path from "path";
+import fs from "fs";
+// ── Chatwoot TI (inventário) ──
+const CW_TI_BASE = "http://192.168.10.181:3000";
+const CW_TI_TOKEN = "o4Y7pWQePkSsSw5uKczFRqZ9";
+const CW_TI_INBOX = 5;
+const CW_TI_ACCOUNT = 1;
+
+function cwHeaders() {
+  return { api_access_token: CW_TI_TOKEN, "Content-Type": "application/json" };
+}
+
+async function cwBuscarContato(telefone: string): Promise<number | null> {
+  const digitos = telefone.replace(/\D/g, "");
+  const termo = digitos.slice(-9);
+  const r = await fetch(`${CW_TI_BASE}/api/v1/accounts/${CW_TI_ACCOUNT}/contacts/search?q=${termo}&page=1&per_page=10&include_contacts=true`, { headers: cwHeaders() });
+  if (!r.ok) return null;
+  const j: any = await r.json();
+  return j.payload?.[0]?.id ?? null;
+}
+
+async function cwCriarContato(telefone: string): Promise<number | null> {
+  const r = await fetch(`${CW_TI_BASE}/api/v1/accounts/${CW_TI_ACCOUNT}/contacts`, {
+    method: "POST", headers: cwHeaders(),
+    body: JSON.stringify({ inbox_id: CW_TI_INBOX, phone_number: `+${telefone}`, name: telefone }),
+  });
+  if (!r.ok) return null;
+  const j: any = await r.json();
+  return j.payload?.contact?.id ?? j.id ?? null;
+}
+
+async function cwBuscarConversaAberta(contatoId: number): Promise<number | null> {
+  const r = await fetch(`${CW_TI_BASE}/api/v1/accounts/${CW_TI_ACCOUNT}/contacts/${contatoId}/conversations`, { headers: cwHeaders() });
+  if (!r.ok) return null;
+  const j: any = await r.json();
+  const convs = j.payload || [];
+  const aberta = convs.find((c: any) => c.status === "open" && c.inbox_id === CW_TI_INBOX);
+  return aberta?.id ?? null;
+}
+
+async function cwCriarConversa(contatoId: number): Promise<number | null> {
+  const r = await fetch(`${CW_TI_BASE}/api/v1/accounts/${CW_TI_ACCOUNT}/conversations`, {
+    method: "POST", headers: cwHeaders(),
+    body: JSON.stringify({ contact_id: contatoId, inbox_id: CW_TI_INBOX, status: "open" }),
+  });
+  if (!r.ok) return null;
+  const j: any = await r.json();
+  return j.id ?? null;
+}
+
+async function cwEnviarMensagem(conversaId: number, msg: string): Promise<number | null> {
+  const r = await fetch(`${CW_TI_BASE}/api/v1/accounts/${CW_TI_ACCOUNT}/conversations/${conversaId}/messages`, {
+    method: "POST", headers: cwHeaders(),
+    body: JSON.stringify({ content: msg, message_type: "outgoing", private: false }),
+  });
+  if (!r.ok) return null;
+  const j: any = await r.json();
+  return j.id ?? null;
+}
+
+async function cwEnviarArquivo(conversaId: number, filePath: string, caption?: string): Promise<number | null> {
+  const form = new FormData();
+  const fileBuffer = fs.readFileSync(filePath);
+  const fileName = path.basename(filePath);
+  form.append("attachments[]", new Blob([fileBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), fileName);
+  if (caption) form.append("content", caption);
+  form.append("message_type", "outgoing");
+  form.append("private", "false");
+  const r = await fetch(`${CW_TI_BASE}/api/v1/accounts/${CW_TI_ACCOUNT}/conversations/${conversaId}/messages`, {
+    method: "POST",
+    headers: { api_access_token: CW_TI_TOKEN },
+    body: form,
+  });
+  if (!r.ok) { console.error(`[Inventário→WPP] Arquivo falhou: ${r.status} ${await r.text()}`); return null; }
+  const j: any = await r.json();
+  return j.id ?? null;
+}
 
 const router = Router();
+
+let io: SocketServer | null = null;
+export function setInventarioIO(socketIO: SocketServer) { io = socketIO; }
 
 // ── Firebird config for inventory product lookup ────────────────────────────
 
@@ -200,8 +283,6 @@ async function addLog(sessaoId: number, usuario: string, acao: string, detalhes?
     .query(`INSERT INTO dbo.INVENTARIO_LOGS (sessao_id, usuario, acao, detalhes) VALUES (@sessao_id, @usuario, @acao, @detalhes)`);
 }
 
-// Helper: update session counts
-// An item is "contado" when it has at least one non-null contagem
 async function refreshCounts(sessaoId: number) {
   const pool = await getPool();
   await pool.request()
@@ -221,7 +302,6 @@ async function refreshCounts(sessaoId: number) {
     `);
 }
 
-// ── Firebird users (for linking Hub ↔ Sistema) ─────────────────────────────
 
 router.get("/usuarios-sistema", async (_req: Request, res: Response) => {
   try {
@@ -450,6 +530,150 @@ router.patch("/sessoes/:id/status", async (req: Request, res: Response) => {
 
     await r.query(`UPDATE dbo.INVENTARIO_SESSOES SET status = @status${extra} WHERE id = @id`);
     await addLog(sessao.id, usuario, `STATUS_${status}`, feedback ? `Feedback: ${feedback}` : undefined);
+
+    // ── Notify via Chatwoot on ENVIADO (sent for approval) ──
+    if (status === "ENVIADO") {
+      console.log(`[Inventário→WPP] Disparando notificação para sessão #${sessao.id}`);
+      (async () => {
+        try {
+          // Load items, contagens and locais
+          const itensRes = await pool.request()
+            .input("sid", sql.Int, sessao.id)
+            .query(`SELECT * FROM dbo.INVENTARIO_ITENS WHERE sessao_id = @sid`);
+          const contagensRes = await pool.request()
+            .input("sid", sql.Int, sessao.id)
+            .query(`
+              SELECT c.* FROM dbo.INVENTARIO_CONTAGENS c
+              JOIN dbo.INVENTARIO_ITENS i ON i.id = c.item_id
+              WHERE i.sessao_id = @sid
+            `);
+          const locaisRes = await pool.request()
+            .input("sid", sql.Int, sessao.id)
+            .query(`SELECT * FROM dbo.INVENTARIO_LOCAIS WHERE sessao_id = @sid ORDER BY ordem`);
+          const locais = locaisRes.recordset;
+
+          const contagensMap: Record<number, any[]> = {};
+          for (const c of contagensRes.recordset) {
+            if (!contagensMap[c.item_id]) contagensMap[c.item_id] = [];
+            contagensMap[c.item_id].push(c);
+          }
+
+          let totalQtdSistema = 0;
+          let totalQtdContada = 0;
+          let totalValorSistema = 0;
+          let totalValorContado = 0;
+          let contados = 0;
+          let naoContados = 0;
+
+          // Build rows for Excel
+          const allRows: any[] = [];
+          const contadosRows: any[] = [];
+          const naoContadosRows: any[] = [];
+
+          for (const item of itensRes.recordset) {
+            const cs = contagensMap[item.id] || [];
+            const filled = cs.filter((c: any) => c.qtd_contada !== null);
+            const qtdContada = filled.length > 0
+              ? filled.reduce((sum: number, c: any) => sum + Number(c.qtd_contada), 0)
+              : null;
+
+            const qtdSis = Number(item.qtd_sistema ?? 0);
+            const custo = Number(item.custo_fiscal ?? 0);
+
+            totalQtdSistema += qtdSis;
+            totalValorSistema += qtdSis * custo;
+
+            if (qtdContada !== null) {
+              contados++;
+              totalQtdContada += qtdContada;
+              totalValorContado += qtdContada * custo;
+            } else {
+              naoContados++;
+            }
+
+            const row: any = {
+              "Código": item.pro_codigo,
+              "Descrição": item.descricao ?? "",
+              "Qtd Sistema": qtdSis,
+            };
+            for (const loc of locais) {
+              const ct = cs.find((c: any) => c.local_id === loc.id);
+              row[loc.nome] = ct?.qtd_contada != null ? Number(ct.qtd_contada) : "";
+            }
+            row["Total Contado"] = qtdContada ?? "";
+            row["Diferença"] = qtdContada != null ? qtdContada - qtdSis : "";
+            row["Custo Fiscal"] = custo;
+            row["Vlr Diferença"] = qtdContada != null ? (qtdContada - qtdSis) * custo : "";
+
+            allRows.push(row);
+            if (qtdContada !== null) contadosRows.push(row);
+            else naoContadosRows.push(row);
+          }
+
+          // Generate XLSX with 3 sheets
+          const wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(allRows), "Todos");
+          XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(contadosRows), "Contados");
+          XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(naoContadosRows), "Não Contados");
+          const tmpFile = path.join(os.tmpdir(), `inventario_${sessao.id}_${Date.now()}.xlsx`);
+          XLSX.writeFile(wb, tmpFile);
+
+          const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+          const fmtQtd = (v: number) => v.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+          const approvalLink = `https://hub.dovale.online/inventario?sessao=${sessao.id}`;
+
+          const msg = [
+            `📦 *INVENTÁRIO ENVIADO PARA APROVAÇÃO*`,
+            `━━━━━━━━━━━━━━━━━━━━`,
+            `📍 *Loja:* ${sessao.loja}`,
+            `📝 *Sessão:* ${sessao.nome} (#${sessao.id})`,
+            `👤 *Enviado por:* ${usuario}`,
+            ``,
+            `📊 *Resumo Geral:*`,
+            `• Total de itens: ${itensRes.recordset.length}`,
+            `• Contados: ${contados}`,
+            `• Não contados: ${naoContados}`,
+            ``,
+            `📦 *Quantidade:*`,
+            `• Sistema (antiga): ${fmtQtd(totalQtdSistema)}`,
+            `• Contada (nova): ${fmtQtd(totalQtdContada)}`,
+            `• Diferença: ${fmtQtd(totalQtdContada - totalQtdSistema)}`,
+            ``,
+            `💰 *Valor:*`,
+            `• Sistema (antigo): ${fmt(totalValorSistema)}`,
+            `• Contado (novo): ${fmt(totalValorContado)}`,
+            `• Diferença: ${fmt(totalValorContado - totalValorSistema)}`,
+            `━━━━━━━━━━━━━━━━━━━━`,
+            ``,
+            `🔗 *Aprovar:* ${approvalLink}`,
+          ].join("\n");
+
+          const numeros = ["5512981898755", "5512988467809", "5512935005923"];
+          for (const num of numeros) {
+            try {
+              let contatoId = await cwBuscarContato(num);
+              if (!contatoId) contatoId = await cwCriarContato(num);
+              if (!contatoId) { console.error(`[Inventário→WPP] Contato não encontrado: ${num}`); continue; }
+
+              let conversaId = await cwBuscarConversaAberta(contatoId);
+              if (!conversaId) conversaId = await cwCriarConversa(contatoId);
+              if (!conversaId) { console.error(`[Inventário→WPP] Conversa falhou: ${num}`); continue; }
+
+              await cwEnviarMensagem(conversaId, msg);
+              await cwEnviarArquivo(conversaId, tmpFile, `📎 Relatório - ${sessao.nome}`);
+              console.log(`[Inventário→WPP] Enviado: ${num}`);
+            } catch (e: any) {
+              console.error(`[Inventário→WPP] Exceção ${num}: ${e.message}`);
+            }
+          }
+
+          // Cleanup temp file
+          try { fs.unlinkSync(tmpFile); } catch (_) {}
+        } catch (e: any) {
+          console.error(`[Inventário→WPP] Erro geral: ${e.message}`);
+        }
+      })();
+    }
 
     // ── Sync to Firebird on APROVADO — create 2 inventories (contados + não contados) ──
     if (status === "APROVADO") {
@@ -772,6 +996,20 @@ router.patch("/contagens/:id", async (req: Request, res: Response) => {
       .query(`SELECT nome FROM dbo.INVENTARIO_LOCAIS WHERE id = @lid`);
     const localNome = localRes.recordset[0]?.nome ?? `Local ${contagem.local_id}`;
     await addLog(contagem.sessao_id, usuario, "CONTAGEM_EDITADA", `${contagem.pro_codigo} @ ${localNome}: ${oldQtd ?? "—"} → ${qtd_contada}`);
+
+    if (io) {
+      io.emit("inventario:contagem-atualizada", {
+        sessao_id: contagem.sessao_id,
+        item_id: contagem.item_id,
+        contagem_id: contagem.id,
+        local_id: contagem.local_id,
+        local_nome: localNome,
+        pro_codigo: contagem.pro_codigo,
+        qtd_contada: Number(qtd_contada),
+        usuario,
+      });
+    }
+
     res.json({ mensagem: "Contagem atualizada" });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

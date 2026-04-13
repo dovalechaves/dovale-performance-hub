@@ -144,6 +144,7 @@ export async function processarDisparo(disparoId: number, inboxId: number) {
     if (result.mediaId) {
       compsTemplate = meta.resolverComponentesComMediaId(compsTemplate, result.mediaId);
       console.log(`[Disparo ${disparoId}] Mídia pré-upada: ${result.mediaId}`);
+      console.log(`[Disparo ${disparoId}] Componentes com mídia:`, JSON.stringify(compsTemplate));
     } else {
       const erroMsg = `Falha no upload de mídia: ${result.error}`;
       console.error(`[Disparo ${disparoId}] ${erroMsg}`);
@@ -186,9 +187,11 @@ export async function processarDisparo(disparoId: number, inboxId: number) {
     for (const chunk of chunks) {
       const results = await Promise.allSettled(
         chunk.map(async (contato: any) => {
+          if (i === 0) console.log(`[Disparo ${disparoId}] Enviando para ${contato.numero} template=${dData.template_nome} lang=${lang} comps=${JSON.stringify(compsTemplate)}`);
           const { data: resp, error } = await meta.enviarTemplate(
             contato.numero, dData.template_nome, lang, compsTemplate,
           );
+          if (i === 0) console.log(`[Disparo ${disparoId}] Resposta ${contato.numero}: data=${JSON.stringify(resp)?.slice(0,200)} error=${error}`);
           if (resp) {
             const wamid = (resp.messages ?? [{}])[0]?.id ?? "";
             return { contato, status: "SENT", erro: "", wamid };

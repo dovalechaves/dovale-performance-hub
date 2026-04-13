@@ -197,47 +197,55 @@ router.get("/templates", async (_req: Request, res: Response) => {
 });
 
 router.post("/templates", async (req: Request, res: Response) => {
-  console.log("[disparo] POST /templates body:", JSON.stringify(req.body));
-  const { payload, erro } = montarPayloadCriacaoTemplate(req.body ?? {});
-  if (erro) return res.status(400).json({ erro });
+  try {
+    console.log("[disparo] POST /templates body:", JSON.stringify(req.body));
+    const { payload, erro } = montarPayloadCriacaoTemplate(req.body ?? {});
+    if (erro) return res.status(400).json({ erro });
 
-  const wabaId = process.env.wpp_waba_id ?? process.env.wpp_conta_id;
-  for (const comp of payload!.components ?? []) {
-    if (comp.type?.toUpperCase() !== "HEADER") continue;
-    if (!["IMAGE", "VIDEO", "DOCUMENT"].includes(comp.format?.toUpperCase())) continue;
-    const handles = comp.example?.header_handle ?? [];
-    if (!handles.length) continue;
-    const url = String(handles[0] ?? "").trim();
-    if (!url.startsWith("http")) continue;
-    if (!wabaId) return res.status(400).json({ erro: "Configure wpp_waba_id para upload de imagens de template." });
-    // Se a URL aponta para nosso próprio endpoint de mídia, lê direto do disco
-    const mediaMatch = url.match(/\/api\/disparo\/media\/([^/?#]+)/);
-    let handle: string | null;
-    let error: string;
-    if (mediaMatch) {
-      const localPath = path.resolve(MEDIA_DIR, mediaMatch[1]);
-      ({ handle, error } = await meta.gerarHandleDeArquivoLocal(localPath, wabaId));
-    } else {
-      ({ handle, error } = await meta.gerarHandlePorUrl(url, wabaId));
+    const wabaId = process.env.wpp_waba_id ?? process.env.wpp_conta_id;
+    for (const comp of payload!.components ?? []) {
+      if (comp.type?.toUpperCase() !== "HEADER") continue;
+      if (!["IMAGE", "VIDEO", "DOCUMENT"].includes(comp.format?.toUpperCase())) continue;
+      const handles = comp.example?.header_handle ?? [];
+      if (!handles.length) continue;
+      const url = String(handles[0] ?? "").trim();
+      if (!url.startsWith("http")) continue;
+      if (!wabaId) return res.status(400).json({ erro: "Configure wpp_waba_id ou wpp_conta_id no ambiente." });
+      // Se a URL aponta para nosso próprio endpoint de mídia, lê direto do disco
+      const mediaMatch = url.match(/\/api\/disparo\/media\/([^/?#]+)/);
+      let handle: string | null;
+      let handleError: string;
+      if (mediaMatch) {
+        const localPath = path.resolve(MEDIA_DIR, mediaMatch[1]);
+        console.log("[disparo] Lendo mídia local:", localPath);
+        ({ handle, error: handleError } = await meta.gerarHandleDeArquivoLocal(localPath, wabaId));
+      } else {
+        console.log("[disparo] Baixando mídia de:", url);
+        ({ handle, error: handleError } = await meta.gerarHandlePorUrl(url, wabaId));
+      }
+      if (!handle) return res.status(502).json({ erro: handleError || "Falha upload mídia exemplo" });
+      console.log("[disparo] Handle obtido:", handle);
+      comp.example = { header_handle: [handle] };
     }
-    if (!handle) return res.status(502).json({ erro: error || "Falha upload imagem exemplo" });
-    comp.example = { header_handle: [handle] };
+
+    const { data, error: createError } = await meta.criarTemplate(payload!);
+    if (!data) return res.status(502).json({ erro: createError || "Falha ao criar template" });
+
+    // Salvar etiqueta/setor automaticamente
+    const etiqueta = String(req.body.etiqueta ?? "").trim();
+    if (etiqueta) {
+      const supa = getSupa();
+      await supa.from("template_configs").upsert(
+        { template_nome: payload!.name, etiqueta, atualizado_em: new Date().toISOString() },
+        { onConflict: "template_nome" },
+      );
+    }
+
+    res.status(201).json({ mensagem: "Template enviado para aprovação na Meta", resultado: data });
+  } catch (err: any) {
+    console.error("[disparo] POST /templates erro:", err);
+    if (!res.headersSent) res.status(500).json({ erro: err.message || "Erro interno ao criar template" });
   }
-
-  const { data, error } = await meta.criarTemplate(payload!);
-  if (!data) return res.status(502).json({ erro: error || "Falha ao criar template" });
-
-  // Salvar etiqueta/setor automaticamente
-  const etiqueta = String(req.body.etiqueta ?? "").trim();
-  if (etiqueta) {
-    const supa = getSupa();
-    await supa.from("template_configs").upsert(
-      { template_nome: payload!.name, etiqueta, atualizado_em: new Date().toISOString() },
-      { onConflict: "template_nome" },
-    );
-  }
-
-  res.status(201).json({ mensagem: "Template enviado para aprovação na Meta", resultado: data });
 });
 
 router.get("/templates/gerenciar", async (_req: Request, res: Response) => {

@@ -72,6 +72,14 @@ app.get("/api/stock-snapshot/history", async (_req, res) => {
 
 setupSwagger(app);
 
+// Global error handler — garante CORS headers mesmo com exceções
+app.use((err: any, _req: any, res: any, _next: any) => {
+  console.error("[server] Erro não tratado:", err?.message ?? err);
+  if (!res.headersSent) {
+    res.status(err.status || 500).json({ erro: err.message || "Erro interno" });
+  }
+});
+
 const httpServer = createServer(app);
 const io = new SocketServer(httpServer, { cors: { origin: "*" } });
 setSocketIO(io);

@@ -14,10 +14,6 @@ services:
       - caddy_0.encode=zstd gzip
       - caddy_0.reverse_proxy={{upstreams 3001}}
       - caddy_0.header=-Server
-      - caddy_0.header.Access-Control-Allow-Origin=*
-      - caddy_0.header.Access-Control-Allow-Methods=GET, POST, PUT, PATCH, DELETE, OPTIONS
-      - caddy_0.header.Access-Control-Allow-Headers=*
-      - caddy_0.header.Access-Control-Allow-Credentials=true
       - caddy_ingress_network=r101pwz0f1vqyh2yjh64h86o
 
   frontend:

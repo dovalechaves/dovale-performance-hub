@@ -23,7 +23,7 @@ export { setSocketIO };
 const JWT_SECRET = process.env.JWT_SECRET ?? "dovale-disparo-jwt-secret-2024";
 const JWT_EXPIRY_HOURS = Number(process.env.JWT_EXPIRY_HOURS) || 8;
 const AD_API_URL = process.env.AD_API_URL ?? "https://api.dovale.com.br/LoginUsuario1";
-const NUMERO_APROVADOR = process.env.NUMERO_APROVADOR ?? "19981818434";
+const NUMEROS_APROVADORES = (process.env.NUMERO_APROVADOR ?? "5512981898755,5519981818434").split(",").map(n => n.replace(/\D/g, "").trim()).filter(Boolean);
 const APROVACAO_TIMEOUT_MIN = Number(process.env.APROVACAO_TIMEOUT_MIN) || 10;
 const UPLOAD_DIR = path.resolve("uploads");
 const MEDIA_DIR = path.resolve("uploads_media");
@@ -381,14 +381,15 @@ router.post("/disparar", async (req: Request, res: Response) => {
   const usuario = (req as any).usuarioLogado ?? {};
   const nomeSolicitante = usuario.nome ?? "Um usuário";
   try {
-    await meta.enviarTemplate(NUMERO_APROVADOR, "permissao_disparo", "pt_BR", [
-      { type: "body", parameters: [
-        { type: "text", text: nomeSolicitante },
-        { type: "text", text: template_nome },
-        { type: "text", text: String(totalContatos) },
-      ]},
-    ]);
-    const cwContatoId = await cw.criarContato(NUMERO_APROVADOR, "Aprovador Disparos", inbox_id);
+    const compsAprovacao = [{ type: "body", parameters: [
+      { type: "text", text: nomeSolicitante },
+      { type: "text", text: template_nome },
+      { type: "text", text: String(totalContatos) },
+    ]}];
+    for (const num of NUMEROS_APROVADORES) {
+      await meta.enviarTemplate(num, "permissao_disparo", "pt_BR", compsAprovacao);
+    }
+    const cwContatoId = await cw.criarContato(NUMEROS_APROVADORES[0], "Aprovador Disparos", inbox_id);
     if (cwContatoId) {
       const cwConversaId = await cw.criarConversa(cwContatoId, inbox_id);
       if (cwConversaId) {
@@ -467,13 +468,16 @@ router.get("/disparos/:id/aprovacao", async (req: Request, res: Response) => {
     }
   }
 
-  // Busca mensagens de resposta do aprovador
-  const contatoId = await cw.buscarContato(NUMERO_APROVADOR);
+  // Busca mensagens de resposta dos aprovadores
   let todasMsgs: any[] = [];
-  if (contatoId) {
-    const conversas = await cw.buscarConversasContato(contatoId);
-    for (const c of conversas) todasMsgs.push(...(c.messages ?? []));
-  } else if (d.aprovacao_conversa_id) {
+  for (const numAprov of NUMEROS_APROVADORES) {
+    const contatoId = await cw.buscarContato(numAprov);
+    if (contatoId) {
+      const conversas = await cw.buscarConversasContato(contatoId);
+      for (const c of conversas) todasMsgs.push(...(c.messages ?? []));
+    }
+  }
+  if (!todasMsgs.length && d.aprovacao_conversa_id) {
     todasMsgs = await cw.buscarMensagensRecentes(d.aprovacao_conversa_id);
   }
 

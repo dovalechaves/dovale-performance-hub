@@ -27,7 +27,7 @@ const NUMERO_APROVADOR = process.env.NUMERO_APROVADOR ?? "19981818434";
 const APROVACAO_TIMEOUT_MIN = Number(process.env.APROVACAO_TIMEOUT_MIN) || 10;
 const UPLOAD_DIR = path.resolve("uploads");
 const MEDIA_DIR = path.resolve("uploads_media");
-const MEDIA_MAX_BYTES = 10 * 1024 * 1024;
+const MEDIA_MAX_BYTES = 50 * 1024 * 1024;
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 fs.mkdirSync(MEDIA_DIR, { recursive: true });
@@ -38,8 +38,8 @@ const uploadMidia = multer({
   limits: { fileSize: MEDIA_MAX_BYTES },
   fileFilter: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
-    if ([".jpg", ".jpeg", ".png", ".webp"].includes(ext)) cb(null, true);
-    else cb(new Error("Formato de mídia inválido. Use jpg, jpeg, png ou webp"));
+    if ([".jpg", ".jpeg", ".png", ".webp", ".mp4", ".3gp"].includes(ext)) cb(null, true);
+    else cb(new Error("Formato de mídia inválido. Use jpg, jpeg, png, webp, mp4 ou 3gp"));
   },
 });
 
@@ -197,10 +197,11 @@ router.get("/templates", async (_req: Request, res: Response) => {
 });
 
 router.post("/templates", async (req: Request, res: Response) => {
+  console.log("[disparo] POST /templates body:", JSON.stringify(req.body));
   const { payload, erro } = montarPayloadCriacaoTemplate(req.body ?? {});
   if (erro) return res.status(400).json({ erro });
 
-  const wabaId = process.env.wpp_waba_id;
+  const wabaId = process.env.wpp_waba_id ?? process.env.wpp_conta_id;
   for (const comp of payload!.components ?? []) {
     if (comp.type?.toUpperCase() !== "HEADER") continue;
     if (!["IMAGE", "VIDEO", "DOCUMENT"].includes(comp.format?.toUpperCase())) continue;
@@ -209,7 +210,16 @@ router.post("/templates", async (req: Request, res: Response) => {
     const url = String(handles[0] ?? "").trim();
     if (!url.startsWith("http")) continue;
     if (!wabaId) return res.status(400).json({ erro: "Configure wpp_waba_id para upload de imagens de template." });
-    const { handle, error } = await meta.gerarHandlePorUrl(url, wabaId);
+    // Se a URL aponta para nosso próprio endpoint de mídia, lê direto do disco
+    const mediaMatch = url.match(/\/api\/disparo\/media\/([^/?#]+)/);
+    let handle: string | null;
+    let error: string;
+    if (mediaMatch) {
+      const localPath = path.resolve(MEDIA_DIR, mediaMatch[1]);
+      ({ handle, error } = await meta.gerarHandleDeArquivoLocal(localPath, wabaId));
+    } else {
+      ({ handle, error } = await meta.gerarHandlePorUrl(url, wabaId));
+    }
     if (!handle) return res.status(502).json({ erro: error || "Falha upload imagem exemplo" });
     comp.example = { header_handle: [handle] };
   }
@@ -292,6 +302,7 @@ router.post("/template-etiquetas", async (req: Request, res: Response) => {
 // ── Upload mídia ─────────────────────────────────────────────────────────────
 
 router.post("/upload-midia", uploadMidia.single("file"), (req: Request, res: Response) => {
+  console.log("[disparo] POST /upload-midia req.file:", !!req.file, "originalname:", req.file?.originalname);
   if (!req.file) return res.status(400).json({ erro: "Nenhum arquivo de mídia enviado" });
   const ext = path.extname(req.file.originalname).toLowerCase();
   const novoNome = `${crypto.randomUUID().replace(/-/g, "")}${ext}`;

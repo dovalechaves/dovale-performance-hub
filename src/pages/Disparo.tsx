@@ -46,6 +46,8 @@ export default function Disparo() {
     header_type: "NONE", header_text: "", header_media_example_url: "",
     body_text: "", footer_text: "", etiqueta: "",
   });
+  const [templateMediaFile, setTemplateMediaFile] = useState<File | null>(null);
+  const [templateMediaUploading, setTemplateMediaUploading] = useState(false);
   const [etiquetasChatwoot, setEtiquetasChatwoot] = useState<string[]>([]);
   const [templateEtiquetas, setTemplateEtiquetas] = useState<Record<string, string>>({});
   const [mediaFile, setMediaFile] = useState<File | null>(null);
@@ -315,9 +317,15 @@ export default function Disparo() {
   const handleCriarTemplate = async () => {
     setCriarLoading(true);
     try {
-      await api.criarTemplate(novoTemplate);
+      // Lê o estado mais recente para evitar closure stale
+      const current = await new Promise<typeof novoTemplate>((resolve) =>
+        setNovoTemplate((prev) => { resolve(prev); return prev; })
+      );
+      console.log("[Disparo] criarTemplate payload:", JSON.stringify(current));
+      await api.criarTemplate(current);
       toast.success("Template enviado para aprovação na Meta!");
       setCriarDialogOpen(false);
+      setTemplateMediaFile(null);
       setNovoTemplate({
         name: "", category: "MARKETING", language_code: "pt_BR",
         header_type: "NONE", header_text: "", header_media_example_url: "",
@@ -488,7 +496,7 @@ export default function Disparo() {
                     <div className="space-y-2">
                       <Label>Mídia (imagem/vídeo)</Label>
                       <div className="flex gap-2">
-                        <Input type="file" accept="image/*" className="cursor-pointer" onChange={(e) => setMediaFile(e.target.files?.[0] ?? null)} />
+                        <Input type="file" accept="image/*,video/mp4,video/3gpp" className="cursor-pointer" onChange={(e) => setMediaFile(e.target.files?.[0] ?? null)} />
                         <Button variant="outline" onClick={handleUploadMidia} disabled={!mediaFile}>Upload</Button>
                       </div>
                       {mediaUrl && <p className="text-xs text-green-600 break-all">{mediaUrl}</p>}
@@ -706,14 +714,41 @@ export default function Disparo() {
             )}
 
             {["IMAGE", "VIDEO", "DOCUMENT"].includes(novoTemplate.header_type) && (
-              <div>
-                <Label>URL da Mídia de Exemplo *</Label>
+              <div className="space-y-2">
+                <Label>Mídia de Exemplo *</Label>
+                <div className="flex gap-2 items-center">
+                  <Input
+                    type="file"
+                    accept={novoTemplate.header_type === "VIDEO" ? "video/mp4,video/3gpp" : novoTemplate.header_type === "IMAGE" ? "image/*" : "*/*"}
+                    className="cursor-pointer"
+                    onChange={(e) => setTemplateMediaFile(e.target.files?.[0] ?? null)}
+                  />
+                  <Button
+                    type="button" variant="outline" size="sm"
+                    disabled={!templateMediaFile || templateMediaUploading}
+                    onClick={async () => {
+                      if (!templateMediaFile) return;
+                      setTemplateMediaUploading(true);
+                      try {
+                        const r = await api.uploadMidia(templateMediaFile);
+                        updateNovo("header_media_example_url", r.media_url);
+                        toast.success("Mídia enviada!");
+                      } catch (e: any) { toast.error(e.message); }
+                      finally { setTemplateMediaUploading(false); }
+                    }}
+                  >
+                    {templateMediaUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                  </Button>
+                </div>
+                {novoTemplate.header_media_example_url && (
+                  <p className="text-xs text-green-600 break-all">{novoTemplate.header_media_example_url}</p>
+                )}
+                <span className="text-xs text-muted-foreground">Ou cole uma URL pública:</span>
                 <Input
-                  placeholder="https://exemplo.com/imagem.png"
+                  placeholder="https://exemplo.com/video.mp4"
                   value={novoTemplate.header_media_example_url}
                   onChange={(e) => updateNovo("header_media_example_url", e.target.value)}
                 />
-                <span className="text-xs text-muted-foreground">URL pública da mídia para aprovação da Meta</span>
               </div>
             )}
 

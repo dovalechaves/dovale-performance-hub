@@ -243,40 +243,51 @@ async function uploadBytesParaHandle(
   contentType: string,
   wabaId?: string,
 ): Promise<{ handle: string | null; error: string }> {
-  const token = getAccessToken();
-  const appId = process.env.wpp_app_id;
-  const waba = wabaId || getWabaId();
-  const uploadOwnerId = appId || waba;
+  try {
+    const token = getAccessToken();
+    const appId = process.env.wpp_app_id;
+    const waba = wabaId || getWabaId();
+    const uploadOwnerId = appId || waba;
 
-  // Etapa 1: criar sessão
-  const r1 = await fetch(
-    `https://graph.facebook.com/${API_VERSION}/${uploadOwnerId}/uploads?` +
-      new URLSearchParams({
-        file_name: nomeBase,
-        file_length: String(conteudo.length),
-        file_type: contentType,
-        access_token: token,
-      }),
-    { method: "POST" },
-  );
-  if (!r1.ok) return { handle: null, error: `Upload sessão falhou (${r1.status}): ${(await r1.text()).slice(0, 300)}` };
-  const sessionId = (await r1.json()).id;
-  if (!sessionId) return { handle: null, error: "Upload sessão não retornou ID" };
+    console.log(`[meta] uploadBytesParaHandle: nome=${nomeBase} tipo=${contentType} tamanho=${conteudo.length} owner=${uploadOwnerId}`);
 
-  // Etapa 2: enviar bytes
-  const r2 = await fetch(`https://graph.facebook.com/${API_VERSION}/${sessionId}`, {
-    method: "POST",
-    headers: {
-      Authorization: `OAuth ${token}`,
-      file_offset: "0",
-      "Content-Type": contentType,
-    },
-    body: new Uint8Array(conteudo),
-  });
-  if (!r2.ok) return { handle: null, error: `Upload bytes falhou (${r2.status}): ${(await r2.text()).slice(0, 300)}` };
-  const handle = (await r2.json()).h;
-  if (!handle) return { handle: null, error: "Upload não retornou handle" };
-  return { handle, error: "" };
+    // Etapa 1: criar sessão
+    const r1 = await fetch(
+      `https://graph.facebook.com/${API_VERSION}/${uploadOwnerId}/uploads?` +
+        new URLSearchParams({
+          file_name: nomeBase,
+          file_length: String(conteudo.length),
+          file_type: contentType,
+          access_token: token,
+        }),
+      { method: "POST" },
+    );
+    const r1Text = await r1.text();
+    console.log(`[meta] Upload sessão status=${r1.status} body=${r1Text.slice(0, 200)}`);
+    if (!r1.ok) return { handle: null, error: `Upload sessão falhou (${r1.status}): ${r1Text.slice(0, 300)}` };
+    const sessionId = JSON.parse(r1Text).id;
+    if (!sessionId) return { handle: null, error: "Upload sessão não retornou ID" };
+
+    // Etapa 2: enviar bytes
+    const r2 = await fetch(`https://graph.facebook.com/${API_VERSION}/${sessionId}`, {
+      method: "POST",
+      headers: {
+        Authorization: `OAuth ${token}`,
+        file_offset: "0",
+        "Content-Type": contentType,
+      },
+      body: new Blob([new Uint8Array(conteudo)], { type: contentType }),
+    });
+    const r2Text = await r2.text();
+    console.log(`[meta] Upload bytes status=${r2.status} body=${r2Text.slice(0, 200)}`);
+    if (!r2.ok) return { handle: null, error: `Upload bytes falhou (${r2.status}): ${r2Text.slice(0, 300)}` };
+    const handle = JSON.parse(r2Text).h;
+    if (!handle) return { handle: null, error: "Upload não retornou handle" };
+    return { handle, error: "" };
+  } catch (e: any) {
+    console.error("[meta] uploadBytesParaHandle erro:", e);
+    return { handle: null, error: `Exceção no upload: ${e.message}` };
+  }
 }
 
 export async function gerarHandlePorUrl(

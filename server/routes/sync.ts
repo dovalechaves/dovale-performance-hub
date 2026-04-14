@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { queryFirebird } from "../db/firebird";
 import { querySqlServer, getPool } from "../db/sqlserver";
-import { sqlServerFiltroRep, firebirdFiltroRep } from "../db/filters";
+import { sqlServerFiltroRep, firebirdFiltroRep, firebirdFiltroVendas, consolidarVendas } from "../db/filters";
 
 const router = Router();
 
@@ -107,7 +107,7 @@ router.get("/vendas", async (req, res) => {
         AND EXTRACT(YEAR  FROM pv.PDV_DATA) = ${ano}
         AND pv.PDV_PSI_CODIGO NOT IN ('CC')
         AND pv.PDV_TVE_CODIGO NOT IN ('7','6','26','34')
-        ${firebirdFiltroRep("r", loja)}
+        ${firebirdFiltroVendas("r", loja)}
       GROUP BY r.REP_CODIGO, r.REP_NOME
       ORDER BY TOTAL_VENDAS DESC`
     );
@@ -118,7 +118,7 @@ router.get("/vendas", async (req, res) => {
       total_vendas: r.TOTAL_VENDAS,
     }));
 
-    res.json(result);
+    res.json(consolidarVendas(result, loja));
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: message });
@@ -147,7 +147,7 @@ router.get("/vendas-hoje", async (req, res) => {
       WHERE CAST(pv.PDV_DATA AS DATE) = CURRENT_DATE
         AND pv.PDV_PSI_CODIGO NOT IN ('CC')
         AND pv.PDV_TVE_CODIGO NOT IN ('7','6','26','34')
-        ${firebirdFiltroRep("r", loja)}
+        ${firebirdFiltroVendas("r", loja)}
       GROUP BY r.REP_CODIGO, r.REP_NOME
       ORDER BY TOTAL_VENDAS DESC`
     );
@@ -158,7 +158,7 @@ router.get("/vendas-hoje", async (req, res) => {
       total_vendas: r.TOTAL_VENDAS,
     }));
 
-    res.json(result);
+    res.json(consolidarVendas(result, loja));
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: message });

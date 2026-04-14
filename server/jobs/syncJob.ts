@@ -27,6 +27,7 @@ async function syncLoja(loja: typeof LOJAS[number]) {
     INNER JOIN PEDIDOS_VENDAS_ITENS pvi ON pvi.PVI_NUMERO = pv.PDV_NUMERO
     WHERE pv.PDV_DATA >= '01.01.${ano}'
       AND r.REP_NOME IS NOT NULL
+      AND pv.PDV_TVE_CODIGO NOT IN ('7','6','26','34')
     GROUP BY r.REP_CODIGO, r.REP_NOME, pv.PDV_NUMERO, pv.PDV_DATA, pv.PDV_PSI_CODIGO
   `);
 

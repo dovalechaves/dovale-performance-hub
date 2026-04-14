@@ -37,6 +37,7 @@ router.post("/", async (req, res) => {
       INNER JOIN PEDIDOS_VENDAS_ITENS pvi ON pvi.PVI_NUMERO = pv.PDV_NUMERO
       WHERE pv.PDV_DATA >= '01.01.${new Date().getFullYear()}'
         AND r.REP_NOME IS NOT NULL
+        AND pv.PDV_TVE_CODIGO NOT IN ('7','6','26','34')
       GROUP BY r.REP_CODIGO, r.REP_NOME, pv.PDV_NUMERO, pv.PDV_DATA, pv.PDV_PSI_CODIGO
     `);
 
@@ -105,6 +106,7 @@ router.get("/vendas", async (req, res) => {
       WHERE EXTRACT(MONTH FROM pv.PDV_DATA) = ${mes}
         AND EXTRACT(YEAR  FROM pv.PDV_DATA) = ${ano}
         AND pv.PDV_PSI_CODIGO NOT IN ('CC')
+        AND pv.PDV_TVE_CODIGO NOT IN ('7','6','26','34')
         ${firebirdFiltroRep("r", loja)}
       GROUP BY r.REP_CODIGO, r.REP_NOME
       ORDER BY TOTAL_VENDAS DESC`
@@ -144,6 +146,7 @@ router.get("/vendas-hoje", async (req, res) => {
       INNER JOIN PEDIDOS_VENDAS_ITENS pvi ON pvi.PVI_NUMERO = pv.PDV_NUMERO
       WHERE CAST(pv.PDV_DATA AS DATE) = CURRENT_DATE
         AND pv.PDV_PSI_CODIGO NOT IN ('CC')
+        AND pv.PDV_TVE_CODIGO NOT IN ('7','6','26','34')
         ${firebirdFiltroRep("r", loja)}
       GROUP BY r.REP_CODIGO, r.REP_NOME
       ORDER BY TOTAL_VENDAS DESC`

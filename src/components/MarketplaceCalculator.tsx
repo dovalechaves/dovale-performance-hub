@@ -1,10 +1,18 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
-import { fetchProduto, fetchTokenSalvo, authToken, simulate, fetchMyItems, fetchCustoOperacional, type SimulateResults } from "@/lib/ecommerce-api";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { fetchProduto, fetchTokenSalvo, authToken, simulate, fetchMyItems, fetchCustoOperacional, fetchContasPagar, type SimulateResults, type LojaCalc } from "@/lib/ecommerce-api";
 
 type Marketplace = "" | "mercadolivre" | "amazon" | "shopee" | "tiktok" | "magalu";
 type ListingType = "gold_pro" | "gold_special" | "free";
 
-const TAX_RATE = 0.21; // 21% fixo
+const TAX_RATE_DEFAULT = 0.21; // 21% fixo
+const TAX_RATE_LOJA = 0.08;   // 8% para lojas Fast/Santana/RJ
+
+const LOJA_LABELS: Record<string, string> = {
+  "": "Nenhuma (padrão 21%)",
+  fast: "Fast",
+  santana: "Santana",
+  rj: "Rio de Janeiro",
+};
 
 const MARKETPLACE_LABELS: Record<Marketplace, string> = {
   "": "Selecionar",
@@ -196,6 +204,12 @@ const MarketplaceCalculator = () => {
   const [custoOpUnit, setCustoOpUnit] = useState<number | null>(null);
   const [valorParticipacao] = useState(2000000);
 
+  // Loja (Fast/Santana/RJ)
+  const [loja, setLoja] = useState<"" | LojaCalc>("");
+  const [contasPagar, setContasPagar] = useState<number | null>(null);
+  const [contasPagarLoading, setContasPagarLoading] = useState(false);
+  const contasPagarRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Product search
   const [isLoadingProduto, setIsLoadingProduto] = useState(false);
   const [produtoNome, setProdutoNome] = useState<string | null>(null);
@@ -208,6 +222,21 @@ const MarketplaceCalculator = () => {
 
   const isML = marketplace === "mercadolivre";
   const hasFrete = marketplace !== "" && marketplace !== "shopee";
+  const taxRate = loja ? TAX_RATE_LOJA : TAX_RATE_DEFAULT;
+
+  // Busca contas a pagar quando loja muda
+  useEffect(() => {
+    if (!loja) { setContasPagar(null); return; }
+    if (contasPagarRef.current) clearTimeout(contasPagarRef.current);
+    contasPagarRef.current = setTimeout(() => {
+      setContasPagarLoading(true);
+      fetchContasPagar(loja)
+        .then((d) => setContasPagar(d.total))
+        .catch(() => setContasPagar(null))
+        .finally(() => setContasPagarLoading(false));
+    }, 300);
+    return () => { if (contasPagarRef.current) clearTimeout(contasPagarRef.current); };
+  }, [loja]);
 
   const effectiveTaxaLabel = useMemo(() => {
     if (isML) return `${LISTING_FEES[listingType]}%`;
@@ -242,7 +271,6 @@ const MarketplaceCalculator = () => {
   // Local calculation (always available)
   const results = useMemo(() => {
     const custoBase = parseFloat(custoProduto) || 0;
-    const cost = custoBase + (custoOpUnit ?? 0);
     const basePrice = parseFloat(precoVenda) || 0;
     const price = basePrice * (1 - desconto / 100);
     const peso = parseInt(pesoGramas) || 0;
@@ -273,7 +301,11 @@ const MarketplaceCalculator = () => {
       shipping = estimateMagaluShipping(peso, MAGALU_TIER_DISCOUNT[magaluTier]) * (1 - descontoFrete / 100);
     }
 
-    const imposto = price * TAX_RATE;
+    // Custo operacional: se loja selecionada, usa contas a pagar; senão usa custoOpUnit
+    const opCost = loja ? (contasPagar ?? 0) : (custoOpUnit ?? 0);
+    const cost = custoBase + opCost;
+
+    const imposto = price * taxRate;
     const profit = price - taxa - shipping - imposto - cost;
     const calculatedMargin = cost > 0 ? (profit / cost) * 100 : 0;
 
@@ -284,8 +316,9 @@ const MarketplaceCalculator = () => {
       frete: shipping,
       imposto,
       margemCalculada: calculatedMargin,
+      custoOperacional: opCost,
     };
-  }, [precoVenda, desconto, descontoFrete, custoProduto, custoOpUnit, marketplace, isML, listingType, pesoGramas, magaluTier]);
+  }, [precoVenda, desconto, descontoFrete, custoProduto, custoOpUnit, marketplace, isML, listingType, pesoGramas, magaluTier, taxRate, loja, contasPagar]);
 
   const buscarProduto = async () => {
     if (!codigoProduto.trim()) return;
@@ -401,6 +434,26 @@ const MarketplaceCalculator = () => {
             Calculadora
           </h2>
 
+          {/* Loja */}
+          <div className="space-y-2 mb-6">
+            <label className={labelClass}>Loja</label>
+            <div className="relative">
+              <select
+                value={loja}
+                onChange={(e) => setLoja(e.target.value as "" | LojaCalc)}
+                className={selectClass}
+              >
+                {Object.entries(LOJA_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+              <ChevronIcon />
+            </div>
+            {loja && (
+              <p className="text-xs text-primary font-medium">Imposto: 8% · Custo Op.: contas a pagar do mês</p>
+            )}
+          </div>
+
           {/* Marketplace */}
           <div className="space-y-2 mb-6">
             <label className={labelClass}>Marketplace</label>
@@ -461,7 +514,6 @@ const MarketplaceCalculator = () => {
             />
           </div>
 
-          {/* Custo do Produto */}
           <div className="space-y-2 mb-6">
             <label className={labelClass}>Custo do Produto (R$)</label>
             <input
@@ -478,25 +530,26 @@ const MarketplaceCalculator = () => {
             )}
           </div>
 
-          {/* Custo Operacional */}
           <div className="space-y-2 mb-6">
-            <label className={labelClass}>Custo Operacional (R$)</label>
+            <label className={labelClass}>Custo Operacional (R$){loja ? " — Contas a Pagar" : ""}</label>
             <input
               type="text"
               readOnly
-              value={custoOpUnit != null ? fmt(custoOpUnit) : "—"}
+              value={contasPagarLoading ? "Carregando..." : results.custoOperacional != null ? fmt(results.custoOperacional) : "—"}
               placeholder="—"
               className={`${inputClass} opacity-70 cursor-not-allowed`}
             />
+            {loja && contasPagar != null && (
+              <p className="text-xs text-[#00A650] font-medium mt-1">Total contas a pagar ({LOJA_LABELS[loja]}): {fmt(contasPagar)}</p>
+            )}
           </div>
 
-          {/* Custo Real */}
           <div className="space-y-2 mb-6">
             <label className={`${labelClass} text-primary`}>Custo Real (R$)</label>
             <input
               type="text"
               readOnly
-              value={custoProduto !== "" ? fmt((parseFloat(custoProduto) || 0) + (custoOpUnit ?? 0)) : "—"}
+              value={custoProduto !== "" ? fmt((parseFloat(custoProduto) || 0) + (results.custoOperacional ?? 0)) : "—"}
               placeholder="—"
               className={`${inputClass} opacity-70 cursor-not-allowed text-primary font-bold`}
             />
@@ -518,7 +571,6 @@ const MarketplaceCalculator = () => {
             )}
           </div>
 
-          {/* Desconto */}
           <div className="space-y-3 mb-6">
             <div className="flex items-center justify-between">
               <label className={labelClass}>Desconto Aplicado</label>
@@ -673,12 +725,13 @@ const MarketplaceCalculator = () => {
 
           <div className="space-y-5">
             <ResultRow label="Marketplace" value={marketplace ? MARKETPLACE_LABELS[marketplace] : "—"} />
+            {loja && <ResultRow label="Loja" value={LOJA_LABELS[loja]} />}
             <ResultRow label="Custo do Produto" value={fmt(parseFloat(custoProduto) || 0)} />
-            {custoOpUnit != null && (
-              <ResultRow label="Custo Operacional" value={fmt(custoOpUnit)} />
+            {results.custoOperacional != null && results.custoOperacional > 0 && (
+              <ResultRow label={loja ? "Contas a Pagar (mês)" : "Custo Operacional"} value={fmt(results.custoOperacional)} />
             )}
-            {custoOpUnit != null && (
-              <ResultRow label="Custo Real" value={fmt((parseFloat(custoProduto) || 0) + custoOpUnit)} accent />
+            {results.custoOperacional != null && results.custoOperacional > 0 && (
+              <ResultRow label="Custo Real" value={fmt((parseFloat(custoProduto) || 0) + results.custoOperacional)} accent />
             )}
             <ResultRow label="Preço do Produto" value={fmt(parseFloat(precoVenda) || 0)} />
             <ResultRow label="Desconto" value={`${desconto}%`} />
@@ -689,7 +742,7 @@ const MarketplaceCalculator = () => {
                 {isML && <ResultRow label="Tipo de Anúncio" value={LISTING_LABELS[listingType]} />}
                 <ResultRow label="Taxa da Plataforma" value={effectiveTaxaLabel} />
                 <ResultRow label="Taxa (R$)" value={fmt(results.taxa)} />
-                <ResultRow label="Imposto (21%)" value={fmt(results.imposto)} />
+                <ResultRow label={`Imposto (${(taxRate * 100).toFixed(0)}%)`} value={fmt(results.imposto)} />
                 <ResultRow label="Peso" value={`${pesoGramas}g`} />
                 {hasFrete && <ResultRow label="Desconto no Frete" value={`${descontoFrete}%`} />}
                 {marketplace === "magalu" && <ResultRow label="Reputação" value={MAGALU_TIER_LABELS[magaluTier]} />}

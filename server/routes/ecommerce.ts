@@ -1,6 +1,7 @@
 import { Router, Request } from "express";
 import { getPool } from "../db/sqlserver";
 import Firebird from "node-firebird";
+import { queryFirebird } from "../db/firebird";
 
 const router = Router();
 const ML_API = "https://api.mercadolibre.com";
@@ -181,6 +182,36 @@ router.get("/custo-operacional", async (req, res) => {
     }
     res.json(result);
   } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** GET /api/ecommerce/contas-pagar?loja=fast|santana|rj */
+const LOJA_FIREBIRD_MAP: Record<string, { fb: string; filial?: number }> = {
+  fast:    { fb: "fast", filial: 12 },
+  santana: { fb: "l2" },
+  rj:      { fb: "l3" },
+};
+
+router.get("/contas-pagar", async (req, res) => {
+  const loja = String(req.query.loja ?? "").toLowerCase();
+  const cfg = LOJA_FIREBIRD_MAP[loja];
+  if (!cfg) return res.status(400).json({ error: `Loja inválida. Use: ${Object.keys(LOJA_FIREBIRD_MAP).join(", ")}` });
+
+  try {
+    const filialFilter = cfg.filial != null ? `AND EMP_FIL_CODIGO = ${cfg.filial}` : "";
+    const sql = `
+      SELECT COALESCE(SUM(PAG_VALORTITULO), 0) AS TOTAL
+      FROM PAGAR_TITULOS
+      WHERE EXTRACT(MONTH FROM PAG_VENCIMENTO) = EXTRACT(MONTH FROM CURRENT_DATE)
+        AND EXTRACT(YEAR FROM PAG_VENCIMENTO) = EXTRACT(YEAR FROM CURRENT_DATE)
+        ${filialFilter}
+    `;
+    const rows = await queryFirebird<{ TOTAL: number }>(cfg.fb, sql);
+    const total = Number(rows[0]?.TOTAL ?? 0);
+    res.json({ loja, total: Math.round(total * 100) / 100 });
+  } catch (err: any) {
+    console.error(`[ecommerce] contas-pagar ${loja}:`, err.message);
     res.status(500).json({ error: err.message });
   }
 });

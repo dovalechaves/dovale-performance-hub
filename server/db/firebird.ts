@@ -30,6 +30,13 @@ const lojas: Record<string, FirebirdConfig> = {
     user: process.env.DB_FIREBIRD_L3_USER!,
     password: process.env.DB_FIREBIRD_L3_PASSWORD!,
   },
+  fast: {
+    host: process.env.DB_FIREBIRD_FAST_HOST!,
+    port: Number(process.env.DB_FIREBIRD_FAST_PORT) || 3050,
+    database: process.env.DB_FIREBIRD_FAST_PATH!,
+    user: process.env.DB_FIREBIRD_FAST_USER!,
+    password: process.env.DB_FIREBIRD_FAST_PASSWORD!,
+  },
 };
 
 export function queryFirebird<T = Record<string, unknown>>(

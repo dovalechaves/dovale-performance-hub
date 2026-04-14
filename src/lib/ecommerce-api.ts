@@ -95,3 +95,11 @@ export async function fetchCustoOperacional(
   if (!res.ok) throw new Error("Erro ao carregar custo operacional");
   return res.json();
 }
+
+export type LojaCalc = "fast" | "santana" | "rj";
+
+export async function fetchContasPagar(loja: LojaCalc): Promise<{ loja: string; total: number }> {
+  const res = await fetch(`${BASE}/contas-pagar?loja=${loja}`);
+  if (!res.ok) throw new Error("Erro ao carregar contas a pagar");
+  return res.json();
+}

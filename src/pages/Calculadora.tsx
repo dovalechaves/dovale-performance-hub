@@ -4,6 +4,7 @@ import { ArrowLeft, Sun, Moon, Settings } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { getCalcRole, type CalcRole } from "@/lib/calc-roles";
 import MarketplaceCalculator from "@/components/MarketplaceCalculator";
+import LojaCalculator from "@/components/LojaCalculator";
 import ProductsTable from "@/components/ProductsTable";
 import GerenciamentoCalc from "@/components/GerenciamentoCalc";
 import logoBlue from "@/assets/logo-blue.png";
@@ -130,17 +131,7 @@ export default function Calculadora() {
             {/* Renderiza calculadora conforme calcRole */}
             {(() => {
               const activeCalc = isAdmin ? calcTab : userCalcRole;
-              if (activeCalc === "loja") {
-                return (
-                  <div className="flex items-center justify-center min-h-[40vh]">
-                    <div className="text-center space-y-3">
-                      <p className="text-4xl">🏪</p>
-                      <p className="text-base font-semibold text-foreground">Calculadora Loja</p>
-                      <p className="text-sm text-muted-foreground">Em desenvolvimento. Em breve disponível.</p>
-                    </div>
-                  </div>
-                );
-              }
+              if (activeCalc === "loja") return <LojaCalculator />;
               return <MarketplaceCalculator />;
             })()}
           </>

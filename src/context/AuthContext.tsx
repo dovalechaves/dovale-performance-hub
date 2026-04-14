@@ -98,6 +98,7 @@ function buildUser(
   const dashboardAccess = apiApps?.dashboard?.can_access ?? canAccessDashboard;
   const calculadoraRole = resolveRole(usuario, apiApps?.calculadora?.role ?? apiRole);
   const calculadoraAccess = apiApps?.calculadora?.can_access ?? (dashboardRole !== "viewer");
+  const calculadoraLoja = apiApps?.calculadora?.loja ?? (calculadoraRole === "manager" ? "fast" : null);
   const disparoRole = resolveRole(usuario, apiApps?.disparo?.role ?? apiRole);
   const disparoAccess = apiApps?.disparo?.can_access ?? false;
   const fechamentoRole = resolveRole(usuario, apiApps?.fechamento?.role ?? apiRole);
@@ -128,7 +129,7 @@ function buildUser(
       calculadora: {
         canAccess: calculadoraAccess,
         role: calculadoraRole,
-        loja: null,
+        loja: calculadoraLoja,
       },
       disparo: {
         canAccess: disparoAccess,

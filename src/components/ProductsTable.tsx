@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { fetchProdutos, fetchProdutosLoja, fetchCustoOperacional, fetchContasPagar, CustoOperacionalItem, type LojaCalc } from "@/lib/ecommerce-api";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { useAuth } from "@/context/AuthContext";
 import * as XLSX from "xlsx";
 
 interface Product {
@@ -208,8 +209,13 @@ const ChevronIcon = () => (
 );
 
 const ProductsTable = () => {
-  const [calcMode, setCalcMode] = useState<CalcMode>("industria");
-  const [loja, setLoja] = useState<LojaCalc>("fast");
+  const { user } = useAuth();
+  const calcRole = user?.apps.calculadora.role ?? "viewer";
+  const isCalcAdmin = calcRole === "admin";
+  const isCalcManager = calcRole === "manager";
+  const fixedCalcLoja = user?.apps.calculadora.loja as LojaCalc | null;
+  const [calcMode, setCalcMode] = useState<CalcMode>(isCalcManager ? "loja" : "industria");
+  const [loja, setLoja] = useState<LojaCalc>(fixedCalcLoja ?? "fast");
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -626,29 +632,31 @@ const ProductsTable = () => {
           </button>
         </div>
 
-        {/* Modo: Indústria / Loja */}
-        <div className="flex gap-1 mb-6">
-          <button
-            onClick={() => setCalcMode("industria")}
-            className={`px-5 py-2 rounded-lg text-xs font-semibold uppercase tracking-widest transition-colors ${
-              calcMode === "industria"
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
-            }`}
-          >
-            Indústria
-          </button>
-          <button
-            onClick={() => setCalcMode("loja")}
-            className={`px-5 py-2 rounded-lg text-xs font-semibold uppercase tracking-widest transition-colors ${
-              calcMode === "loja"
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
-            }`}
-          >
-            Loja
-          </button>
-        </div>
+        {/* Modo: Indústria / Loja — gerente só vê loja */}
+        {!isCalcManager && (
+          <div className="flex gap-1 mb-6">
+            <button
+              onClick={() => setCalcMode("industria")}
+              className={`px-5 py-2 rounded-lg text-xs font-semibold uppercase tracking-widest transition-colors ${
+                calcMode === "industria"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+              }`}
+            >
+              Indústria
+            </button>
+            <button
+              onClick={() => setCalcMode("loja")}
+              className={`px-5 py-2 rounded-lg text-xs font-semibold uppercase tracking-widest transition-colors ${
+                calcMode === "loja"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+              }`}
+            >
+              Loja
+            </button>
+          </div>
+        )}
 
         {/* Filters */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
@@ -673,10 +681,14 @@ const ProductsTable = () => {
                   value={loja}
                   onChange={(e) => setLoja(e.target.value as LojaCalc)}
                   className={selectClass}
+                  disabled={!isCalcAdmin && !!fixedCalcLoja}
                 >
-                  {Object.entries(LOJA_LABELS).map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
+                  {isCalcAdmin || !fixedCalcLoja
+                    ? Object.entries(LOJA_LABELS).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))
+                    : <option value={fixedCalcLoja}>{LOJA_LABELS[fixedCalcLoja]}</option>
+                  }
                 </select>
                 <ChevronIcon />
               </div>

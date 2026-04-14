@@ -20,9 +20,12 @@ export default function Calculadora() {
   const [dark, setDark] = useState(() => localStorage.getItem("dovale_theme") !== "light");
   const [showGerenciamento, setShowGerenciamento] = useState(false);
 
-  const isAdmin = user?.role === "admin";
-  const userCalcRole: CalcRole = isAdmin ? "industria" : getCalcRole(user?.usuario ?? "");
-  const [calcTab, setCalcTab] = useState<CalcTab>(userCalcRole);
+  const calcRole = user?.apps.calculadora.role ?? "viewer";
+  const isCalcAdmin = calcRole === "admin";
+  const isCalcManager = calcRole === "manager";
+  // Admin: pode alternar entre loja e indústria. Manager: sempre loja. Viewer: usa calc-roles local.
+  const defaultTab: CalcTab = isCalcAdmin ? "industria" : isCalcManager ? "loja" : getCalcRole(user?.usuario ?? "");
+  const [calcTab, setCalcTab] = useState<CalcTab>(defaultTab);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
@@ -86,7 +89,7 @@ export default function Calculadora() {
             >
               {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
-            {isAdmin && (
+            {isCalcAdmin && (
               <button
                 onClick={() => setShowGerenciamento(true)}
                 className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
@@ -103,7 +106,7 @@ export default function Calculadora() {
         {tab === "calculadora" ? (
           <>
             {/* Tabs Loja / Indústria — admin vê ambas */}
-            {isAdmin && (
+            {isCalcAdmin && (
               <div className="flex gap-1 mb-8">
                 <button
                   onClick={() => setCalcTab("loja")}
@@ -130,7 +133,7 @@ export default function Calculadora() {
 
             {/* Renderiza calculadora conforme calcRole */}
             {(() => {
-              const activeCalc = isAdmin ? calcTab : userCalcRole;
+              const activeCalc = isCalcAdmin ? calcTab : defaultTab;
               if (activeCalc === "loja") return <LojaCalculator />;
               return <MarketplaceCalculator />;
             })()}

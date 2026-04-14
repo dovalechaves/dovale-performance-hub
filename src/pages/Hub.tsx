@@ -7,6 +7,12 @@ import logoWhite from "@/assets/logo-white.png";
 import { API_BASE, LOJAS, getAuthUsers, updateAuthUserRole, type AuthManagedUser } from "@/services/api";
 import { ROLE_LABELS, type Role } from "@/lib/rbac";
 
+const CALC_LOJAS = [
+  { value: "fast", label: "Fast" },
+  { value: "santana", label: "Santana" },
+  { value: "rj", label: "Rio de Janeiro" },
+];
+
 interface AppCard {
   title: string;
   description: string;
@@ -342,6 +348,7 @@ export default function Hub() {
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Loja Painel</th>
                     <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Calculadora</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Calculadora</th>
+                    <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Loja Calculadora</th>
                     <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Disparo</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Disparo</th>
                     <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Fechamento</th>
@@ -549,6 +556,7 @@ export default function Hub() {
                                     calculadora: {
                                       ...u.apps.calculadora,
                                       role: nextRole,
+                                      loja: nextRole === "manager" ? (u.apps.calculadora.loja ?? "fast") : null,
                                     },
                                   },
                                 };
@@ -564,6 +572,38 @@ export default function Hub() {
                             </select>
                             <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
                           </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          {u.apps.calculadora.role === "manager" ? (
+                            <div className="relative inline-block">
+                              <select
+                                value={u.apps.calculadora.loja ?? "fast"}
+                                onChange={async (e) => {
+                                  const next: AuthManagedUser = {
+                                    ...u,
+                                    apps: {
+                                      ...u.apps,
+                                      calculadora: {
+                                        ...u.apps.calculadora,
+                                        loja: e.target.value,
+                                      },
+                                    },
+                                  };
+                                  updateManagedUser(u.usuario, () => next);
+                                  await persistUser(next);
+                                }}
+                                disabled={savingUser === u.usuario || !u.can_access_hub}
+                                className="appearance-none rounded-lg border border-border bg-muted px-3 py-1.5 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40"
+                              >
+                                {CALC_LOJAS.map((l) => (
+                                  <option key={l.value} value={l.value}>{l.label}</option>
+                                ))}
+                              </select>
+                              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-muted-foreground">—</span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-center">
                           <input

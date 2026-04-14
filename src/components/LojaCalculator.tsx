@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { fetchProdutoLoja, fetchContasPagar, fetchCustoOperacional, type LojaCalc, type CustoOperacionalItem } from "@/lib/ecommerce-api";
+import { useAuth } from "@/context/AuthContext";
 
 const TAX_RATE = 0.08; // 8% para lojas
 const ML_FEE = 0.165;  // 16.5% Mercado Livre
@@ -37,7 +38,10 @@ const ResultRow = ({ label, value, accent, colorClass }: { label: string; value:
 );
 
 const LojaCalculator = () => {
-  const [loja, setLoja] = useState<LojaCalc>("fast");
+  const { user } = useAuth();
+  const isAdmin = user?.apps.calculadora.role === "admin";
+  const fixedLoja = user?.apps.calculadora.loja as LojaCalc | null;
+  const [loja, setLoja] = useState<LojaCalc>(fixedLoja ?? "fast");
   const [codigoProduto, setCodigoProduto] = useState("");
   const [custoProduto, setCustoProduto] = useState("");
   const [precoVenda, setPrecoVenda] = useState("");
@@ -154,10 +158,14 @@ const LojaCalculator = () => {
                 value={loja}
                 onChange={(e) => setLoja(e.target.value as LojaCalc)}
                 className={selectClass}
+                disabled={!isAdmin && !!fixedLoja}
               >
-                {Object.entries(LOJA_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
+                {isAdmin || !fixedLoja
+                  ? Object.entries(LOJA_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))
+                  : <option value={fixedLoja}>{LOJA_LABELS[fixedLoja]}</option>
+                }
               </select>
               <ChevronIcon />
             </div>

@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, Sun, Moon, Send, RotateCcw, Copy, Download, Loader2,
   CheckCircle2, Bot, User, MessageSquare, FolderOpen, Clock, ChevronLeft,
-  FileCheck, AlertCircle, SendHorizonal, Calendar, ExternalLink,
+  FileCheck, AlertCircle, SendHorizonal, Calendar, ExternalLink, Pencil, Trash2, Check, X,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import logoBlue from "@/assets/logo-blue.png";
@@ -88,6 +88,8 @@ export default function AiAssistant() {
   const [submitTitle, setSubmitTitle] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [prazoDate, setPrazoDate] = useState("");
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [editTitleValue, setEditTitleValue] = useState("");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -327,6 +329,33 @@ export default function AiAssistant() {
       await openProject(projectId);
     } catch { /* ignore */ }
   }, [user, commentText, openProject]);
+
+  const renameDemand = useCallback(async (projectId: number, newTitle: string) => {
+    if (!user || !newTitle.trim()) return;
+    try {
+      await fetch(`${BASE}/ai-assistant/projects/${projectId}/titulo`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ titulo: newTitle.trim(), usuario: user.usuario }),
+      });
+      setEditingTitle(false);
+      await openProject(projectId);
+      await fetchProjects();
+    } catch { /* ignore */ }
+  }, [user, openProject, fetchProjects]);
+
+  const deleteDemand = useCallback(async (projectId: number) => {
+    if (!user || !confirm("Tem certeza que deseja excluir esta demanda?")) return;
+    try {
+      const role = isIT ? "admin" : "viewer";
+      const res = await fetch(`${BASE}/ai-assistant/projects/${projectId}?usuario=${user.usuario}&role=${role}`, { method: "DELETE" });
+      const data = await res.json();
+      if (data.error) return alert(data.error);
+      setSelectedProject(null);
+      setView("projects");
+      await fetchProjects();
+    } catch { /* ignore */ }
+  }, [user, isIT, fetchProjects]);
 
   useEffect(() => { if (view === "projects") fetchProjects(); }, [view, fetchProjects]);
 
@@ -608,7 +637,36 @@ export default function AiAssistant() {
                   <ChevronLeft className="w-4 h-4" />
                 </button>
                 <div className="flex-1 min-w-0">
-                  <h2 className="text-lg font-semibold text-foreground truncate">{selectedProject.titulo}</h2>
+                  {editingTitle ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={editTitleValue}
+                        onChange={(e) => setEditTitleValue(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") renameDemand(selectedProject.id, editTitleValue); if (e.key === "Escape") setEditingTitle(false); }}
+                        className="flex-1 rounded-lg border border-border bg-muted px-3 py-1.5 text-sm font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                        autoFocus
+                      />
+                      <button onClick={() => renameDemand(selectedProject.id, editTitleValue)} className="w-7 h-7 rounded-lg bg-green-600 flex items-center justify-center text-white hover:bg-green-700 transition-colors">
+                        <Check className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={() => setEditingTitle(false)} className="w-7 h-7 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-lg font-semibold text-foreground truncate">{selectedProject.titulo}</h2>
+                      <button onClick={() => { setEditTitleValue(selectedProject.titulo); setEditingTitle(true); }} className="w-6 h-6 rounded-md bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors shrink-0" title="Editar título">
+                        <Pencil className="w-3 h-3" />
+                      </button>
+                      {isIT && (
+                        <button onClick={() => deleteDemand(selectedProject.id)} className="w-6 h-6 rounded-md bg-red-500/10 flex items-center justify-center text-red-500 hover:bg-red-500/20 transition-colors shrink-0" title="Excluir demanda">
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  )}
                   <p className="text-[11px] text-muted-foreground">por {selectedProject.display_name} · {new Date(selectedProject.created_at).toLocaleDateString("pt-BR")}</p>
                 </div>
                 {(() => { const sc = STATUS_CONFIG[selectedProject.status] || STATUS_CONFIG.em_analise_ti; const Icon = sc.icon; return (

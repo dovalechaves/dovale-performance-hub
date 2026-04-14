@@ -729,6 +729,17 @@ router.patch("/projects/:id/status", async (req, res) => {
       }
     }
 
+    // Notifica TI via Chatwoot quando demanda volta para análise
+    if (status === "em_analise_ti") {
+      const projRow = await pool.request().input("pid", sql.Int, projectId)
+        .query(`SELECT titulo, display_name, usuario FROM dbo.AI_REQUESTS WHERE id = @pid`);
+      if (projRow.recordset.length > 0) {
+        const p = projRow.recordset[0];
+        notificarDemandaChatwoot(projectId, p.titulo || "Sem título", p.usuario, p.display_name || p.usuario)
+          .catch((e: any) => console.error("[Demanda→WPP] Erro:", e.message));
+      }
+    }
+
     res.json({ id: projectId, status, trelloUrl });
   } catch (err: any) {
     console.error("[ai-assistant] Status change error:", err?.message);
@@ -773,6 +784,58 @@ router.post("/projects/:id/comments", async (req, res) => {
   } catch (err: any) {
     console.error("[ai-assistant] Add comment error:", err?.message);
     res.status(500).json({ error: "Erro ao adicionar comentário." });
+  }
+});
+
+/** PATCH /projects/:id/titulo — rename a project */
+router.patch("/projects/:id/titulo", async (req, res) => {
+  try {
+    const { titulo, usuario } = req.body ?? {};
+    if (!titulo || !usuario) {
+      return res.status(400).json({ error: "titulo e usuario são obrigatórios." });
+    }
+    const pool = await getPool();
+    const projectId = parseInt(req.params.id);
+    const check = await pool.request().input("id", sql.Int, projectId)
+      .query(`SELECT id, usuario FROM dbo.AI_REQUESTS WHERE id = @id`);
+    if (check.recordset.length === 0) {
+      return res.status(404).json({ error: "Projeto não encontrado." });
+    }
+    await pool.request()
+      .input("id", sql.Int, projectId)
+      .input("titulo", sql.NVarChar(500), titulo.trim())
+      .input("updated_at", sql.DateTime, new Date())
+      .query(`UPDATE dbo.AI_REQUESTS SET titulo = @titulo, updated_at = @updated_at WHERE id = @id`);
+    res.json({ ok: true });
+  } catch (err: any) {
+    console.error("[ai-assistant] Rename error:", err?.message);
+    res.status(500).json({ error: "Erro ao renomear projeto." });
+  }
+});
+
+/** DELETE /projects/:id — delete a project (admin only) */
+router.delete("/projects/:id", async (req, res) => {
+  try {
+    const { usuario, role } = req.query;
+    if (role !== "admin") {
+      return res.status(403).json({ error: "Apenas administradores podem excluir demandas." });
+    }
+    const pool = await getPool();
+    const projectId = parseInt(req.params.id);
+    const check = await pool.request().input("id", sql.Int, projectId)
+      .query(`SELECT id FROM dbo.AI_REQUESTS WHERE id = @id`);
+    if (check.recordset.length === 0) {
+      return res.status(404).json({ error: "Projeto não encontrado." });
+    }
+    // Delete comments first, then the project
+    await pool.request().input("rid", sql.Int, projectId)
+      .query(`DELETE FROM dbo.AI_REQUEST_COMMENTS WHERE request_id = @rid`);
+    await pool.request().input("id", sql.Int, projectId)
+      .query(`DELETE FROM dbo.AI_REQUESTS WHERE id = @id`);
+    res.json({ ok: true });
+  } catch (err: any) {
+    console.error("[ai-assistant] Delete error:", err?.message);
+    res.status(500).json({ error: "Erro ao excluir projeto." });
   }
 });
 

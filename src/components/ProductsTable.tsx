@@ -683,26 +683,20 @@ const ProductsTable = () => {
             </div>
           )}
 
-          {/* Marketplace (modo indústria) */}
-          {calcMode === "industria" && (
-            <div>
-              <label className={labelClass}>Marketplace</label>
-              <div className="relative">
-                <select
-                  value={marketplace}
-                  onChange={(e) => setMarketplace(e.target.value as Marketplace)}
-                  className={selectClass}
-                >
-                  {Object.entries(MARKETPLACE_LABELS).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-                <ChevronIcon />
-              </div>
+          {/* Marketplace */}
+          <div>
+            <label className={labelClass}>Marketplace</label>
+            <div className="relative">
+              <select
+                value={marketplace}
+                onChange={(e) => setMarketplace(e.target.value as Marketplace)}
+                className={selectClass}
+              >
+                <option value="mercadolivre">Mercado Livre</option>
+              </select>
+              <ChevronIcon />
             </div>
-          )}
+          </div>
 
           {/* Magalu Tier (só aparece quando Magalu está selecionado no modo indústria) */}
           {calcMode === "industria" && marketplace === "magalu" && (
@@ -768,19 +762,6 @@ const ProductsTable = () => {
             </div>
           )}
 
-          {/* Desconto no Frete */}
-          <div>
-            <label className={labelClass}>Desconto no Frete (%)</label>
-            <Input
-              type="number"
-              min="0"
-              max="100"
-              step="1"
-              value={descontoFrete}
-              onChange={(e) => setDescontoFrete(Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))}
-              className="w-full bg-secondary border-0 rounded-lg px-4 py-3.5 text-sm"
-            />
-          </div>
         </div>
 
         {/* Info loja */}

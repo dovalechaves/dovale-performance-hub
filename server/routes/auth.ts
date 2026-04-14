@@ -150,7 +150,7 @@ function mergeApps(
     merged[appKey] = {
       app_key: appKey,
       role,
-      loja: (appKey === "dashboard" || appKey === "fechamento") && role === "manager" ? (row?.loja ? String(row.loja) : null) : null,
+      loja: (appKey === "dashboard" || appKey === "calculadora" || appKey === "fechamento") && role === "manager" ? (row?.loja ? String(row.loja) : null) : null,
       can_access: isEnabledFlag(row?.ativo),
       ...(appKey === "inventario" && row?.usu_codigo_sistema != null ? { usu_codigo_sistema: Number(row.usu_codigo_sistema) } : {}),
     };
@@ -196,7 +196,7 @@ function normalizeAppsPayload(
       merged[appKey] = {
         app_key: appKey,
         role,
-        loja: (appKey === "dashboard" || appKey === "fechamento") && role === "manager" ? (raw.loja ? String(raw.loja) : null) : null,
+        loja: (appKey === "dashboard" || appKey === "calculadora" || appKey === "fechamento") && role === "manager" ? (raw.loja ? String(raw.loja) : null) : null,
         can_access: typeof raw.can_access === "boolean" ? raw.can_access : merged[appKey].can_access,
       };
     }

@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
-import { fetchProduto, fetchContasPagar, type LojaCalc } from "@/lib/ecommerce-api";
+import { fetchProdutoLoja, fetchContasPagar, fetchCustoOperacional, type LojaCalc, type CustoOperacionalItem } from "@/lib/ecommerce-api";
 
 const TAX_RATE = 0.08; // 8% para lojas
 const ML_FEE = 0.165;  // 16.5% Mercado Livre
@@ -48,11 +48,17 @@ const LojaCalculator = () => {
   const [produtoNome, setProdutoNome] = useState<string | null>(null);
   const [produtoErro, setProdutoErro] = useState<string | null>(null);
 
+  // Contas a pagar (total do mês = valor_participacao para rateio)
   const [contasPagar, setContasPagar] = useState<number | null>(null);
   const [contasPagarLoading, setContasPagarLoading] = useState(false);
   const contasPagarRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Busca contas a pagar quando loja muda
+  // Custo operacional rateado por produto (mesma lógica da indústria)
+  const [custoOpUnit, setCustoOpUnit] = useState<number | null>(null);
+  const [custoOpData, setCustoOpData] = useState<Record<number, CustoOperacionalItem>>({});
+  const custoOpRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 1. Busca contas a pagar quando loja muda
   useEffect(() => {
     if (contasPagarRef.current) clearTimeout(contasPagarRef.current);
     contasPagarRef.current = setTimeout(() => {
@@ -65,16 +71,41 @@ const LojaCalculator = () => {
     return () => { if (contasPagarRef.current) clearTimeout(contasPagarRef.current); };
   }, [loja]);
 
+  // 2. Quando contas a pagar mudar, busca custo operacional rateado
+  useEffect(() => {
+    if (contasPagar == null || contasPagar <= 0) { setCustoOpData({}); return; }
+    if (custoOpRef.current) clearTimeout(custoOpRef.current);
+    custoOpRef.current = setTimeout(() => {
+      fetchCustoOperacional(contasPagar)
+        .then((data) => setCustoOpData(data))
+        .catch(() => setCustoOpData({}));
+    }, 300);
+    return () => { if (custoOpRef.current) clearTimeout(custoOpRef.current); };
+  }, [contasPagar]);
+
+  // 3. Quando produto ou custoOpData mudar, atualiza custoOpUnit
+  useEffect(() => {
+    if (!codigoProduto.trim()) { setCustoOpUnit(null); return; }
+    const cod = Number(codigoProduto);
+    const item = custoOpData[cod];
+    setCustoOpUnit(item?.custo_operacional_unit ?? null);
+  }, [codigoProduto, custoOpData]);
+
   const buscarProduto = async () => {
     if (!codigoProduto.trim()) return;
     setIsLoadingProduto(true);
     setProdutoErro(null);
     setProdutoNome(null);
+    setCustoOpUnit(null);
     try {
-      const data = await fetchProduto(codigoProduto);
+      const data = await fetchProdutoLoja(codigoProduto, loja);
       setCustoProduto(Number(data.custo).toFixed(2));
       if (data.peso) setPesoGramas(String(data.peso));
       setProdutoNome(data.resumo);
+      // Atualiza custo op do produto
+      const cod = Number(codigoProduto);
+      const item = custoOpData[cod];
+      setCustoOpUnit(item?.custo_operacional_unit ?? null);
     } catch {
       setProdutoErro("Produto não encontrado");
     } finally {
@@ -89,8 +120,8 @@ const LojaCalculator = () => {
 
     const taxa = price * ML_FEE;
     const imposto = price * TAX_RATE;
-    const custoOp = contasPagar ?? 0;
-    const cost = custoBase + custoOp;
+    const opCost = custoOpUnit ?? 0;
+    const cost = custoBase + opCost;
     const profit = price - taxa - imposto - cost;
     const calculatedMargin = cost > 0 ? (profit / cost) * 100 : 0;
 
@@ -99,10 +130,10 @@ const LojaCalculator = () => {
       lucroPorVenda: profit,
       taxa,
       imposto,
-      custoOp,
+      custoOp: opCost,
       margemCalculada: calculatedMargin,
     };
-  }, [precoVenda, desconto, custoProduto, contasPagar]);
+  }, [precoVenda, desconto, custoProduto, custoOpUnit]);
 
   const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -189,9 +220,9 @@ const LojaCalculator = () => {
             )}
           </div>
 
-          {/* Custo Operacional — Contas a Pagar */}
+          {/* Contas a Pagar (total mês) */}
           <div className="space-y-2 mb-6">
-            <label className={labelClass}>Custo Operacional — Contas a Pagar (R$)</label>
+            <label className={labelClass}>Contas a Pagar do Mês (R$)</label>
             <input
               type="text"
               readOnly
@@ -200,8 +231,20 @@ const LojaCalculator = () => {
               className={`${inputClass} opacity-70 cursor-not-allowed`}
             />
             {contasPagar != null && (
-              <p className="text-xs text-[#00A650] font-medium mt-1">✅ Total contas a pagar ({LOJA_LABELS[loja]}) — mês vigente</p>
+              <p className="text-xs text-muted-foreground mt-1">Total {LOJA_LABELS[loja]} — usado como base de rateio</p>
             )}
+          </div>
+
+          {/* Custo Operacional Rateado */}
+          <div className="space-y-2 mb-6">
+            <label className={labelClass}>Custo Operacional (R$)</label>
+            <input
+              type="text"
+              readOnly
+              value={custoOpUnit != null ? fmt(custoOpUnit) : "—"}
+              placeholder="—"
+              className={`${inputClass} opacity-70 cursor-not-allowed`}
+            />
           </div>
 
           {/* Custo Real */}
@@ -210,7 +253,7 @@ const LojaCalculator = () => {
             <input
               type="text"
               readOnly
-              value={custoProduto !== "" ? fmt((parseFloat(custoProduto) || 0) + (contasPagar ?? 0)) : "—"}
+              value={custoProduto !== "" ? fmt((parseFloat(custoProduto) || 0) + (custoOpUnit ?? 0)) : "—"}
               placeholder="—"
               className={`${inputClass} opacity-70 cursor-not-allowed text-primary font-bold`}
             />
@@ -272,11 +315,14 @@ const LojaCalculator = () => {
             <ResultRow label="Loja" value={LOJA_LABELS[loja]} />
             <ResultRow label="Marketplace" value="Mercado Livre" />
             <ResultRow label="Custo do Produto" value={fmt(parseFloat(custoProduto) || 0)} />
-            {contasPagar != null && contasPagar > 0 && (
-              <ResultRow label="Contas a Pagar (mês)" value={fmt(contasPagar)} />
+            {contasPagar != null && (
+              <ResultRow label={`Contas a Pagar (${LOJA_LABELS[loja]})`} value={fmt(contasPagar)} />
             )}
-            {contasPagar != null && contasPagar > 0 && (
-              <ResultRow label="Custo Real" value={fmt((parseFloat(custoProduto) || 0) + contasPagar)} accent />
+            {custoOpUnit != null && (
+              <ResultRow label="Custo Operacional" value={fmt(custoOpUnit)} />
+            )}
+            {custoOpUnit != null && (
+              <ResultRow label="Custo Real" value={fmt((parseFloat(custoProduto) || 0) + custoOpUnit)} accent />
             )}
             <ResultRow label="Preço do Produto" value={fmt(parseFloat(precoVenda) || 0)} />
             <ResultRow label="Desconto" value={`${desconto}%`} />

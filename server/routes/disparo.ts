@@ -143,7 +143,7 @@ router.post("/upload", uploadContatos.single("file"), async (req: Request, res: 
   fs.renameSync(filepath, destPath);
 
   try {
-    const contatos = validarArquivo(destPath);
+    const { contatos, descartados } = validarArquivo(destPath);
     let novaListaId: number;
     for (let t = 0; t < 3; t++) {
       try {
@@ -161,7 +161,7 @@ router.post("/upload", uploadContatos.single("file"), async (req: Request, res: 
       lista_id: novaListaId!, nome: c.Nome, numero: c.Numero, dados_extras: JSON.stringify(c.dadosExtras),
     }));
     await supaInsertBatch("contatos_lista", rows);
-    res.status(201).json({ mensagem: "Lista importada com sucesso", lista_id: novaListaId!, total: contatos.length });
+    res.status(201).json({ mensagem: "Lista importada com sucesso", lista_id: novaListaId!, total: contatos.length, descartados });
   } catch (e: any) {
     res.status(400).json({ erro: e.message });
   }

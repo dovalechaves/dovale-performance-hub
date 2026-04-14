@@ -114,7 +114,7 @@ export async function exchangeHubToken(usuario: string, displayName: string): Pr
 
 // ── Upload ───────────────────────────────────────────────────────────────────
 
-export async function uploadContatos(file: File): Promise<{ lista_id: number; total: number }> {
+export async function uploadContatos(file: File): Promise<{ lista_id: number; total: number; descartados: number }> {
   const form = new FormData();
   form.append("file", file);
   const r = await authFetch(`${API_BASE}/api/disparo/upload`, { method: "POST", body: form });

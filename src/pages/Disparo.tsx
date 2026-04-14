@@ -186,8 +186,9 @@ export default function Disparo() {
       const r = await api.uploadContatos(uploadFile);
       setListaId(r.lista_id);
       setTotalContatos(r.total);
-      addLog(`Lista importada: ${r.total} contatos (ID ${r.lista_id})`);
-      toast.success(`${r.total} contatos importados!`);
+      const descMsg = r.descartados > 0 ? ` (${r.descartados} descartados por número inválido)` : "";
+      addLog(`Lista importada: ${r.total} contatos${descMsg} (ID ${r.lista_id})`);
+      toast.success(`${r.total} contatos importados!${descMsg}`);
     } catch (e: any) {
       toast.error(e.message);
     } finally {

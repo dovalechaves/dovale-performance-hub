@@ -42,9 +42,17 @@ export async function fetchProduto(codigo: string): Promise<Produto> {
   return res.json();
 }
 
+export type LojaCalc = "fast" | "santana" | "rj";
+
 export async function fetchProdutos(): Promise<Produto[]> {
   const res = await fetch(`${BASE}/produtos`);
   if (!res.ok) throw new Error("Erro ao carregar produtos");
+  return res.json();
+}
+
+export async function fetchProdutosLoja(loja: LojaCalc): Promise<Produto[]> {
+  const res = await fetch(`${BASE}/produtos-loja?loja=${loja}`);
+  if (!res.ok) throw new Error("Erro ao carregar produtos da loja");
   return res.json();
 }
 
@@ -96,7 +104,11 @@ export async function fetchCustoOperacional(
   return res.json();
 }
 
-export type LojaCalc = "fast" | "santana" | "rj";
+export async function fetchProdutoLoja(codigo: string, loja: LojaCalc): Promise<Produto> {
+  const res = await fetch(`${BASE}/produto-loja/${encodeURIComponent(codigo)}?loja=${loja}`);
+  if (!res.ok) throw new Error("Produto não encontrado nesta loja");
+  return res.json();
+}
 
 export async function fetchContasPagar(loja: LojaCalc): Promise<{ loja: string; total: number }> {
   const res = await fetch(`${BASE}/contas-pagar?loja=${loja}`);

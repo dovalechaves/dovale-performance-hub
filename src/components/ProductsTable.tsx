@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { fetchProdutos, fetchCustoOperacional, CustoOperacionalItem } from "@/lib/ecommerce-api";
+import { fetchProdutos, fetchProdutosLoja, fetchCustoOperacional, fetchContasPagar, CustoOperacionalItem, type LojaCalc } from "@/lib/ecommerce-api";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import * as XLSX from "xlsx";
@@ -13,7 +13,14 @@ interface Product {
   peso: number;
 }
 
+type CalcMode = "industria" | "loja";
 type Marketplace = "mercadolivre" | "amazon" | "shopee" | "tiktok" | "magalu";
+
+const LOJA_LABELS: Record<LojaCalc, string> = {
+  fast: "Fast",
+  santana: "Santana",
+  rj: "Rio de Janeiro",
+};
 
 const MARKETPLACE_LABELS: Record<Marketplace, string> = {
   mercadolivre: "Mercado Livre",
@@ -201,6 +208,8 @@ const ChevronIcon = () => (
 );
 
 const ProductsTable = () => {
+  const [calcMode, setCalcMode] = useState<CalcMode>("industria");
+  const [loja, setLoja] = useState<LojaCalc>("fast");
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -215,9 +224,17 @@ const ProductsTable = () => {
   const [custoOpLoading, setCustoOpLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Contas a pagar (só no modo loja)
+  const [contasPagar, setContasPagar] = useState<number | null>(null);
+  const [contasPagarLoading, setContasPagarLoading] = useState(false);
+  const contasPagarRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Carrega produtos conforme modo e loja
   useEffect(() => {
     setIsLoading(true);
-    fetchProdutos()
+    setLoadError(null);
+    const promise = calcMode === "loja" ? fetchProdutosLoja(loja) : fetchProdutos();
+    promise
       .then((data) => {
         setProducts(
           data.map((p) => ({
@@ -232,7 +249,7 @@ const ProductsTable = () => {
       })
       .catch(() => setLoadError("Não foi possível carregar os produtos. Verifique se o backend está rodando."))
       .finally(() => setIsLoading(false));
-  }, []);
+  }, [calcMode, loja]);
 
   useEffect(() => {
     const media = window.matchMedia("(min-width: 1536px)");
@@ -246,19 +263,36 @@ const ProductsTable = () => {
     };
   }, []);
 
-  // Busca custo operacional; re-executa com debounce quando valorParticipacao muda
+  // Busca contas a pagar no modo loja
+  useEffect(() => {
+    if (calcMode !== "loja") { setContasPagar(null); return; }
+    if (contasPagarRef.current) clearTimeout(contasPagarRef.current);
+    contasPagarRef.current = setTimeout(() => {
+      setContasPagarLoading(true);
+      fetchContasPagar(loja)
+        .then((d) => setContasPagar(d.total))
+        .catch(() => setContasPagar(null))
+        .finally(() => setContasPagarLoading(false));
+    }, 300);
+    return () => { if (contasPagarRef.current) clearTimeout(contasPagarRef.current); };
+  }, [calcMode, loja]);
+
+  // Valor de participação efetivo: contas a pagar (loja) ou input manual (indústria)
+  const effectiveValorParticipacao = calcMode === "loja" ? (contasPagar ?? 0) : valorParticipacao;
+
+  // Busca custo operacional rateado
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       setCustoOpLoading(true);
       setCustoOpError(null);
-      fetchCustoOperacional(valorParticipacao)
+      fetchCustoOperacional(effectiveValorParticipacao)
         .then((data) => { setCustoOp(data); setCustoOpError(null); })
         .catch((e: Error) => { setCustoOp({}); setCustoOpError(e.message); })
         .finally(() => setCustoOpLoading(false));
     }, 600);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [valorParticipacao]);
+  }, [effectiveValorParticipacao]);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState("");
@@ -267,37 +301,40 @@ const ProductsTable = () => {
   const [magaluTier, setMagaluTier] = useState<MagaluTier>("silver");
   const [currentPage, setCurrentPage] = useState(1);
 
+  const effectiveMarketplace = calcMode === "loja" ? "mercadolivre" as Marketplace : marketplace;
+
   const effectiveFeeRate = useMemo(() => {
-    if (marketplace === "mercadolivre") {
+    if (effectiveMarketplace === "mercadolivre") {
       return 0.165;
     }
-    return MARKETPLACE_FEES[marketplace] / 100;
-  }, [marketplace]);
+    return MARKETPLACE_FEES[effectiveMarketplace] / 100;
+  }, [effectiveMarketplace]);
 
   const TIKTOK_FIXED_FEE = 4;
   const MAGALU_FIXED_FEE = 5;
 
-  const taxRate = 0.21;
+  const taxRate = calcMode === "loja" ? 0.08 : 0.21;
 
   const getCalculatedValues = useCallback(
     (product: Product) => {
       const recebimento = product.precoFinal * (1 - product.percentualDesconto / 100);
-      const taxa = marketplace === "shopee"
+      const mp = effectiveMarketplace;
+      const taxa = mp === "shopee"
         ? shopeeFee(recebimento)
-        : marketplace === "tiktok"
+        : mp === "tiktok"
           ? recebimento * effectiveFeeRate + TIKTOK_FIXED_FEE
-          : marketplace === "magalu"
+          : mp === "magalu"
             ? recebimento * effectiveFeeRate + MAGALU_FIXED_FEE
             : recebimento * effectiveFeeRate;
 
       const freteBase =
-        marketplace === "mercadolivre" && recebimento >= 79
+        mp === "mercadolivre" && recebimento >= 79
           ? estimateShipping(recebimento, product.peso)
-          : marketplace === "amazon"
+          : mp === "amazon"
             ? estimateAmazonShipping(recebimento, product.peso)
-            : marketplace === "tiktok"
+            : mp === "tiktok"
               ? recebimento * 0.06
-              : marketplace === "magalu"
+              : mp === "magalu"
                 ? estimateMagaluShipping(product.peso, MAGALU_TIER_DISCOUNT[magaluTier])
                 : 0;
       const frete = freteBase * (1 - descontoFrete / 100);
@@ -314,7 +351,7 @@ const ProductsTable = () => {
 
       return { recebimento, taxa, frete, imposto, custoReal, lucro, margem, margemComImposto };
     },
-    [effectiveFeeRate, marketplace, taxRate, custoOp, descontoFrete, magaluTier]
+    [effectiveFeeRate, effectiveMarketplace, taxRate, custoOp, descontoFrete, magaluTier]
   );
 
   const updateProduct = useCallback((codigo: string, updates: Partial<Product>) => {
@@ -380,7 +417,7 @@ const ProductsTable = () => {
   const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
   const exportToExcel = () => {
-    const showFrete = marketplace !== "shopee";
+    const showFrete = effectiveMarketplace !== "shopee";
     const headers = [
       "Código", "Descrição", "% Desc", "Preço Final", "Preço c/ Desc",
       `Taxa (${MARKETPLACE_LABELS[marketplace]})`,
@@ -560,8 +597,9 @@ const ProductsTable = () => {
     XLSX.writeFile(wb, `produtos_${MARKETPLACE_LABELS[marketplace].toLowerCase().replace(" ", "_")}.xlsx`);
   };
 
-  const taxaLabel =
-    marketplace === "mercadolivre"
+  const taxaLabel = calcMode === "loja"
+    ? "Taxa ML (16,5%)"
+    : marketplace === "mercadolivre"
       ? "Taxa ML (Premium 16,5%)"
       : marketplace === "amazon"
         ? "Amazon (11%)"
@@ -570,6 +608,8 @@ const ProductsTable = () => {
           : marketplace === "magalu"
             ? "Magalu (14% + R$5)"
             : "Shopee (14%~20% + fixo)";
+
+  const impostoLabel = `Imposto (${(taxRate * 100).toFixed(0)}%)`;
 
   return (
     <div className="bg-card rounded-2xl p-8 shadow-sm">
@@ -583,6 +623,30 @@ const ProductsTable = () => {
             className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
           >
             Exportar Excel
+          </button>
+        </div>
+
+        {/* Modo: Indústria / Loja */}
+        <div className="flex gap-1 mb-6">
+          <button
+            onClick={() => setCalcMode("industria")}
+            className={`px-5 py-2 rounded-lg text-xs font-semibold uppercase tracking-widest transition-colors ${
+              calcMode === "industria"
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+            }`}
+          >
+            Indústria
+          </button>
+          <button
+            onClick={() => setCalcMode("loja")}
+            className={`px-5 py-2 rounded-lg text-xs font-semibold uppercase tracking-widest transition-colors ${
+              calcMode === "loja"
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+            }`}
+          >
+            Loja
           </button>
         </div>
 
@@ -600,27 +664,48 @@ const ProductsTable = () => {
             />
           </div>
 
-          {/* Marketplace */}
-          <div>
-            <label className={labelClass}>Marketplace</label>
-            <div className="relative">
-              <select
-                value={marketplace}
-                onChange={(e) => setMarketplace(e.target.value as Marketplace)}
-                className={selectClass}
-              >
-                {Object.entries(MARKETPLACE_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-              <ChevronIcon />
+          {/* Loja selector (modo loja) */}
+          {calcMode === "loja" && (
+            <div>
+              <label className={labelClass}>Loja</label>
+              <div className="relative">
+                <select
+                  value={loja}
+                  onChange={(e) => setLoja(e.target.value as LojaCalc)}
+                  className={selectClass}
+                >
+                  {Object.entries(LOJA_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+                <ChevronIcon />
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Magalu Tier (só aparece quando Magalu está selecionado) */}
-          {marketplace === "magalu" && (
+          {/* Marketplace (modo indústria) */}
+          {calcMode === "industria" && (
+            <div>
+              <label className={labelClass}>Marketplace</label>
+              <div className="relative">
+                <select
+                  value={marketplace}
+                  onChange={(e) => setMarketplace(e.target.value as Marketplace)}
+                  className={selectClass}
+                >
+                  {Object.entries(MARKETPLACE_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronIcon />
+              </div>
+            </div>
+          )}
+
+          {/* Magalu Tier (só aparece quando Magalu está selecionado no modo indústria) */}
+          {calcMode === "industria" && marketplace === "magalu" && (
             <div>
               <label className={labelClass}>Reputação Magalu</label>
               <div className="relative">
@@ -640,28 +725,48 @@ const ProductsTable = () => {
             </div>
           )}
 
-          {/* Valor de Participação */}
-          <div>
-            <label className={labelClass}>
-              Valor de Participação (R$)
-              {custoOpLoading && (
-                <span className="ml-2 text-primary font-normal normal-case tracking-normal">calculando...</span>
-              )}
-              {custoOpError && (
-                <span className="ml-2 text-destructive font-normal normal-case tracking-normal" title={custoOpError}>
-                  erro ao carregar
-                </span>
-              )}
-            </label>
-            <Input
-              type="number"
-              min="0"
-              step="100000"
-              value={valorParticipacaoInput}
-              onChange={(e) => setValorParticipacaoInput(e.target.value)}
-              className="w-full bg-secondary border-0 rounded-lg px-4 py-3.5 text-sm"
-            />
-          </div>
+          {/* Valor de Participação (modo indústria) */}
+          {calcMode === "industria" && (
+            <div>
+              <label className={labelClass}>
+                Valor de Participação (R$)
+                {custoOpLoading && (
+                  <span className="ml-2 text-primary font-normal normal-case tracking-normal">calculando...</span>
+                )}
+                {custoOpError && (
+                  <span className="ml-2 text-destructive font-normal normal-case tracking-normal" title={custoOpError}>
+                    erro ao carregar
+                  </span>
+                )}
+              </label>
+              <Input
+                type="number"
+                min="0"
+                step="100000"
+                value={valorParticipacaoInput}
+                onChange={(e) => setValorParticipacaoInput(e.target.value)}
+                className="w-full bg-secondary border-0 rounded-lg px-4 py-3.5 text-sm"
+              />
+            </div>
+          )}
+
+          {/* Contas a Pagar (modo loja) */}
+          {calcMode === "loja" && (
+            <div>
+              <label className={labelClass}>
+                Contas a Pagar do Mês
+                {contasPagarLoading && (
+                  <span className="ml-2 text-primary font-normal normal-case tracking-normal">carregando...</span>
+                )}
+              </label>
+              <Input
+                type="text"
+                readOnly
+                value={contasPagar != null ? contasPagar.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "—"}
+                className="w-full bg-secondary border-0 rounded-lg px-4 py-3.5 text-sm opacity-70 cursor-not-allowed"
+              />
+            </div>
+          )}
 
           {/* Desconto no Frete */}
           <div>
@@ -678,6 +783,11 @@ const ProductsTable = () => {
           </div>
         </div>
 
+        {/* Info loja */}
+        {calcMode === "loja" && (
+          <p className="text-xs text-primary font-medium mb-4">Modo Loja: Imposto 8% · ML 16,5% · Custo Op. rateado via contas a pagar</p>
+        )}
+
         {/* Tabela completa (somente telas muito largas) */}
         {is2xlScreen && <div className="overflow-hidden rounded-xl border border-border/60">
           <table className="w-full table-fixed text-xs">
@@ -689,10 +799,10 @@ const ProductsTable = () => {
                 <th className="px-2 py-2 text-right font-semibold text-foreground uppercase tracking-wider">Preço Final</th>
                 <th className="px-2 py-2 text-right font-semibold text-muted-foreground uppercase tracking-wider">Preço</th>
                 <th className="px-2 py-2 text-right font-semibold text-muted-foreground uppercase tracking-wider">{taxaLabel}</th>
-                {marketplace !== "shopee" && (
+                {effectiveMarketplace !== "shopee" && (
                   <th className="px-2 py-2 text-right font-semibold text-muted-foreground uppercase tracking-wider">Frete (est.)</th>
                 )}
-                <th className="px-2 py-2 text-right font-semibold text-muted-foreground uppercase tracking-wider">Imposto</th>
+                <th className="px-2 py-2 text-right font-semibold text-muted-foreground uppercase tracking-wider">{impostoLabel}</th>
                 <th className="px-2 py-2 text-right font-semibold text-muted-foreground uppercase tracking-wider">Custo</th>
                 <th className="px-2 py-2 text-right font-semibold text-muted-foreground uppercase tracking-wider">Custo Op.</th>
                 <th className="px-2 py-2 text-right font-semibold text-primary uppercase tracking-wider">Custo Real</th>
@@ -731,7 +841,7 @@ const ProductsTable = () => {
                     </td>
                     <td className="px-2 py-2 text-right text-muted-foreground">{fmt(values.recebimento)}</td>
                     <td className="px-2 py-2 text-right text-muted-foreground">{fmt(values.taxa)}</td>
-                    {marketplace !== "shopee" && (
+                    {effectiveMarketplace !== "shopee" && (
                       <td className="px-2 py-2 text-right text-muted-foreground">{fmt(values.frete)}</td>
                     )}
                     <td className="px-2 py-2 text-right text-muted-foreground">{fmt(values.imposto)}</td>
@@ -811,7 +921,7 @@ const ProductsTable = () => {
                     <p className="text-sm text-foreground">{fmt(values.taxa)}</p>
                   </div>
 
-                  {marketplace !== "shopee" && (
+                  {effectiveMarketplace !== "shopee" && (
                     <div>
                       <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Frete (est.)</p>
                       <p className="text-sm text-foreground">{fmt(values.frete)}</p>
@@ -819,7 +929,7 @@ const ProductsTable = () => {
                   )}
 
                   <div>
-                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Imposto</p>
+                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">{impostoLabel}</p>
                     <p className="text-sm text-foreground">{fmt(values.imposto)}</p>
                   </div>
 

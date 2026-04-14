@@ -84,7 +84,43 @@ function estimateShipping(price: number, weightGrams: number): number {
 let custoCache: { base: Record<number, { venda_total: number; qtd_total: number; grand_total: number }> | null; ts: number } = { base: null, ts: 0 };
 const CUSTO_TTL = 30 * 60 * 1000;
 
+// ── Mapa de lojas Firebird ───────────────────────────────────────────────────
+const LOJA_FIREBIRD_MAP: Record<string, { fb: string; filial?: number }> = {
+  fast:    { fb: "fast", filial: 12 },
+  santana: { fb: "l2" },
+  rj:      { fb: "l3" },
+};
+
 // ── Routes ───────────────────────────────────────────────────────────────────
+
+/** GET /api/ecommerce/produto-loja/:codigo?loja=fast|santana|rj */
+router.get("/produto-loja/:codigo", async (req, res) => {
+  const loja = String(req.query.loja ?? "").toLowerCase();
+  const cfg = LOJA_FIREBIRD_MAP[loja];
+  if (!cfg) return res.status(400).json({ error: `Loja inválida. Use: ${Object.keys(LOJA_FIREBIRD_MAP).join(", ")}` });
+
+  try {
+    const rows = await queryFirebird<any>(
+      cfg.fb,
+      `SELECT pro.pro_codigo, pro.pro_resumo AS resumo, tp.tbp_custo AS custo
+       FROM produtos pro
+       INNER JOIN tabelas_produtos tp ON tp.tbp_pro_codigo = pro.pro_codigo
+       WHERE tp.tbp_tab_codigo = 1 AND pro.pro_codigo = ?`,
+      [Number(req.params.codigo)]
+    );
+    if (!rows.length) return res.status(404).json({ error: "Produto não encontrado nesta loja" });
+    const r = rows[0];
+    res.json({
+      pro_codigo: r.PRO_CODIGO ?? r.pro_codigo,
+      resumo:     r.RESUMO     ?? r.resumo,
+      custo:      r.CUSTO      ?? r.custo,
+      peso:       r.PESO       ?? r.peso ?? 0,
+    });
+  } catch (err: any) {
+    console.error(`[ecommerce] produto-loja ${loja}:`, err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 /** GET /api/ecommerce/produto/:codigo */
 router.get("/produto/:codigo", async (req, res) => {
@@ -106,6 +142,35 @@ router.get("/produto/:codigo", async (req, res) => {
       peso:       r.PESO       ?? r.peso,
     });
   } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** GET /api/ecommerce/produtos-loja?loja=fast|santana|rj */
+router.get("/produtos-loja", async (req, res) => {
+  const loja = String(req.query.loja ?? "").toLowerCase();
+  const cfg = LOJA_FIREBIRD_MAP[loja];
+  if (!cfg) return res.status(400).json({ error: `Loja inválida. Use: ${Object.keys(LOJA_FIREBIRD_MAP).join(", ")}` });
+
+  try {
+    const rows = await queryFirebird<any>(
+      cfg.fb,
+      `SELECT pro.pro_codigo, pro.pro_resumo AS resumo,
+              t1.tbp_custo AS custo, t4.tbp_custo AS preco
+       FROM produtos pro
+       LEFT JOIN tabelas_produtos t1 ON t1.tbp_pro_codigo = pro.pro_codigo AND t1.tbp_tab_codigo = 1
+       LEFT JOIN tabelas_produtos t4 ON t4.tbp_pro_codigo = pro.pro_codigo AND t4.tbp_tab_codigo = 4
+       WHERE t1.tbp_pro_codigo IS NOT NULL`
+    );
+    res.json(rows.map((r: any) => ({
+      pro_codigo: r.PRO_CODIGO ?? r.pro_codigo,
+      resumo:     r.RESUMO     ?? r.resumo,
+      custo:      r.CUSTO      ?? r.custo,
+      preco:      r.PRECO      ?? r.preco,
+      peso:       0,
+    })));
+  } catch (err: any) {
+    console.error(`[ecommerce] produtos-loja ${loja}:`, err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -187,12 +252,6 @@ router.get("/custo-operacional", async (req, res) => {
 });
 
 /** GET /api/ecommerce/contas-pagar?loja=fast|santana|rj */
-const LOJA_FIREBIRD_MAP: Record<string, { fb: string; filial?: number }> = {
-  fast:    { fb: "fast", filial: 12 },
-  santana: { fb: "l2" },
-  rj:      { fb: "l3" },
-};
-
 router.get("/contas-pagar", async (req, res) => {
   const loja = String(req.query.loja ?? "").toLowerCase();
   const cfg = LOJA_FIREBIRD_MAP[loja];

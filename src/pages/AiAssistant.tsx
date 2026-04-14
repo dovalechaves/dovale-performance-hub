@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, Sun, Moon, Send, RotateCcw, Copy, Download, Loader2,
   CheckCircle2, Bot, User, MessageSquare, FolderOpen, Clock, ChevronLeft,
@@ -329,6 +329,21 @@ export default function AiAssistant() {
   }, [user, commentText, openProject]);
 
   useEffect(() => { if (view === "projects") fetchProjects(); }, [view, fetchProjects]);
+
+  // Deep-link: ?projeto=ID abre direto o detalhe
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const projetoId = searchParams.get("projeto");
+    if (projetoId) {
+      const id = parseInt(projetoId, 10);
+      if (!isNaN(id)) {
+        setView("projects");
+        openProject(id);
+      }
+      searchParams.delete("projeto");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams, openProject]);
 
   const progress = chat.totalStages > 0 ? Math.round((chat.stage / chat.totalStages) * 100) : 0;
 

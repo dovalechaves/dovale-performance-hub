@@ -265,7 +265,7 @@ export default function Hub() {
         </div>
 
         {visibleApps.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-4xl">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 max-w-5xl">
             {visibleApps.map((app) => (
               <button
                 key={app.route}

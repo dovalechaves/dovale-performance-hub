@@ -13,6 +13,7 @@ import disparoRouter, { setSocketIO } from "./routes/disparo";
 import aiAssistantRouter from "./routes/ai-assistant";
 import multiPrecoRouter from "./routes/multi-preco";
 import inventarioRouter, { setInventarioIO } from "./routes/inventario";
+import onboardingRouter from "./routes/onboarding";
 import { startSyncJob } from "./jobs/syncJob";
 import { startStockSnapshotJob, runStockSnapshotManual, getStockSnapshotStatus } from "./jobs/stockSnapshotJob";
 import { setupSwagger } from "./swagger";
@@ -33,6 +34,7 @@ app.use("/api/disparo",         disparoRouter);
 app.use("/api/ai-assistant",    aiAssistantRouter);
 app.use("/api/multi-preco",     multiPrecoRouter);
 app.use("/api/inventario",      inventarioRouter);
+app.use("/api/onboarding",      onboardingRouter);
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });

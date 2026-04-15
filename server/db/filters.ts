@@ -16,8 +16,17 @@ const IGNORAR_CODIGOS: Record<string, number[]> = {
   l3: [519, 543, 559, 2049],              // Rio de Janeiro: LENIN, LIGIA BENTO, RAYANE LIMA, REBECA PEREIRA
 };
 
+// Códigos PERMITIDOS por loja (whitelist — somente esses aparecem)
+const PERMITIR_CODIGOS: Record<string, number[]> = {
+  campinas: [24, 42, 6, 29, 3, 43],       // BEATRIZ, CAMILA, CHICO, Ester, LOJA, MAIARA
+};
+
 /** Gera o trecho WHERE para Firebird */
 export function firebirdFiltroRep(alias = "r", loja = "bh"): string {
+  const permitidos = PERMITIR_CODIGOS[loja];
+  if (permitidos?.length) {
+    return `AND ${alias}.REP_CODIGO IN (${permitidos.join(", ")})`;
+  }
   const nomes = IGNORAR_NOMES_BH.map(n => `'${n}'`).join(", ");
   const codigos = IGNORAR_CODIGOS[loja];
   const codigoFiltro = codigos?.length
@@ -113,6 +122,16 @@ export function consolidarVendas(rows: VendaRow[], loja: string): VendaRow[] {
 
 /** Filtro para queries de VENDAS — não exclui códigos consolidados (filhos) */
 export function firebirdFiltroVendas(alias = "r", loja = "bh"): string {
+  const permitidos = PERMITIR_CODIGOS[loja];
+  if (permitidos?.length) {
+    // Para lojas com whitelist, incluir permitidos + filhos de consolidação
+    const consolidados = new Set<number>();
+    for (const r of (CONSOLIDAR_REPS[loja] ?? [])) {
+      for (const f of r.filhos) consolidados.add(f);
+    }
+    const todos = [...new Set([...permitidos, ...consolidados])];
+    return `AND ${alias}.REP_CODIGO IN (${todos.join(", ")})`;
+  }
   const nomes = IGNORAR_NOMES_BH.map(n => `'${n}'`).join(", ");
   // Códigos a ignorar EXCETO os que serão consolidados
   const consolidados = new Set<number>();

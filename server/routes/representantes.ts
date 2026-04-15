@@ -17,7 +17,7 @@ router.get("/", async (req, res) => {
   const loja = (req.query.loja as string) || "bh";
 
   try {
-    const rows = await queryFirebird<RepFirebird>(loja as "bh" | "l2" | "l3", `
+    const rows = await queryFirebird<RepFirebird>(loja as any, `
       SELECT DISTINCT
         r.REP_CODIGO,
         r.REP_NOME

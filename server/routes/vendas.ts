@@ -11,13 +11,13 @@ const router = Router();
 router.get("/", async (req, res) => {
   const loja = (req.query.loja as string) || "bh";
 
-  if (!firebirdLojas.includes(loja as "bh" | "l2" | "l3")) {
+  if (!firebirdLojas.includes(loja as any)) {
     return res.status(400).json({ error: `Loja inválida. Use: ${firebirdLojas.join(", ")}` });
   }
 
   try {
     // TODO: ajuste a query conforme as tabelas do Microsys
-    const rows = await queryFirebird(loja as "bh", `
+    const rows = await queryFirebird(loja as any, `
       SELECT
         V.CODVEND   AS id,
         V.NOMEVEND  AS nome,

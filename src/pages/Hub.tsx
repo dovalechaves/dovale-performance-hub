@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import { BarChart3, Calculator, LogOut, Sun, Moon, Users, RefreshCw, Loader2, ChevronDown, Settings2, Send, Archive, Bot, Database, ClipboardList } from "lucide-react";
+import { BarChart3, Calculator, LogOut, Sun, Moon, Users, RefreshCw, Loader2, ChevronDown, Settings2, Send, Archive, Bot, Database, ClipboardList, UserPlus } from "lucide-react";
 import logoBlue from "@/assets/logo-blue.png";
 import logoWhite from "@/assets/logo-white.png";
 import { API_BASE, LOJAS, getAuthUsers, updateAuthUserRole, type AuthManagedUser } from "@/services/api";
@@ -71,6 +71,13 @@ const APPS: AppCard[] = [
     route: "/inventario",
     color: "from-teal-500/20 to-teal-600/10 border-teal-500/30 hover:border-teal-500/60",
   },
+  {
+    title: "Onboarding",
+    description: "Crie usuários no Active Directory automaticamente para novos funcionários.",
+    icon: <UserPlus className="w-8 h-8" />,
+    route: "/onboarding",
+    color: "from-indigo-500/20 to-indigo-600/10 border-indigo-500/30 hover:border-indigo-500/60",
+  },
 ];
 
 const APP_BY_ROUTE: Record<string, keyof AuthManagedUser["apps"]> = {
@@ -81,6 +88,7 @@ const APP_BY_ROUTE: Record<string, keyof AuthManagedUser["apps"]> = {
   "/ai-assistant": "assistente",
   "/multi-preco": "multipreco",
   "/inventario": "inventario",
+  "/onboarding": "onboarding",
 };
 
 export default function Hub() {
@@ -422,6 +430,10 @@ export default function Hub() {
                                   inventario: {
                                     ...u.apps.inventario,
                                     can_access: enabled ? u.apps.inventario.can_access : false,
+                                  },
+                                  onboarding: {
+                                    ...u.apps.onboarding,
+                                    can_access: enabled ? u.apps.onboarding.can_access : false,
                                   },
                                 },
                                 can_access_dashboard: enabled ? u.apps.dashboard.can_access : false,

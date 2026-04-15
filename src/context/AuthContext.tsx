@@ -46,6 +46,11 @@ interface AuthUser {
       role: Role;
       loja: string | null;
     };
+    onboarding: {
+      canAccess: boolean;
+      role: Role;
+      loja: string | null;
+    };
   };
 }
 
@@ -91,6 +96,7 @@ function buildUser(
     assistente?: { role?: string; loja?: string | null; can_access?: boolean };
     multipreco?: { role?: string; loja?: string | null; can_access?: boolean };
     inventario?: { role?: string; loja?: string | null; can_access?: boolean };
+    onboarding?: { role?: string; loja?: string | null; can_access?: boolean };
   }
 ): AuthUser {
   const dashboardRole = resolveRole(usuario, apiApps?.dashboard?.role ?? apiRole);
@@ -110,6 +116,8 @@ function buildUser(
   const multiprecoAccess = apiApps?.multipreco?.can_access ?? false;
   const inventarioRole = resolveRole(usuario, apiApps?.inventario?.role ?? apiRole);
   const inventarioAccess = apiApps?.inventario?.can_access ?? false;
+  const onboardingRole = resolveRole(usuario, apiApps?.onboarding?.role ?? apiRole);
+  const onboardingAccess = apiApps?.onboarding?.can_access ?? false;
 
   return {
     usuario,
@@ -156,6 +164,11 @@ function buildUser(
         role: inventarioRole,
         loja: null,
       },
+      onboarding: {
+        canAccess: onboardingAccess,
+        role: onboardingRole,
+        loja: null,
+      },
     },
   };
 }
@@ -182,6 +195,8 @@ function loadFromStorage(): AuthUser | null {
     const multiprecoAccess = (parsed.apps as any)?.multipreco?.canAccess ?? false;
     const inventarioRole = (parsed.apps as any)?.inventario?.role ?? parsed.role;
     const inventarioAccess = (parsed.apps as any)?.inventario?.canAccess ?? false;
+    const onboardingRole = (parsed.apps as any)?.onboarding?.role ?? parsed.role;
+    const onboardingAccess = (parsed.apps as any)?.onboarding?.canAccess ?? false;
 
     return {
       usuario: parsed.usuario,
@@ -226,6 +241,11 @@ function loadFromStorage(): AuthUser | null {
         inventario: {
           canAccess: inventarioAccess,
           role: inventarioRole,
+          loja: null,
+        },
+        onboarding: {
+          canAccess: onboardingAccess,
+          role: onboardingRole,
           loja: null,
         },
       },

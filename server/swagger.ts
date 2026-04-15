@@ -134,7 +134,7 @@ const spec: object = {
         tags: ["Dashboard — Vendas"],
         summary: "Vendas do dia por vendedor (Firebird)",
         parameters: [
-          { name: "loja", in: "query", schema: { type: "string", enum: ["bh", "l2", "l3"], default: "bh" } },
+          { name: "loja", in: "query", schema: { type: "string", enum: ["bh", "l2", "l3", "campinas"], default: "bh" } },
         ],
         responses: {
           200: { description: "Lista de vendas", content: { "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/VendaDia" } } } } },

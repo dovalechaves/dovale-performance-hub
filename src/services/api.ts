@@ -22,6 +22,7 @@ export const LOJAS = [
   { value: "bh", label: "Belo Horizonte" },
   { value: "l2", label: "Santana" },
   { value: "l3", label: "Rio de Janeiro" },
+  { value: "campinas", label: "Campinas" },
 ];
 
 async function handleResponse<T>(res: Response): Promise<T> {
@@ -89,6 +90,12 @@ export interface AuthManagedUser {
       loja: string | null;
       can_access: boolean;
       usu_codigo_sistema?: number | null;
+    };
+    onboarding: {
+      app_key: "onboarding";
+      role: "admin" | "manager" | "viewer";
+      loja: string | null;
+      can_access: boolean;
     };
   };
 }

@@ -95,7 +95,7 @@ router.get("/vendas", async (req, res) => {
 
   try {
     const rows = await queryFirebird<{ REP_CODIGO: string; REP_NOME: string; TOTAL_VENDAS: number }>(
-      loja as "bh" | "l2" | "l3",
+      loja as any,
       `SELECT
         r.REP_CODIGO,
         r.REP_NOME,
@@ -136,7 +136,7 @@ router.get("/vendas-hoje", async (req, res) => {
 
   try {
     const rows = await queryFirebird<{ REP_CODIGO: string; REP_NOME: string; TOTAL_VENDAS: number }>(
-      loja as "bh" | "l2" | "l3",
+      loja as any,
       `SELECT
         r.REP_CODIGO,
         r.REP_NOME,

@@ -47,8 +47,8 @@ export function firebirdFiltroRep(alias = "r", loja = "bh"): string {
  */
 const CONSOLIDAR_REPS: Record<string, { pai: number; nome: string; filhos: number[] }[]> = {
   bh: [
-    { pai: 46, nome: "LOJA", filhos: [118, 2102, 3105, 130, 3106, 2101] },
-    // 118=CAMILA-TELEVENDAS, 2102=CLARICE, 3105=DEISE, 130=INGRIDY-TELEVENDAS, 3106=JENNIFER S, 2101=LINDSAY
+    { pai: 46, nome: "LOJA", filhos: [3119, 46, 3115, 26, 3114, 100] },
+    // 3119, 46, 3115, 26, 3114, 100 conforme solicitado
   ],
 };
 
@@ -89,7 +89,7 @@ export function consolidarVendas(rows: VendaRow[], loja: string): VendaRow[] {
   // Soma vendas do próprio pai (se existir)
   for (const row of rows) {
     const code = String(row.rep_codigo).trim();
-    if (paiTotals.has(code)) {
+    if (paiTotals.has(code) && !filhoParaPai.has(code)) {
       paiTotals.get(code)!.total += row.total_vendas;
     }
   }
@@ -120,34 +120,26 @@ export function consolidarVendas(rows: VendaRow[], loja: string): VendaRow[] {
   return result;
 }
 
-/** Filtro para queries de VENDAS — não exclui códigos consolidados (filhos) */
+/** Gera o trecho WHERE para Firebird vendas */
 export function firebirdFiltroVendas(alias = "r", loja = "bh"): string {
-  const permitidos = PERMITIR_CODIGOS[loja];
-  if (permitidos?.length) {
-    // Para lojas com whitelist, incluir permitidos + filhos de consolidação
-    const consolidados = new Set<number>();
-    for (const r of (CONSOLIDAR_REPS[loja] ?? [])) {
-      for (const f of r.filhos) consolidados.add(f);
+  const baseFiltro = firebirdFiltroRep(alias, loja);
+  // Para BH, não aplicar filtros por nome para os códigos na lista de consolidação de LOJA
+  if (loja === "bh") {
+    const codigosConsolidados = CONSOLIDAR_REPS.bh[0]?.filhos || [];
+    if (codigosConsolidados.length) {
+      const codigos = codigosConsolidados.join(", ");
+      return baseFiltro
+        .replace(
+          `AND ${alias}.REP_NOME NOT CONTAINING 'DISTRIBUIDOR'`,
+          `AND (${alias}.REP_NOME NOT CONTAINING 'DISTRIBUIDOR' OR ${alias}.REP_CODIGO IN (${codigos}))`
+        )
+        .replace(
+          `AND ${alias}.REP_NOME NOT IN (${IGNORAR_NOMES_BH.map(n => `'${n}'`).join(", ")})`,
+          `AND (${alias}.REP_NOME NOT IN (${IGNORAR_NOMES_BH.map(n => `'${n}'`).join(", ")}) OR ${alias}.REP_CODIGO IN (${codigos}))`
+        );
     }
-    const todos = [...new Set([...permitidos, ...consolidados])];
-    return `AND ${alias}.REP_CODIGO IN (${todos.join(", ")})`;
   }
-  const nomes = IGNORAR_NOMES_BH.map(n => `'${n}'`).join(", ");
-  // Códigos a ignorar EXCETO os que serão consolidados
-  const consolidados = new Set<number>();
-  for (const r of (CONSOLIDAR_REPS[loja] ?? [])) {
-    for (const f of r.filhos) consolidados.add(f);
-  }
-  const codigos = (IGNORAR_CODIGOS[loja] ?? []).filter(c => !consolidados.has(c));
-  const codigoFiltro = codigos.length
-    ? `AND ${alias}.REP_CODIGO NOT IN (${codigos.join(", ")})`
-    : "";
-  return `
-    AND ${alias}.REP_NOME IS NOT NULL
-    AND ${alias}.REP_NOME NOT CONTAINING 'DISTRIBUIDOR'
-    AND ${alias}.REP_NOME NOT IN (${nomes})
-    ${codigoFiltro}
-  `;
+  return baseFiltro;
 }
 
 /** Gera o trecho WHERE para SQL Server */

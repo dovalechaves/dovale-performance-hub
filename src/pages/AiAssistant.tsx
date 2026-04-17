@@ -47,6 +47,17 @@ interface Project {
   trello_status?: { list: string; board: string } | null;
 }
 
+interface ConversationItem {
+  id: string;
+  usuario: string;
+  display_name: string;
+  status: string; // "ativa" | "pausada" | "concluida"
+  stage: number;
+  has_prd: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 interface Comment {
   id: number;
   request_id: number;
@@ -61,6 +72,12 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof
   em_analise_ti: { label: "Em Analise TI", color: "bg-yellow-500/15 text-yellow-600 border-yellow-500/30", icon: Clock },
   feedback_ti: { label: "Feedback TI", color: "bg-orange-500/15 text-orange-600 border-orange-500/30", icon: AlertCircle },
   aprovado: { label: "Aprovado", color: "bg-green-500/15 text-green-600 border-green-500/30", icon: CheckCircle2 },
+};
+
+const CONV_STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof MessageSquare }> = {
+  ativa: { label: "Em Progresso", color: "bg-cyan-500/15 text-cyan-600 border-cyan-500/30", icon: MessageSquare },
+  pausada: { label: "Pausada", color: "bg-yellow-500/15 text-yellow-600 border-yellow-500/30", icon: Clock },
+  concluida: { label: "Concluida", color: "bg-green-500/15 text-green-600 border-green-500/30", icon: CheckCircle2 },
 };
 
 export default function AiAssistant() {
@@ -79,8 +96,9 @@ export default function AiAssistant() {
     totalStages: 8,
   });
 
-  const [view, setView] = useState<View>("chat");
+  const [view, setView] = useState<View>(() => (localStorage.getItem("dovale_ai_view") as View) || "chat");
   const [projects, setProjects] = useState<Project[]>([]);
+  const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [commentText, setCommentText] = useState("");
@@ -110,10 +128,43 @@ export default function AiAssistant() {
     if (!loading) inputRef.current?.focus();
   }, [loading, chat.messages]);
 
-  // Start conversation on mount
+  // Persist view in localStorage
   useEffect(() => {
-    startConversation();
+    localStorage.setItem("dovale_ai_view", view);
+  }, [view]);
+
+  // Auto-load last active conversation on mount (chat view)
+  useEffect(() => {
+    if (view === "chat" && !chat.conversationId) {
+      loadLastConversation();
+    }
   }, []);
+
+  const loadLastConversation = useCallback(async () => {
+    if (!user?.usuario) return;
+    try {
+      const res = await fetch(`${BASE}/ai-assistant/conversations?usuario=${user.usuario}&role=viewer`);
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        const active = data.find((c: ConversationItem) => c.status === "ativa");
+        if (active) {
+          const convRes = await fetch(`${BASE}/ai-assistant/conversation/${active.id}`);
+          const convData = await convRes.json();
+          if (!convData.error) {
+            setChat({
+              conversationId: convData.conversation_id,
+              messages: convData.messages ?? [],
+              completed: convData.completed ?? false,
+              prd: convData.prd ?? null,
+              stage: convData.stage ?? 0,
+              totalStages: convData.totalStages ?? 8,
+            });
+            return;
+          }
+        }
+      }
+    } catch { /* ignore */ }
+  }, [user]);
 
   const startConversation = useCallback(async () => {
     setLoading(true);
@@ -121,7 +172,7 @@ export default function AiAssistant() {
       const res = await fetch(`${BASE}/ai-assistant/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ usuario: user?.usuario }),
+        body: JSON.stringify({ usuario: user?.usuario, display_name: user?.displayName }),
       });
       const data = await res.json();
       setChat({
@@ -163,6 +214,7 @@ export default function AiAssistant() {
           conversation_id: chat.conversationId,
           message: msg,
           usuario: user?.usuario,
+          display_name: user?.displayName,
         }),
       });
       const data = await res.json();
@@ -196,7 +248,7 @@ export default function AiAssistant() {
       const res = await fetch(`${BASE}/ai-assistant/restart`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversation_id: chat.conversationId, usuario: user?.usuario }),
+        body: JSON.stringify({ conversation_id: chat.conversationId, usuario: user?.usuario, display_name: user?.displayName }),
       });
       const data = await res.json();
       setChat({
@@ -251,9 +303,14 @@ export default function AiAssistant() {
     setProjectsLoading(true);
     try {
       const role = isIT ? "admin" : "viewer";
-      const res = await fetch(`${BASE}/ai-assistant/projects?usuario=${user?.usuario}&role=${role}`);
-      const data = await res.json();
-      if (Array.isArray(data)) setProjects(data);
+      const [projRes, convRes] = await Promise.all([
+        fetch(`${BASE}/ai-assistant/projects?usuario=${user?.usuario}&role=${role}`),
+        fetch(`${BASE}/ai-assistant/conversations?usuario=${user?.usuario}&role=${role}`),
+      ]);
+      const projData = await projRes.json();
+      const convData = await convRes.json();
+      if (Array.isArray(projData)) setProjects(projData);
+      if (Array.isArray(convData)) setConversations(convData);
     } catch { /* ignore */ } finally { setProjectsLoading(false); }
   }, [user, isIT]);
 
@@ -356,6 +413,56 @@ export default function AiAssistant() {
       await fetchProjects();
     } catch { /* ignore */ }
   }, [user, isIT, fetchProjects]);
+
+  const resumeConversation = useCallback(async (convId: string) => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${BASE}/ai-assistant/conversation/${convId}`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setChat({
+        conversationId: data.conversation_id,
+        messages: data.messages ?? [],
+        completed: data.completed ?? false,
+        prd: data.prd ?? null,
+        stage: data.stage ?? 0,
+        totalStages: data.totalStages ?? 8,
+      });
+      setView("chat");
+    } catch { /* ignore */ } finally { setLoading(false); }
+  }, []);
+
+  const deleteConversation = useCallback(async (convId: string) => {
+    if (!confirm("Tem certeza que deseja excluir esta conversa?")) return;
+    try {
+      await fetch(`${BASE}/ai-assistant/conversations/${convId}`, { method: "DELETE" });
+      await fetchProjects();
+    } catch { /* ignore */ }
+  }, [fetchProjects]);
+
+  const pauseConversation = useCallback(async (convId: string) => {
+    try {
+      await fetch(`${BASE}/ai-assistant/conversations/${convId}/pause`, { method: "PATCH" });
+      await fetchProjects();
+    } catch { /* ignore */ }
+  }, [fetchProjects]);
+
+  // Auto-pause conversation when user leaves chat view or page
+  useEffect(() => {
+    if (view === "projects" && chat.conversationId && !chat.completed) {
+      fetch(`${BASE}/ai-assistant/conversations/${chat.conversationId}/pause`, { method: "PATCH" }).catch(() => {});
+    }
+  }, [view, chat.conversationId, chat.completed]);
+
+  useEffect(() => {
+    const handleLeave = () => {
+      if (chat.conversationId && !chat.completed) {
+        navigator.sendBeacon(`${BASE}/ai-assistant/conversations/${chat.conversationId}/pause`);
+      }
+    };
+    window.addEventListener("beforeunload", handleLeave);
+    return () => window.removeEventListener("beforeunload", handleLeave);
+  }, [chat.conversationId, chat.completed]);
 
   useEffect(() => { if (view === "projects") fetchProjects(); }, [view, fetchProjects]);
 
@@ -510,6 +617,26 @@ export default function AiAssistant() {
         {/* ─── CHAT VIEW ─── */}
         {view === "chat" && (
           <>
+            {!chat.conversationId && !loading ? (
+              /* Welcome screen */
+              <div className="flex-1 flex items-center justify-center">
+                <div className="text-center space-y-6 px-4">
+                  <div className="w-16 h-16 mx-auto rounded-2xl bg-cyan-500/15 flex items-center justify-center">
+                    <Bot className="w-8 h-8 text-cyan-500" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-semibold text-foreground">Assistente de Demandas</h2>
+                    <p className="text-sm text-muted-foreground mt-2 max-w-md mx-auto">
+                      Descreva sua necessidade e eu ajudarei a criar um documento de requisitos completo.
+                    </p>
+                  </div>
+                  <button onClick={startConversation} className="inline-flex items-center gap-2 rounded-xl bg-cyan-500 px-6 py-3 text-sm font-semibold text-white hover:bg-cyan-600 transition-colors">
+                    <MessageSquare className="w-4 h-4" /> Iniciar Nova Demanda
+                  </button>
+                </div>
+              </div>
+            ) : (
+            <>
             <div className="flex-1 overflow-y-auto">
               <div className="container mx-auto max-w-3xl px-4 py-6 space-y-4">
                 {chat.messages.map((msg, i) => (
@@ -536,8 +663,10 @@ export default function AiAssistant() {
                 <div ref={messagesEndRef} />
               </div>
             </div>
+            </>
+            )}
 
-            {chat.completed && (
+            {chat.conversationId && chat.completed && (
               <div className="border-t border-border bg-gradient-card">
                 <div className="container mx-auto max-w-3xl px-4 py-4 space-y-3">
                   <div className="flex items-center gap-2">
@@ -560,7 +689,7 @@ export default function AiAssistant() {
               </div>
             )}
 
-            {!chat.completed && (
+            {chat.conversationId && !chat.completed && (
               <div className="border-t border-border bg-gradient-card shrink-0">
                 <div className="container mx-auto max-w-3xl px-4 py-3">
                   <div className="flex items-end gap-2">
@@ -581,6 +710,11 @@ export default function AiAssistant() {
             )}
           </>
         )}
+        {loading && !chat.conversationId && (
+          <div className="flex-1 flex items-center justify-center">
+            <Loader2 className="w-8 h-8 animate-spin text-cyan-500" />
+          </div>
+        )}
 
         {/* ─── PROJECTS LIST VIEW ─── */}
         {view === "projects" && !selectedProject && (
@@ -593,34 +727,91 @@ export default function AiAssistant() {
                 </button>
               </div>
 
-              {projectsLoading && projects.length === 0 ? (
+              {projectsLoading && projects.length === 0 && conversations.length === 0 ? (
                 <div className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin mx-auto text-muted-foreground" /></div>
-              ) : projects.length === 0 ? (
+              ) : projects.length === 0 && conversations.length === 0 ? (
                 <div className="text-center py-12 text-muted-foreground text-sm">Nenhum projeto encontrado.</div>
               ) : (
                 <div className="space-y-2">
-                  {projects.map((p) => {
-                    const sc = STATUS_CONFIG[p.status] || STATUS_CONFIG.em_analise_ti;
-                    const Icon = sc.icon;
-                    return (
-                      <button key={p.id} onClick={() => openProject(p.id)} className="w-full text-left rounded-xl border border-border bg-gradient-card p-4 hover:border-cyan-500/40 transition-colors">
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="flex-1 min-w-0">
-                            <h3 className="text-sm font-semibold text-foreground truncate">{p.titulo}</h3>
-                            <p className="text-[11px] text-muted-foreground mt-1">por {p.display_name} · {new Date(p.created_at).toLocaleDateString("pt-BR")}</p>
+                  {/* Conversas pausadas/ativas */}
+                  {conversations.length > 0 && (
+                    <>
+                      <div className="flex items-center gap-2 mb-3 mt-2">
+                        <MessageSquare className="w-3.5 h-3.5 text-cyan-500" />
+                        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Conversas</h3>
+                        <div className="flex-1 h-px bg-border" />
+                      </div>
+                      {conversations.map((c) => {
+                        const cs = CONV_STATUS_CONFIG[c.status] || CONV_STATUS_CONFIG.ativa;
+                        const CIcon = cs.icon;
+                        return (
+                          <div key={c.id} className="rounded-xl border border-border bg-gradient-card p-4 hover:border-cyan-500/40 transition-colors">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="flex-1 min-w-0">
+                                <h3 className="text-sm font-semibold text-foreground truncate">
+                                  {c.has_prd ? "PRD Gerado" : `Etapa ${c.stage}/8`}
+                                </h3>
+                                <p className="text-[11px] text-muted-foreground mt-1">
+                                  por {c.display_name} · {new Date(c.updated_at).toLocaleDateString("pt-BR")}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold border ${cs.color}`}>
+                                  <CIcon className="w-3 h-3" /> {cs.label}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 mt-3">
+                              <button onClick={() => resumeConversation(c.id)} className="inline-flex items-center gap-1.5 rounded-lg bg-cyan-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-cyan-600 transition-colors">
+                                <MessageSquare className="w-3 h-3" /> Retomar
+                              </button>
+                              {c.status === "ativa" && (
+                                <button onClick={() => pauseConversation(c.id)} className="inline-flex items-center gap-1.5 rounded-lg bg-secondary px-3 py-1.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-colors">
+                                  <Clock className="w-3 h-3" /> Pausar
+                                </button>
+                              )}
+                              <button onClick={() => deleteConversation(c.id)} className="inline-flex items-center gap-1.5 rounded-lg bg-red-500/10 px-3 py-1.5 text-[11px] font-semibold text-red-500 hover:bg-red-500/20 transition-colors">
+                                <Trash2 className="w-3 h-3" /> Excluir
+                              </button>
+                            </div>
                           </div>
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold border shrink-0 ${sc.color}`}>
-                            <Icon className="w-3 h-3" /> {sc.label}
-                          </span>
-                        </div>
-                        {p.prazo_entrega && (
-                          <div className="flex items-center gap-1 mt-2 text-[10px] text-muted-foreground">
-                            <Calendar className="w-3 h-3" /> Prazo: {new Date(p.prazo_entrega).toLocaleDateString("pt-BR")}
-                          </div>
-                        )}
-                      </button>
-                    );
-                  })}
+                        );
+                      })}
+                    </>
+                  )}
+
+                  {/* Demandas (projetos) */}
+                  {projects.length > 0 && (
+                    <>
+                      <div className="flex items-center gap-2 mb-3 mt-4">
+                        <FolderOpen className="w-3.5 h-3.5 text-cyan-500" />
+                        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Demandas</h3>
+                        <div className="flex-1 h-px bg-border" />
+                      </div>
+                      {projects.map((p) => {
+                        const sc = STATUS_CONFIG[p.status] || STATUS_CONFIG.em_analise_ti;
+                        const Icon = sc.icon;
+                        return (
+                          <button key={p.id} onClick={() => openProject(p.id)} className="w-full text-left rounded-xl border border-border bg-gradient-card p-4 hover:border-cyan-500/40 transition-colors">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="flex-1 min-w-0">
+                                <h3 className="text-sm font-semibold text-foreground truncate">{p.titulo}</h3>
+                                <p className="text-[11px] text-muted-foreground mt-1">por {p.display_name} · {new Date(p.created_at).toLocaleDateString("pt-BR")}</p>
+                              </div>
+                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold border shrink-0 ${sc.color}`}>
+                                <Icon className="w-3 h-3" /> {sc.label}
+                              </span>
+                            </div>
+                            {p.prazo_entrega && (
+                              <div className="flex items-center gap-1 mt-2 text-[10px] text-muted-foreground">
+                                <Calendar className="w-3 h-3" /> Prazo: {new Date(p.prazo_entrega).toLocaleDateString("pt-BR")}
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </>
+                  )}
                 </div>
               )}
             </div>

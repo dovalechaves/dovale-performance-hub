@@ -174,7 +174,7 @@ ${PRD_MARKER_END}
 
 Comece se apresentando e fazendo a primeira pergunta.`;
 
-// ── Conversation store (in-memory, keyed by conversation ID) ────────────────
+// ── Conversation types ────────────────────────────────────────────────────
 interface Message {
   role: "user" | "bot";
   content: string;
@@ -184,6 +184,7 @@ interface Message {
 interface Conversation {
   id: string;
   usuario: string;
+  display_name: string;
   stage: number;
   openaiHistory: { role: "system" | "user" | "assistant"; content: string }[];
   messages: Message[];
@@ -192,14 +193,69 @@ interface Conversation {
   createdAt: string;
 }
 
-const conversations = new Map<string, Conversation>();
+// ── Conversation persistence helpers ──────────────────────────────────────
+async function saveConversation(conv: Conversation): Promise<void> {
+  const pool = await getPool();
+  const status = conv.completed ? "concluida" : "ativa";
+  const historyJson = JSON.stringify(conv.openaiHistory);
+  await pool.request()
+    .input("id", sql.VarChar(100), conv.id)
+    .input("usuario", sql.VarChar(100), conv.usuario)
+    .input("display_name", sql.NVarChar(200), conv.display_name)
+    .input("status", sql.VarChar(30), status)
+    .input("stage", sql.Int, conv.stage)
+    .input("prd", sql.NVarChar(sql.MAX), conv.prd)
+    .input("openai_history", sql.NVarChar(sql.MAX), historyJson)
+    .input("updated_at", sql.DateTime, new Date())
+    .query(`
+      IF EXISTS (SELECT 1 FROM dbo.AI_CONVERSATIONS WHERE id = @id)
+        UPDATE dbo.AI_CONVERSATIONS
+        SET status = @status, stage = @stage, prd = @prd,
+            openai_history = @openai_history, updated_at = @updated_at
+        WHERE id = @id
+      ELSE
+        INSERT INTO dbo.AI_CONVERSATIONS (id, usuario, display_name, status, stage, prd, openai_history)
+        VALUES (@id, @usuario, @display_name, @status, @stage, @prd, @openai_history)
+    `);
+}
 
-setInterval(() => {
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  for (const [id, conv] of conversations) {
-    if (new Date(conv.createdAt).getTime() < cutoff) conversations.delete(id);
-  }
-}, 60 * 60 * 1000);
+async function saveMessage(convId: string, msg: Message): Promise<void> {
+  const pool = await getPool();
+  await pool.request()
+    .input("conversation_id", sql.VarChar(100), convId)
+    .input("role", sql.VarChar(10), msg.role)
+    .input("content", sql.NVarChar(sql.MAX), msg.content)
+    .input("timestamp", sql.DateTime, new Date(msg.timestamp))
+    .query(`
+      INSERT INTO dbo.AI_CONVERSATION_MESSAGES (conversation_id, role, content, timestamp)
+      VALUES (@conversation_id, @role, @content, @timestamp)
+    `);
+}
+
+async function loadConversation(id: string): Promise<Conversation | null> {
+  const pool = await getPool();
+  const convRes = await pool.request().input("id", sql.VarChar(100), id)
+    .query(`SELECT * FROM dbo.AI_CONVERSATIONS WHERE id = @id`);
+  if (!convRes.recordset.length) return null;
+  const row = convRes.recordset[0];
+  const msgRes = await pool.request().input("cid", sql.VarChar(100), id)
+    .query(`SELECT role, content, timestamp FROM dbo.AI_CONVERSATION_MESSAGES WHERE conversation_id = @cid ORDER BY timestamp ASC`);
+  return {
+    id: row.id,
+    usuario: row.usuario,
+    display_name: row.display_name || row.usuario,
+    stage: row.stage || 0,
+    openaiHistory: row.openai_history ? JSON.parse(row.openai_history) : [],
+    messages: msgRes.recordset.map((m: any) => ({
+      role: m.role,
+      content: m.content,
+      timestamp: new Date(m.timestamp).toISOString(),
+    })),
+    completed: row.status === "concluida",
+    prd: row.prd || null,
+    createdAt: new Date(row.created_at).toISOString(),
+  };
+}
 
 function now(): string {
   return new Date().toISOString();
@@ -240,7 +296,7 @@ async function callOpenAI(history: Conversation["openaiHistory"]): Promise<strin
 
 router.post("/chat", async (req, res) => {
   try {
-    const { conversation_id, message, usuario } = req.body ?? {};
+    const { conversation_id, message, usuario, display_name } = req.body ?? {};
 
     if (!conversation_id) {
       const id = crypto.randomUUID();
@@ -252,17 +308,20 @@ router.post("/chat", async (req, res) => {
 
       history.push({ role: "assistant", content: aiReply });
 
+      const botMsg: Message = { role: "bot", content: clean, timestamp: now() };
       const conv: Conversation = {
         id,
         usuario: usuario || "anonymous",
+        display_name: display_name || usuario || "anonymous",
         stage: Math.max(stage, 1),
         openaiHistory: history,
-        messages: [{ role: "bot", content: clean, timestamp: now() }],
+        messages: [botMsg],
         completed: false,
         prd: null,
         createdAt: now(),
       };
-      conversations.set(id, conv);
+      await saveConversation(conv);
+      await saveMessage(id, botMsg);
       return res.json({
         conversation_id: id,
         messages: conv.messages,
@@ -273,7 +332,7 @@ router.post("/chat", async (req, res) => {
       });
     }
 
-    const conv = conversations.get(conversation_id);
+    const conv = await loadConversation(conversation_id);
     if (!conv) {
       return res.status(404).json({ error: "Conversa não encontrada. Inicie uma nova." });
     }
@@ -293,8 +352,10 @@ router.post("/chat", async (req, res) => {
       return res.status(400).json({ error: "Mensagem não pode ser vazia." });
     }
 
-    conv.messages.push({ role: "user", content: userMsg, timestamp: now() });
+    const userMsgObj: Message = { role: "user", content: userMsg, timestamp: now() };
+    conv.messages.push(userMsgObj);
     conv.openaiHistory.push({ role: "user", content: userMsg });
+    await saveMessage(conv.id, userMsgObj);
 
     const aiReply = await callOpenAI(conv.openaiHistory);
     conv.openaiHistory.push({ role: "assistant", content: aiReply });
@@ -310,7 +371,10 @@ router.post("/chat", async (req, res) => {
       conv.stage = TOTAL_STAGES;
     }
 
-    conv.messages.push({ role: "bot", content: displayText, timestamp: now() });
+    const botMsgObj: Message = { role: "bot", content: displayText, timestamp: now() };
+    conv.messages.push(botMsgObj);
+    await saveMessage(conv.id, botMsgObj);
+    await saveConversation(conv);
 
     return res.json({
       conversation_id: conv.id,
@@ -328,8 +392,13 @@ router.post("/chat", async (req, res) => {
 
 router.post("/restart", async (req, res) => {
   try {
-    const { conversation_id } = req.body ?? {};
-    if (conversation_id) conversations.delete(conversation_id);
+    const { conversation_id, usuario, display_name } = req.body ?? {};
+    // Mark old conversation as excluida if exists
+    if (conversation_id) {
+      const pool = await getPool();
+      await pool.request().input("id", sql.VarChar(100), conversation_id)
+        .query(`UPDATE dbo.AI_CONVERSATIONS SET status = 'excluida', updated_at = GETDATE() WHERE id = @id`);
+    }
 
     const id = crypto.randomUUID();
     const history: Conversation["openaiHistory"] = [
@@ -339,17 +408,20 @@ router.post("/restart", async (req, res) => {
     const { stage, clean } = parseStage(aiReply);
     history.push({ role: "assistant", content: aiReply });
 
+    const botMsg: Message = { role: "bot", content: clean, timestamp: now() };
     const conv: Conversation = {
       id,
-      usuario: req.body?.usuario || "anonymous",
+      usuario: usuario || "anonymous",
+      display_name: display_name || usuario || "anonymous",
       stage: Math.max(stage, 1),
       openaiHistory: history,
-      messages: [{ role: "bot", content: clean, timestamp: now() }],
+      messages: [botMsg],
       completed: false,
       prd: null,
       createdAt: now(),
     };
-    conversations.set(id, conv);
+    await saveConversation(conv);
+    await saveMessage(id, botMsg);
 
     res.json({
       conversation_id: id,
@@ -365,31 +437,37 @@ router.post("/restart", async (req, res) => {
   }
 });
 
-router.get("/conversation/:id", (req, res) => {
-  const conv = conversations.get(req.params.id);
-  if (!conv) return res.status(404).json({ error: "Conversa não encontrada." });
-
-  res.json({
-    conversation_id: conv.id,
-    messages: conv.messages,
-    completed: conv.completed,
-    prd: conv.prd,
-    stage: conv.stage,
-    totalStages: TOTAL_STAGES,
-  });
+router.get("/conversation/:id", async (req, res) => {
+  try {
+    const conv = await loadConversation(req.params.id);
+    if (!conv) return res.status(404).json({ error: "Conversa não encontrada." });
+    res.json({
+      conversation_id: conv.id,
+      messages: conv.messages,
+      completed: conv.completed,
+      prd: conv.prd,
+      stage: conv.stage,
+      totalStages: TOTAL_STAGES,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Erro ao carregar conversa." });
+  }
 });
 
-router.get("/export/:id", (req, res) => {
-  const conv = conversations.get(req.params.id);
-  if (!conv) return res.status(404).json({ error: "Conversa não encontrada." });
-  if (!conv.completed) return res.status(400).json({ error: "Conversa ainda não foi concluída." });
-
-  res.json({
-    conversation_id: conv.id,
-    usuario: conv.usuario,
-    created_at: conv.createdAt,
-    prd: conv.prd,
-  });
+router.get("/export/:id", async (req, res) => {
+  try {
+    const conv = await loadConversation(req.params.id);
+    if (!conv) return res.status(404).json({ error: "Conversa não encontrada." });
+    if (!conv.completed) return res.status(400).json({ error: "Conversa ainda não foi concluída." });
+    res.json({
+      conversation_id: conv.id,
+      usuario: conv.usuario,
+      created_at: conv.createdAt,
+      prd: conv.prd,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Erro ao exportar conversa." });
+  }
 });
 
 // ── Project Workflow ────────────────────────────────────────────────────────
@@ -436,6 +514,31 @@ async function ensureProjectTables(): Promise<void> {
       tipo VARCHAR(50) DEFAULT 'comentario',
       created_at DATETIME DEFAULT GETDATE(),
       FOREIGN KEY (request_id) REFERENCES dbo.AI_REQUESTS(id)
+    )
+  `);
+  // ── Conversation persistence tables ──
+  await pool.request().query(`
+    IF OBJECT_ID('dbo.AI_CONVERSATIONS', 'U') IS NULL
+    CREATE TABLE dbo.AI_CONVERSATIONS (
+      id VARCHAR(100) PRIMARY KEY,
+      usuario VARCHAR(100) NOT NULL,
+      display_name NVARCHAR(200),
+      status VARCHAR(30) DEFAULT 'ativa',
+      stage INT DEFAULT 0,
+      prd NVARCHAR(MAX) NULL,
+      openai_history NVARCHAR(MAX) NULL,
+      created_at DATETIME DEFAULT GETDATE(),
+      updated_at DATETIME DEFAULT GETDATE()
+    )
+  `);
+  await pool.request().query(`
+    IF OBJECT_ID('dbo.AI_CONVERSATION_MESSAGES', 'U') IS NULL
+    CREATE TABLE dbo.AI_CONVERSATION_MESSAGES (
+      id INT IDENTITY(1,1) PRIMARY KEY,
+      conversation_id VARCHAR(100) NOT NULL,
+      role VARCHAR(10) NOT NULL,
+      content NVARCHAR(MAX),
+      timestamp DATETIME DEFAULT GETDATE()
     )
   `);
 }
@@ -813,7 +916,6 @@ router.patch("/projects/:id/titulo", async (req, res) => {
   }
 });
 
-/** DELETE /projects/:id — delete a project (admin only) */
 router.delete("/projects/:id", async (req, res) => {
   try {
     const { usuario, role } = req.query;
@@ -827,7 +929,6 @@ router.delete("/projects/:id", async (req, res) => {
     if (check.recordset.length === 0) {
       return res.status(404).json({ error: "Projeto não encontrado." });
     }
-    // Delete comments first, then the project
     await pool.request().input("rid", sql.Int, projectId)
       .query(`DELETE FROM dbo.AI_REQUEST_COMMENTS WHERE request_id = @rid`);
     await pool.request().input("id", sql.Int, projectId)
@@ -836,6 +937,69 @@ router.delete("/projects/:id", async (req, res) => {
   } catch (err: any) {
     console.error("[ai-assistant] Delete error:", err?.message);
     res.status(500).json({ error: "Erro ao excluir projeto." });
+  }
+});
+
+// ── Conversation management routes ─────────────────────────────────────────
+
+/** GET /conversations — list conversations for a user (ativas + pausadas) */
+router.get("/conversations", async (req, res) => {
+  try {
+    const { usuario, role } = req.query;
+    if (!usuario) return res.status(400).json({ error: "usuario é obrigatório." });
+    const pool = await getPool();
+    const request = pool.request().input("usuario", sql.VarChar(100), String(usuario));
+    let query = `
+      SELECT id, usuario, display_name, status, stage, prd, created_at, updated_at
+      FROM dbo.AI_CONVERSATIONS
+      WHERE status NOT IN ('excluida')
+    `;
+    if (role !== "admin") {
+      query += ` AND usuario = @usuario`;
+    }
+    query += ` ORDER BY updated_at DESC`;
+    const result = await request.query(query);
+    res.json(result.recordset.map((r: any) => ({
+      id: r.id,
+      usuario: r.usuario,
+      display_name: r.display_name || r.usuario,
+      status: r.status,
+      stage: r.stage || 0,
+      has_prd: !!r.prd,
+      created_at: new Date(r.created_at).toISOString(),
+      updated_at: new Date(r.updated_at).toISOString(),
+    })));
+  } catch (err: any) {
+    console.error("[ai-assistant] List conversations error:", err?.message);
+    res.status(500).json({ error: "Erro ao listar conversas." });
+  }
+});
+
+/** PATCH /conversations/:id/pause — pause a conversation */
+router.patch("/conversations/:id/pause", async (req, res) => {
+  try {
+    const pool = await getPool();
+    await pool.request()
+      .input("id", sql.VarChar(100), req.params.id)
+      .input("updated_at", sql.DateTime, new Date())
+      .query(`UPDATE dbo.AI_CONVERSATIONS SET status = 'pausada', updated_at = @updated_at WHERE id = @id AND status = 'ativa'`);
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Erro ao pausar conversa." });
+  }
+});
+
+/** DELETE /conversations/:id — soft delete a conversation */
+router.delete("/conversations/:id", async (req, res) => {
+  try {
+    const pool = await getPool();
+    await pool.request()
+      .input("id", sql.VarChar(100), req.params.id)
+      .input("updated_at", sql.DateTime, new Date())
+      .query(`UPDATE dbo.AI_CONVERSATIONS SET status = 'excluida', updated_at = @updated_at WHERE id = @id`);
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Erro ao excluir conversa." });
   }
 });
 

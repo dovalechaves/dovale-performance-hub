@@ -1,7 +1,7 @@
 import { queryFirebird } from "../db/firebird";
 import { getPool } from "../db/sqlserver";
 
-const LOJAS = ["bh", "l2", "l3", "campinas"] as const;
+const LOJAS = ["bh", "l2", "l3", "campinas", "riopreto"] as const;
 
 interface VendaFirebird {
   REP_CODIGO: string;

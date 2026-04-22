@@ -2,6 +2,8 @@ export interface Seller {
   id: string;
   name: string;
   category: string;
+  origem?: string;
+  detalhes?: { db: string; total: number }[];
   sales: number;
   goal: number;
   avatar?: string;

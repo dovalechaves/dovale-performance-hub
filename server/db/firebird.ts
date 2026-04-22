@@ -44,6 +44,27 @@ const lojas: Record<string, FirebirdConfig> = {
     user: process.env.DB_FIREBIRD_CAMPINAS_USER!,
     password: process.env.DB_FIREBIRD_CAMPINAS_PASSWORD!,
   },
+  riopreto: {
+    host: process.env.DB_FIREBIRD_RIOPRETO_HOST!,
+    port: Number(process.env.DB_FIREBIRD_RIOPRETO_PORT) || 3050,
+    database: process.env.DB_FIREBIRD_RIOPRETO_PATH!,
+    user: process.env.DB_FIREBIRD_RIOPRETO_USER!,
+    password: process.env.DB_FIREBIRD_RIOPRETO_PASSWORD!,
+  },
+  sjc: {
+    host: process.env.DB_FIREBIRD_SJC_HOST || process.env.DB_FIREBIRD_ECOMMERCE_HOST!,
+    port: Number(process.env.DB_FIREBIRD_SJC_PORT || process.env.DB_FIREBIRD_ECOMMERCE_PORT) || 3050,
+    database: process.env.DB_FIREBIRD_SJC_PATH || process.env.DB_FIREBIRD_ECOMMERCE_PATH!,
+    user: process.env.DB_FIREBIRD_SJC_USER || process.env.DB_FIREBIRD_ECOMMERCE_USER!,
+    password: process.env.DB_FIREBIRD_SJC_PASSWORD || process.env.DB_FIREBIRD_ECOMMERCE_PASSWORD!,
+  },
+  mg: {
+    host: process.env.DB_FIREBIRD_MG_HOST || process.env.DB_FIREBIRD_SPM_HOST || process.env.DB_FIREBIRD_ECOMMERCE_HOST!,
+    port: Number(process.env.DB_FIREBIRD_MG_PORT || process.env.DB_FIREBIRD_SPM_PORT || process.env.DB_FIREBIRD_ECOMMERCE_PORT) || 3050,
+    database: process.env.DB_FIREBIRD_MG_PATH || process.env.DB_FIREBIRD_SPM_PATH!,
+    user: process.env.DB_FIREBIRD_MG_USER || process.env.DB_FIREBIRD_SPM_USER || process.env.DB_FIREBIRD_ECOMMERCE_USER!,
+    password: process.env.DB_FIREBIRD_MG_PASSWORD || process.env.DB_FIREBIRD_SPM_PASSWORD || process.env.DB_FIREBIRD_ECOMMERCE_PASSWORD!,
+  },
 };
 
 export function queryFirebird<T = Record<string, unknown>>(
@@ -52,19 +73,29 @@ export function queryFirebird<T = Record<string, unknown>>(
   params: unknown[] = []
 ): Promise<T[]> {
   const config = lojas[loja];
+  console.log(`[firebird] ${loja} config: host=${config.host}, db=${config.database}`);
   if (!config.host || !config.database) {
+    console.error(`[firebird] ${loja} NOT CONFIGURED — host or database missing`);
     return Promise.reject(new Error(`Loja "${loja}" não configurada no .env`));
   }
 
   return new Promise((resolve, reject) => {
     Firebird.attach(config, (err, db) => {
-      if (err) return reject(err);
+      if (err) {
+        console.error(`[firebird] ${loja} attach FAILED:`, err.message);
+        return reject(err);
+      }
       db.transaction(Firebird.ISOLATION_READ_COMMITTED, (err2, transaction) => {
-        if (err2) { db.detach(); return reject(err2); }
+        if (err2) { db.detach(); console.error(`[firebird] ${loja} transaction FAILED:`, err2.message); return reject(err2); }
         transaction.query(sql, params, (err3, result) => {
           transaction.commit(() => db.detach());
-          if (err3) return reject(err3);
-          resolve(result as T[]);
+          if (err3) {
+            console.error(`[firebird] ${loja} query FAILED:`, err3.message);
+            return reject(err3);
+          }
+          const rows = (result as T[]) || [];
+          console.log(`[firebird] ${loja} query OK: ${rows.length} rows`);
+          resolve(rows);
         });
       });
     });

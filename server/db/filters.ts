@@ -21,8 +21,32 @@ const PERMITIR_CODIGOS: Record<string, number[]> = {
   campinas: [24, 42, 6, 29, 3, 43],       // BEATRIZ, CAMILA, CHICO, Ester, LOJA, MAIARA
 };
 
+// Filtros por nome CONTAINING (auto-descoberta — não precisa manter códigos)
+const FILTRAR_POR_NOME_CONTAINING: Record<string, string> = {
+};
+
+// Bancos adicionais que compõem as vendas de uma loja.
+// Quando loja=riopreto, consulta também sjc e mg com filtro "LOJA RIO PRETO".
+// O banco principal (riopreto) NÃO usa filtro — traz todos os representantes.
+export const MULTI_DB_LOJAS: Record<string, string[]> = {
+  riopreto: ["sjc", "mg"],
+};
+
+// Filtro CONTAINING aplicado SOMENTE nos bancos extras (não no principal)
+export const MULTI_DB_FILTRO: Record<string, string> = {
+  riopreto: "LOJA RIO PRETO",
+};
+
 /** Gera o trecho WHERE para Firebird */
 export function firebirdFiltroRep(alias = "r", loja = "bh"): string {
+  const filtroNome = FILTRAR_POR_NOME_CONTAINING[loja];
+  if (filtroNome) {
+    return `
+      AND ${alias}.REP_NOME IS NOT NULL
+      AND UPPER(${alias}.REP_NOME) CONTAINING UPPER('${filtroNome}')
+    `;
+  }
+
   const permitidos = PERMITIR_CODIGOS[loja];
   if (permitidos?.length) {
     return `AND ${alias}.REP_CODIGO IN (${permitidos.join(", ")})`;
@@ -50,12 +74,54 @@ const CONSOLIDAR_REPS: Record<string, { pai: number; nome: string; filhos: numbe
     { pai: 46, nome: "LOJA", filhos: [3119, 46, 3115, 26, 3114, 100] },
     // 3119, 46, 3115, 26, 3114, 100 conforme solicitado
   ],
+  riopreto: [
+    { pai: 35, nome: "REBECA", filhos: [35, 2050] },
+    { pai: 30, nome: "MARIA", filhos: [30, 1996] },
+  ],
 };
+
+/** Retorna o código pai consolidado para a loja, se existir regra */
+export function codigoPaiRepresentante(loja: string, repCodigo: string | number): string {
+  const code = String(repCodigo).trim();
+  const regras = CONSOLIDAR_REPS[loja] || [];
+  for (const regra of regras) {
+    if (regra.filhos.map(String).includes(code)) {
+      return String(regra.pai);
+    }
+  }
+  return code;
+}
+
+/** Lista todos os códigos envolvidos na consolidação da loja (pais e filhos). */
+export function codigosConsolidadosRepresentantes(loja: string): string[] {
+  const regras = CONSOLIDAR_REPS[loja] || [];
+  const set = new Set<string>();
+  for (const regra of regras) {
+    set.add(String(regra.pai));
+    for (const filho of regra.filhos) set.add(String(filho));
+  }
+  return Array.from(set);
+}
+
+/** Lista apenas os códigos filhos que NÃO são pai (para uso nos bancos extras). */
+export function codigosFilhosExtraDb(loja: string): string[] {
+  const regras = CONSOLIDAR_REPS[loja] || [];
+  const pais = new Set(regras.map(r => String(r.pai)));
+  const set = new Set<string>();
+  for (const regra of regras) {
+    for (const filho of regra.filhos) {
+      if (!pais.has(String(filho))) set.add(String(filho));
+    }
+  }
+  return Array.from(set);
+}
 
 export interface VendaRow {
   rep_codigo: string;
   rep_nome: string;
   total_vendas: number;
+  origem?: string;
+  detalhes?: { db: string; total: number }[];
 }
 
 /** Consolida vendas: mantém cards individuais e soma filhos no pai */
@@ -72,7 +138,7 @@ export function consolidarVendas(rows: VendaRow[], loja: string): VendaRow[] {
   }
 
   // Acumula total do pai
-  const paiTotals = new Map<string, { nome: string; total: number }>();
+  const paiTotals = new Map<string, { nome: string; total: number; origem?: string; detalhes: { db: string; total: number }[] }>();
   for (const row of rows) {
     const code = String(row.rep_codigo).trim();
     const target = filhoParaPai.get(code);
@@ -80,8 +146,16 @@ export function consolidarVendas(rows: VendaRow[], loja: string): VendaRow[] {
       const existing = paiTotals.get(target.pai);
       if (existing) {
         existing.total += row.total_vendas;
+        if (row.origem) {
+          const partes = new Set((existing.origem || "").split(" /").map(p => p.trim()).filter(Boolean));
+          for (const p of row.origem.split(" /").map(p => p.trim()).filter(Boolean)) partes.add(p);
+          existing.origem = Array.from(partes).join(" /");
+        }
+        if (row.detalhes?.length) {
+          existing.detalhes.push(...row.detalhes);
+        }
       } else {
-        paiTotals.set(target.pai, { nome: target.nome, total: row.total_vendas });
+        paiTotals.set(target.pai, { nome: target.nome, total: row.total_vendas, origem: row.origem, detalhes: row.detalhes ? [...row.detalhes] : [] });
       }
     }
   }
@@ -91,6 +165,9 @@ export function consolidarVendas(rows: VendaRow[], loja: string): VendaRow[] {
     const code = String(row.rep_codigo).trim();
     if (paiTotals.has(code) && !filhoParaPai.has(code)) {
       paiTotals.get(code)!.total += row.total_vendas;
+      if (row.detalhes?.length) {
+        paiTotals.get(code)!.detalhes.push(...row.detalhes);
+      }
     }
   }
 
@@ -103,7 +180,7 @@ export function consolidarVendas(rows: VendaRow[], loja: string): VendaRow[] {
     if (paiCodes.has(code)) {
       // Substitui pelo total consolidado
       const p = paiTotals.get(code)!;
-      result.push({ rep_codigo: code, rep_nome: p.nome, total_vendas: p.total });
+      result.push({ rep_codigo: code, rep_nome: p.nome, total_vendas: p.total, origem: p.origem, detalhes: p.detalhes });
       paiCodes.delete(code); // só insere uma vez
     } else {
       result.push(row);
@@ -113,7 +190,7 @@ export function consolidarVendas(rows: VendaRow[], loja: string): VendaRow[] {
   // Se o pai não existia nos rows originais, adiciona
   for (const [code, p] of paiTotals) {
     if (!rows.some(r => String(r.rep_codigo).trim() === code)) {
-      result.push({ rep_codigo: code, rep_nome: p.nome, total_vendas: p.total });
+      result.push({ rep_codigo: code, rep_nome: p.nome, total_vendas: p.total, origem: p.origem, detalhes: p.detalhes });
     }
   }
 

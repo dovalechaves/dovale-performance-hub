@@ -5,6 +5,7 @@ const BASE = API_BASE;
 export interface Representante {
   rep_codigo: string;
   rep_nome: string;
+  origem?: string;
 }
 
 export interface Meta {
@@ -23,6 +24,7 @@ export const LOJAS = [
   { value: "l2", label: "Santana" },
   { value: "l3", label: "Rio de Janeiro" },
   { value: "campinas", label: "Campinas" },
+  { value: "riopreto", label: "Rio Preto" },
 ];
 
 async function handleResponse<T>(res: Response): Promise<T> {
@@ -33,10 +35,17 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return res.json();
 }
 
+export interface VendaDetalhe {
+  db: string;
+  total: number;
+}
+
 export interface VendaConsolidada {
   rep_codigo: string;
   rep_nome: string;
   total_vendas: number;
+  origem?: string;
+  detalhes?: VendaDetalhe[];
 }
 
 export interface AuthManagedUser {

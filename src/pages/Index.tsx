@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { SellerCard } from "@/components/SellerCard";
+import { SellerDetailModal } from "@/components/SellerDetailModal";
 import { StatsBar } from "@/components/StatsBar";
 import { useCelebration } from "@/hooks/useCelebration";
 import { Seller } from "@/data/sellers";
@@ -22,6 +23,17 @@ function normalizeRepCode(code: string | number | null | undefined) {
   if (!raw) return "";
   const numeric = Number(raw);
   return Number.isFinite(numeric) ? String(numeric) : raw.toLowerCase();
+}
+
+function normalizeName(name: string | null | undefined) {
+  return String(name ?? "").trim().toUpperCase();
+}
+
+function cleanRepName(name: string | null | undefined) {
+  return String(name ?? "")
+    .replace(/\bLOJA\s+RIO\s+PRETO\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 function playGoalReachedChime() {
@@ -67,6 +79,7 @@ const Index = () => {
   const [loading, setLoading] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [showCelebrationMascot, setShowCelebrationMascot] = useState(false);
+  const [selectedSeller, setSelectedSeller] = useState<Seller | null>(null);
   const [tvMode, setTvMode] = useState(true); // gerente: padrão oculto (modo TV)
   const [modoVista, setModoVista] = useState<"mensal" | "diario">("diario");
   const { celebrate } = useCelebration();
@@ -95,10 +108,11 @@ const Index = () => {
       const metasMap = new Map(metas.map((m) => [normalizeRepCode(m.rep_codigo), m.meta_valor]));
       const diasUteisMap = new Map(metas.map((m) => [normalizeRepCode(m.rep_codigo), m.dias_uteis ?? null]));
       const vendasMap = new Map(vendas.map((v) => [normalizeRepCode(v.rep_codigo), v]));
+      const vendasByName = new Map(vendas.map((v) => [normalizeName(v.rep_nome), v]));
 
       const data: Seller[] = representantes.map((rep) => {
         const repCode = normalizeRepCode(rep.rep_codigo);
-        const venda = vendasMap.get(repCode);
+        const venda = vendasMap.get(repCode) ?? vendasByName.get(normalizeName(rep.rep_nome));
         const sales = venda?.total_vendas ?? 0;
         const metaMensal = metasMap.get(repCode) ?? 0;
         const diasUteis = diasUteisMap.get(repCode);
@@ -108,12 +122,14 @@ const Index = () => {
 
         return {
           id: repCode,
-          name: rep.rep_nome,
+          name: cleanRepName(rep.rep_nome),
           category: LOJAS.find(l => l.value === loja)?.label ?? loja.toUpperCase(),
+          origem: venda?.origem ?? rep.origem,
+          detalhes: venda?.detalhes,
           sales,
           goal,
           goalReached: goal > 0 && sales >= goal,
-          avatar: initials(rep.rep_nome),
+          avatar: initials(cleanRepName(rep.rep_nome) || rep.rep_nome),
         };
       });
 
@@ -322,7 +338,14 @@ const Index = () => {
               <div className="flex flex-col gap-3">
                 <AnimatePresence mode="popLayout">
                   {sorted.map((seller, i) => (
-                    <SellerCard key={seller.id} seller={seller} rank={i + 1} showValues={user?.role === "manager" ? !tvMode : can("view:salesValues")} loja={loja} />
+                    <SellerCard
+                      key={seller.id}
+                      seller={seller}
+                      rank={i + 1}
+                      showValues={user?.role === "manager" ? !tvMode : can("view:salesValues")}
+                      loja={loja}
+                      onClick={() => setSelectedSeller(seller)}
+                    />
                   ))}
                 </AnimatePresence>
               </div>
@@ -345,6 +368,8 @@ const Index = () => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <SellerDetailModal seller={selectedSeller} onClose={() => setSelectedSeller(null)} />
 
       <footer className="border-t border-border mt-12">
         <div className="container mx-auto px-4 py-4 text-center">

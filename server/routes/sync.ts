@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { queryFirebird } from "../db/firebird";
 import { querySqlServer, getPool } from "../db/sqlserver";
-import { sqlServerFiltroRep, firebirdFiltroRep, firebirdFiltroVendas, consolidarVendas } from "../db/filters";
+import { sqlServerFiltroRep, firebirdFiltroRep, firebirdFiltroVendas, consolidarVendas, MULTI_DB_LOJAS, MULTI_DB_FILTRO, codigoPaiRepresentante, codigosFilhosExtraDb } from "../db/filters";
 
 const router = Router();
 
@@ -12,6 +12,20 @@ interface VendaFirebird {
   PDV_DATA: Date;
   STATUS: string;
   TOTAL: number;
+}
+
+type VendaMultiDbRow = {
+  REP_CODIGO: string;
+  REP_NOME: string;
+  TOTAL_VENDAS: number;
+  ORIGEM_DB: string;
+};
+
+function origemLabel(db: string) {
+  if (db === "riopreto") return "RIO PRETO";
+  if (db === "sjc") return "SJC";
+  if (db === "mg") return "MG";
+  return db.toUpperCase();
 }
 
 /**
@@ -84,6 +98,31 @@ router.post("/", async (req, res) => {
   }
 });
 
+/** Agrupa vendas de múltiplos bancos pelo REP_NOME, somando totais */
+function mergeVendasMultiDb(
+  rows: VendaMultiDbRow[],
+  loja: string
+) {
+  const map = new Map<string, { rep_codigo: string; rep_nome: string; total_vendas: number; origem: string; detalhes: { db: string; total: number }[] }>();
+  for (const r of rows) {
+    const repCodigo = codigoPaiRepresentante(loja, r.REP_CODIGO);
+    const nome = (r.REP_NOME || "").trim().toUpperCase();
+    const key = loja === "riopreto" ? repCodigo : nome;
+    const existing = map.get(key);
+    const origem = origemLabel(r.ORIGEM_DB);
+    if (existing) {
+      existing.total_vendas += r.TOTAL_VENDAS;
+      const partes = new Set(existing.origem.split(" /").map(p => p.trim()).filter(Boolean));
+      partes.add(origem);
+      existing.origem = Array.from(partes).join(" /");
+      existing.detalhes.push({ db: origem, total: r.TOTAL_VENDAS });
+    } else {
+      map.set(key, { rep_codigo: repCodigo, rep_nome: r.REP_NOME, total_vendas: r.TOTAL_VENDAS, origem, detalhes: [{ db: origem, total: r.TOTAL_VENDAS }] });
+    }
+  }
+  return Array.from(map.values());
+}
+
 /**
  * GET /api/sync/vendas?loja=bh&mes=3&ano=2026
  * Busca diretamente do Firebird — sempre fresco, sem intermediário.
@@ -94,31 +133,46 @@ router.get("/vendas", async (req, res) => {
   const ano  = Number(req.query.ano)  || new Date().getFullYear();
 
   try {
-    const rows = await queryFirebird<{ REP_CODIGO: string; REP_NOME: string; TOTAL_VENDAS: number }>(
-      loja as any,
-      `SELECT
-        r.REP_CODIGO,
-        r.REP_NOME,
-        SUM(pvi.PVI_TOTALITEM) AS TOTAL_VENDAS
-      FROM PEDIDOS_VENDAS pv
-      INNER JOIN REPRESENTANTES r         ON r.REP_CODIGO  = pv.PDV_REP_CODIGO
-      INNER JOIN PEDIDOS_VENDAS_ITENS pvi ON pvi.PVI_NUMERO = pv.PDV_NUMERO
-      WHERE EXTRACT(MONTH FROM pv.PDV_DATA) = ${mes}
-        AND EXTRACT(YEAR  FROM pv.PDV_DATA) = ${ano}
-        AND pv.PDV_PSI_CODIGO NOT IN ('CC')
-        AND pv.PDV_TVE_CODIGO NOT IN ('7','6','26','34')
-        ${firebirdFiltroVendas("r", loja)}
-      GROUP BY r.REP_CODIGO, r.REP_NOME
-      ORDER BY TOTAL_VENDAS DESC`
-    );
+    const extraDbs = MULTI_DB_LOJAS[loja] || [];
+    const filtroPrincipal = firebirdFiltroVendas("r", loja);
+    const codigosConsolidados = codigosFilhosExtraDb(loja);
+    const filtroExtra = MULTI_DB_FILTRO[loja]
+      ? `AND r.REP_NOME IS NOT NULL
+         AND (
+           UPPER(r.REP_NOME) CONTAINING UPPER('${MULTI_DB_FILTRO[loja]}')
+           ${codigosConsolidados.length ? `OR r.REP_CODIGO IN (${codigosConsolidados.join(",")})` : ""}
+         )`
+      : filtroPrincipal;
 
-    const result = rows.map(r => ({
-      rep_codigo:   r.REP_CODIGO,
-      rep_nome:     r.REP_NOME,
-      total_vendas: r.TOTAL_VENDAS,
-    }));
+    const buildSql = (filtro: string) => `SELECT
+            r.REP_CODIGO,
+            r.REP_NOME,
+            SUM(pvi.PVI_TOTALITEM) AS TOTAL_VENDAS
+          FROM PEDIDOS_VENDAS pv
+          INNER JOIN REPRESENTANTES r         ON r.REP_CODIGO  = pv.PDV_REP_CODIGO
+          INNER JOIN PEDIDOS_VENDAS_ITENS pvi ON pvi.PVI_NUMERO = pv.PDV_NUMERO
+          WHERE EXTRACT(MONTH FROM pv.PDV_DATA) = ${mes}
+            AND EXTRACT(YEAR  FROM pv.PDV_DATA) = ${ano}
+            AND pv.PDV_PSI_CODIGO NOT IN ('CC')
+            AND pv.PDV_TVE_CODIGO NOT IN ('7','6','26','34')
+            ${filtro}
+          GROUP BY r.REP_CODIGO, r.REP_NOME
+          ORDER BY TOTAL_VENDAS DESC`;
 
-    res.json(consolidarVendas(result, loja));
+    const queries = [
+      queryFirebird<{ REP_CODIGO: string; REP_NOME: string; TOTAL_VENDAS: number }>(loja as any, buildSql(filtroPrincipal))
+        .then(rows => rows.map(r => ({ ...r, ORIGEM_DB: loja })))
+        .catch(err => { console.error(`[sync/vendas] Erro DB ${loja}:`, err instanceof Error ? err.message : err); return [] as VendaMultiDbRow[]; }),
+      ...extraDbs.map(db =>
+        queryFirebird<{ REP_CODIGO: string; REP_NOME: string; TOTAL_VENDAS: number }>(db as any, buildSql(filtroExtra))
+          .then(rows => rows.map(r => ({ ...r, ORIGEM_DB: db })))
+          .catch(err => { console.error(`[sync/vendas] Erro DB ${db} para loja ${loja}:`, err instanceof Error ? err.message : err); return [] as VendaMultiDbRow[]; })
+      ),
+    ];
+
+    const allRows = (await Promise.all(queries)).flat();
+    const merged = mergeVendasMultiDb(allRows, loja);
+    res.json(consolidarVendas(merged, loja));
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: message });
@@ -131,34 +185,47 @@ router.get("/vendas", async (req, res) => {
  */
 router.get("/vendas-hoje", async (req, res) => {
   const loja = (req.query.loja as string) || "bh";
-  const mes  = new Date().getMonth() + 1;
-  const ano  = new Date().getFullYear();
 
   try {
-    const rows = await queryFirebird<{ REP_CODIGO: string; REP_NOME: string; TOTAL_VENDAS: number }>(
-      loja as any,
-      `SELECT
-        r.REP_CODIGO,
-        r.REP_NOME,
-        SUM(pvi.PVI_TOTALITEM) AS TOTAL_VENDAS
-      FROM PEDIDOS_VENDAS pv
-      INNER JOIN REPRESENTANTES r         ON r.REP_CODIGO  = pv.PDV_REP_CODIGO
-      INNER JOIN PEDIDOS_VENDAS_ITENS pvi ON pvi.PVI_NUMERO = pv.PDV_NUMERO
-      WHERE CAST(pv.PDV_DATA AS DATE) = CURRENT_DATE
-        AND pv.PDV_PSI_CODIGO NOT IN ('CC')
-        AND pv.PDV_TVE_CODIGO NOT IN ('7','6','26','34')
-        ${firebirdFiltroVendas("r", loja)}
-      GROUP BY r.REP_CODIGO, r.REP_NOME
-      ORDER BY TOTAL_VENDAS DESC`
-    );
+    const extraDbs = MULTI_DB_LOJAS[loja] || [];
+    const filtroPrincipal = firebirdFiltroVendas("r", loja);
+    const codigosConsolidados = codigosFilhosExtraDb(loja);
+    const filtroExtra = MULTI_DB_FILTRO[loja]
+      ? `AND r.REP_NOME IS NOT NULL
+         AND (
+           UPPER(r.REP_NOME) CONTAINING UPPER('${MULTI_DB_FILTRO[loja]}')
+           ${codigosConsolidados.length ? `OR r.REP_CODIGO IN (${codigosConsolidados.join(",")})` : ""}
+         )`
+      : filtroPrincipal;
 
-    const result = rows.map(r => ({
-      rep_codigo:   r.REP_CODIGO,
-      rep_nome:     r.REP_NOME,
-      total_vendas: r.TOTAL_VENDAS,
-    }));
+    const buildSql = (filtro: string) => `SELECT
+            r.REP_CODIGO,
+            r.REP_NOME,
+            SUM(pvi.PVI_TOTALITEM) AS TOTAL_VENDAS
+          FROM PEDIDOS_VENDAS pv
+          INNER JOIN REPRESENTANTES r         ON r.REP_CODIGO  = pv.PDV_REP_CODIGO
+          INNER JOIN PEDIDOS_VENDAS_ITENS pvi ON pvi.PVI_NUMERO = pv.PDV_NUMERO
+          WHERE CAST(pv.PDV_DATA AS DATE) = CURRENT_DATE
+            AND pv.PDV_PSI_CODIGO NOT IN ('CC')
+            AND pv.PDV_TVE_CODIGO NOT IN ('7','6','26','34')
+            ${filtro}
+          GROUP BY r.REP_CODIGO, r.REP_NOME
+          ORDER BY TOTAL_VENDAS DESC`;
 
-    res.json(consolidarVendas(result, loja));
+    const queries = [
+      queryFirebird<{ REP_CODIGO: string; REP_NOME: string; TOTAL_VENDAS: number }>(loja as any, buildSql(filtroPrincipal))
+        .then(rows => rows.map(r => ({ ...r, ORIGEM_DB: loja })))
+        .catch(err => { console.error(`[sync/vendas-hoje] Erro DB ${loja}:`, err instanceof Error ? err.message : err); return [] as VendaMultiDbRow[]; }),
+      ...extraDbs.map(db =>
+        queryFirebird<{ REP_CODIGO: string; REP_NOME: string; TOTAL_VENDAS: number }>(db as any, buildSql(filtroExtra))
+          .then(rows => rows.map(r => ({ ...r, ORIGEM_DB: db })))
+          .catch(err => { console.error(`[sync/vendas-hoje] Erro DB ${db} para loja ${loja}:`, err instanceof Error ? err.message : err); return [] as VendaMultiDbRow[]; })
+      ),
+    ];
+
+    const allRows = (await Promise.all(queries)).flat();
+    const merged = mergeVendasMultiDb(allRows, loja);
+    res.json(consolidarVendas(merged, loja));
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: message });

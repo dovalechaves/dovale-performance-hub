@@ -7,9 +7,10 @@ interface SellerCardProps {
   rank: number;
   showValues?: boolean;
   loja?: string;
+  onClick?: (seller: Seller) => void;
 }
 
-export function SellerCard({ seller, rank, showValues = true, loja }: SellerCardProps) {
+export function SellerCard({ seller, rank, showValues = true, loja, onClick }: SellerCardProps) {
   const tvBig = loja === "bh";
   const rawPercentage = seller.goal > 0 ? (seller.sales / seller.goal) * 100 : 0;
   const isGoalReached = rawPercentage >= 100;
@@ -45,8 +46,10 @@ export function SellerCard({ seller, rank, showValues = true, loja }: SellerCard
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ type: "spring", stiffness: 300, damping: 30 }}
       whileHover={{ scale: 1.01, y: -2 }}
+      onClick={() => onClick?.(seller)}
       className={`
         relative overflow-hidden rounded-xl border px-6 transition-colors
+        ${onClick ? "cursor-pointer" : ""}
         bg-gradient-card metal-texture
         ${isOverGoal ? "py-6" : "py-4"}
         ${isOverGoal

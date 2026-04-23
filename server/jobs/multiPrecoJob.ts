@@ -12,7 +12,7 @@ type SyncEvent = {
 };
 
 const TIMEZONE = process.env.APP_TIMEZONE?.trim() || "America/Sao_Paulo";
-const DEFAULT_CRON = "0 3 * * *";
+const DEFAULT_CRON = "0 3 * * 1-5";
 
 function getApiBaseUrl(): string {
   const envBase = process.env.MULTI_PRECO_INTERNAL_API_URL?.trim();

@@ -15,6 +15,7 @@ interface PriceLog {
   status: string;
   storeName: string;
   productCode: string;
+  oldPrice?: number;
   newPrice: number;
   message?: string;
   tableName?: string;
@@ -23,7 +24,7 @@ interface PriceLog {
 const STORES_DEFAULT = [
   { id: "sjc", name: "SJC" },
   { id: "lockeysp", name: "LockeySP" },
-  { id: "lockeymg", name: "LockeyMG" },
+  { id: "mg", name: "MG" },
   { id: "rs", name: "RS" },
   { id: "niteroi", name: "Niteroi" },
 ];
@@ -35,9 +36,18 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 // ── CSV Export ──
 function exportCsv(logs: PriceLog[], userName: string) {
   if (!logs.length) return;
-  const header = "Código Produto;Loja;Valor Novo;Data/Hora;Status;Usuário;Tabela\n";
+  const header = "Código Produto;Loja;Valor Anterior;Valor Novo;Data/Hora;Status;Usuário;Tabela\n";
   const rows = logs.map((l) =>
-    [l.productCode, l.storeName, l.newPrice.toFixed(2).replace(".", ","), l.timestamp.toLocaleString("pt-BR"), l.status === "success" ? "SUCESSO" : "ERRO", userName, l.tableName || ""].join(";")
+    [
+      l.productCode,
+      l.storeName,
+      l.oldPrice?.toFixed(2).replace(".", ",") ?? "",
+      l.newPrice.toFixed(2).replace(".", ","),
+      l.timestamp.toLocaleString("pt-BR"),
+      l.status === "success" ? "SUCESSO" : "NÃO ALTERADO/ERRO",
+      userName,
+      l.tableName || "",
+    ].join(";")
   );
   const blob = new Blob(["\uFEFF" + header + rows.join("\n")], { type: "text/csv;charset=utf-8;" });
   const a = document.createElement("a");
@@ -125,6 +135,7 @@ export default function MultiPreco() {
               status: l.status || "info",
               storeName: l.storeName || "SJC",
               productCode: String(l.productCode || "---"),
+              oldPrice: l.oldPrice !== undefined ? Number(l.oldPrice) : undefined,
               newPrice: Number(l.newPrice || 0),
               message: l.message,
               tableName: l.tableName,

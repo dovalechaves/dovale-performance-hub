@@ -114,6 +114,7 @@ interface SyncEvent {
   message: string;
   storeName?: string;
   productCode?: string;
+  oldPrice?: number;
   newPrice?: number;
   tableName?: string;
 }
@@ -154,7 +155,7 @@ router.post("/sync", async (req: Request, res: Response) => {
               CASE WHEN p.PRO_NIVEL2 = '1' THEN 'CHAVES' ELSE 'MERCADORIA' END AS GRUPO
        FROM TABELAS_PRODUTOS tp
        INNER JOIN PRODUTOS p ON p.PRO_CODIGO = tp.TBP_PRO_CODIGO
-       WHERE tp.TBP_TAB_CODIGO = 1 AND tp.TBP_PRO_CODIGO in (35801,682)`
+       WHERE tp.TBP_TAB_CODIGO = 1`
     );
 
     const produtosSjcDdf: any[] = await fbQuery(
@@ -163,7 +164,7 @@ router.post("/sync", async (req: Request, res: Response) => {
               CASE WHEN p.PRO_NIVEL2 = '1' THEN 'CHAVES' ELSE 'MERCADORIA' END AS GRUPO
        FROM TABELAS_PRODUTOS tp
        INNER JOIN PRODUTOS p ON p.PRO_CODIGO = tp.TBP_PRO_CODIGO
-       WHERE tp.TBP_TAB_CODIGO = 4 AND tp.TBP_PRO_CODIGO in (35801,682)`
+       WHERE tp.TBP_TAB_CODIGO = 4`
     );
 
     await fbDetach(dbSjc);
@@ -184,17 +185,17 @@ router.post("/sync", async (req: Request, res: Response) => {
     // Build unified map
     const unificados = new Map<
       number,
-      { atacado: number | null; ddf: number | null; grupo: string; rowcount: number }
+      { atacado: number | null; ddf: number | null; grupo: string; rowcount: number; old_atacado: number; old_ddf: number }
     >();
     for (const p of produtosSjc) {
-      unificados.set(p.TBP_PRO_CODIGO, { atacado: p.TBP_PRECO, ddf: null, grupo: getGrupo(p), rowcount: 0 });
+      unificados.set(p.TBP_PRO_CODIGO, { atacado: p.TBP_PRECO, ddf: null, grupo: getGrupo(p), rowcount: 0, old_atacado: 0, old_ddf: 0 });
     }
     for (const p of produtosSjcDdf) {
       const ex = unificados.get(p.TBP_PRO_CODIGO);
       if (ex) {
         ex.ddf = p.TBP_PRECO;
       } else {
-        unificados.set(p.TBP_PRO_CODIGO, { atacado: null, ddf: p.TBP_PRECO, grupo: getGrupo(p), rowcount: 0 });
+        unificados.set(p.TBP_PRO_CODIGO, { atacado: null, ddf: p.TBP_PRECO, grupo: getGrupo(p), rowcount: 0, old_atacado: 0, old_ddf: 0 });
       }
     }
 
@@ -290,6 +291,15 @@ router.post("/sync", async (req: Request, res: Response) => {
               pAtac *= 1.1;
               pDdf *= 1.1;
             }
+            // Fetch old prices before update
+            const [oldRows] = (await conn.execute(
+              "SELECT Preco, Preco3 FROM pacad WHERE codigopro = ?",
+              [String(idProduto).trim()]
+            )) as any;
+            const oldRow = oldRows?.[0];
+            precos.old_atacado = oldRow?.Preco != null ? Number(oldRow.Preco) : 0;
+            precos.old_ddf = oldRow?.Preco3 != null ? Number(oldRow.Preco3) : 0;
+
             const [result] = (await conn.execute(
               "UPDATE pacad SET Preco = ?, Preco3 = ? WHERE codigopro = ?",
               [pAtac, pDdf, String(idProduto).trim()]
@@ -304,13 +314,14 @@ router.post("/sync", async (req: Request, res: Response) => {
             const grupoAtac = unificados.get(id)?.grupo || getGrupo(p);
             if (cleanName.toUpperCase() === "RS" && grupoAtac === "MERCADORIA") preco *= 1.1;
             const rc = unificados.get(id)?.rowcount || 0;
+            const oldPrice = unificados.get(id)?.old_atacado ?? 0;
             const dt = nowStr();
             const pDb = Math.round(preco * 100) / 100;
             if (rc === 0) {
-              send({ status: "error", message: `Produto ${id} → ${cleanName} Tabela ATACADO: Não encontrado/alterado`, productCode: String(id), storeName: cleanName, newPrice: preco, tableName: "ATACADO" });
+              send({ status: "error", message: `Produto ${id} → ${cleanName} Tabela ATACADO: Não encontrado/alterado`, productCode: String(id), storeName: cleanName, oldPrice, newPrice: preco, tableName: "ATACADO" });
               sqlInserts.push([String(id), cleanName, dt, pDb, usuario, "ERRO", "ATACADO"]);
             } else {
-              send({ status: "success", message: `Produto ${id} → ${cleanName} Tabela ATACADO: ${fmtBRL(preco)}`, productCode: String(id), storeName: cleanName, newPrice: preco, tableName: "ATACADO" });
+              send({ status: "success", message: `Produto ${id} → ${cleanName} Tabela ATACADO: ${fmtBRL(preco)}`, productCode: String(id), storeName: cleanName, oldPrice, newPrice: preco, tableName: "ATACADO" });
               sqlInserts.push([String(id), cleanName, dt, pDb, usuario, "SUCESSO", "ATACADO"]);
             }
           }
@@ -322,13 +333,14 @@ router.post("/sync", async (req: Request, res: Response) => {
             const grupoDdf = unificados.get(id)?.grupo || getGrupo(p);
             if (cleanName.toUpperCase() === "RS" && grupoDdf === "MERCADORIA") preco *= 1.1;
             const rc = unificados.get(id)?.rowcount || 0;
+            const oldPrice = unificados.get(id)?.old_ddf ?? 0;
             const dt = nowStr();
             const pDb = Math.round(preco * 100) / 100;
             if (rc === 0) {
-              send({ status: "error", message: `Produto ${id} → ${cleanName} Tabela DDF: Não encontrado/alterado`, productCode: String(id), storeName: cleanName, newPrice: preco, tableName: "DDF" });
+              send({ status: "error", message: `Produto ${id} → ${cleanName} Tabela DDF: Não encontrado/alterado`, productCode: String(id), storeName: cleanName, oldPrice, newPrice: preco, tableName: "DDF" });
               sqlInserts.push([String(id), cleanName, dt, pDb, usuario, "ERRO", "DDF"]);
             } else {
-              send({ status: "success", message: `Produto ${id} → ${cleanName} Tabela DDF: ${fmtBRL(preco)}`, productCode: String(id), storeName: cleanName, newPrice: preco, tableName: "DDF" });
+              send({ status: "success", message: `Produto ${id} → ${cleanName} Tabela DDF: ${fmtBRL(preco)}`, productCode: String(id), storeName: cleanName, oldPrice, newPrice: preco, tableName: "DDF" });
               sqlInserts.push([String(id), cleanName, dt, pDb, usuario, "SUCESSO", "DDF"]);
             }
           }
@@ -345,14 +357,14 @@ router.post("/sync", async (req: Request, res: Response) => {
             storeName: cleanName,
           });
 
-          // Pre-fetch existing product codes for efficiency (avoids per-row rowcount issue)
-          const existingTab1 = new Set<number>();
-          const existingTabDdf = new Set<number>();
-          const rows1 = await fbQuery(tx, "SELECT TBP_PRO_CODIGO FROM TABELAS_PRODUTOS WHERE TBP_TAB_CODIGO = 1");
-          for (const r of rows1) existingTab1.add(r.TBP_PRO_CODIGO);
+          // Pre-fetch existing product codes and their current prices
+          const existingTab1 = new Map<number, number>();
+          const existingTabDdf = new Map<number, number>();
+          const rows1 = await fbQuery(tx, "SELECT TBP_PRO_CODIGO, TBP_PRECO FROM TABELAS_PRODUTOS WHERE TBP_TAB_CODIGO = 1");
+          for (const r of rows1) existingTab1.set(r.TBP_PRO_CODIGO, Number(r.TBP_PRECO) || 0);
           if (tabDdfDestino) {
-            const rowsD = await fbQuery(tx, "SELECT TBP_PRO_CODIGO FROM TABELAS_PRODUTOS WHERE TBP_TAB_CODIGO = ?", [tabDdfDestino]);
-            for (const r of rowsD) existingTabDdf.add(r.TBP_PRO_CODIGO);
+            const rowsD = await fbQuery(tx, "SELECT TBP_PRO_CODIGO, TBP_PRECO FROM TABELAS_PRODUTOS WHERE TBP_TAB_CODIGO = ?", [tabDdfDestino]);
+            for (const r of rowsD) existingTabDdf.set(r.TBP_PRO_CODIGO, Number(r.TBP_PRECO) || 0);
           }
 
           // ATACADO updates
@@ -362,6 +374,7 @@ router.post("/sync", async (req: Request, res: Response) => {
             if (cleanName.toUpperCase() === "RS" && getGrupo(p) === "MERCADORIA") preco *= 1.1;
 
             const exists = existingTab1.has(id);
+            const oldPrice = existingTab1.get(id) ?? 0;
             if (exists) {
               await fbExecute(tx, "UPDATE TABELAS_PRODUTOS SET TBP_PRECO = ? WHERE TBP_PRO_CODIGO = ? AND TBP_TAB_CODIGO = ?", [preco, id, 1]);
             }
@@ -369,10 +382,10 @@ router.post("/sync", async (req: Request, res: Response) => {
             const dt = nowStr();
             const pDb = Math.round(preco * 100) / 100;
             if (!exists) {
-              send({ status: "error", message: `Produto ${id} → ${cleanName} Tabela ATACADO: Não encontrado/alterado`, productCode: String(id), storeName: cleanName, newPrice: preco, tableName: "ATACADO" });
+              send({ status: "error", message: `Produto ${id} → ${cleanName} Tabela ATACADO: Não encontrado/alterado`, productCode: String(id), storeName: cleanName, oldPrice, newPrice: preco, tableName: "ATACADO" });
               sqlInserts.push([String(id), cleanName, dt, pDb, usuario, "ERRO", "ATACADO"]);
             } else {
-              send({ status: "success", message: `Produto ${id} → ${cleanName} Tabela ATACADO: ${fmtBRL(preco)}`, productCode: String(id), storeName: cleanName, newPrice: preco, tableName: "ATACADO" });
+              send({ status: "success", message: `Produto ${id} → ${cleanName} Tabela ATACADO: ${fmtBRL(preco)}`, productCode: String(id), storeName: cleanName, oldPrice, newPrice: preco, tableName: "ATACADO" });
               sqlInserts.push([String(id), cleanName, dt, pDb, usuario, "SUCESSO", "ATACADO"]);
             }
           }
@@ -384,6 +397,7 @@ router.post("/sync", async (req: Request, res: Response) => {
             if (cleanName.toUpperCase() === "RS" && getGrupo(p) === "MERCADORIA") preco *= 1.1;
 
             const exists = existingTabDdf.has(id);
+            const oldPrice = existingTabDdf.get(id) ?? 0;
             if (exists) {
               await fbExecute(tx, "UPDATE TABELAS_PRODUTOS SET TBP_PRECO = ? WHERE TBP_PRO_CODIGO = ? AND TBP_TAB_CODIGO = ?", [preco, id, tabDdfDestino]);
             }
@@ -391,10 +405,10 @@ router.post("/sync", async (req: Request, res: Response) => {
             const dt = nowStr();
             const pDb = Math.round(preco * 100) / 100;
             if (!exists) {
-              send({ status: "error", message: `Produto ${id} → ${cleanName} Tabela DDF: Não encontrado/alterado`, productCode: String(id), storeName: cleanName, newPrice: preco, tableName: "DDF" });
+              send({ status: "error", message: `Produto ${id} → ${cleanName} Tabela DDF: Não encontrado/alterado`, productCode: String(id), storeName: cleanName, oldPrice, newPrice: preco, tableName: "DDF" });
               sqlInserts.push([String(id), cleanName, dt, pDb, usuario, "ERRO", "DDF"]);
             } else {
-              send({ status: "success", message: `Produto ${id} → ${cleanName} Tabela DDF: ${fmtBRL(preco)}`, productCode: String(id), storeName: cleanName, newPrice: preco, tableName: "DDF" });
+              send({ status: "success", message: `Produto ${id} → ${cleanName} Tabela DDF: ${fmtBRL(preco)}`, productCode: String(id), storeName: cleanName, oldPrice, newPrice: preco, tableName: "DDF" });
               sqlInserts.push([String(id), cleanName, dt, pDb, usuario, "SUCESSO", "DDF"]);
             }
           }

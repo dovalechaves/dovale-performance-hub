@@ -16,6 +16,7 @@ import inventarioRouter, { setInventarioIO } from "./routes/inventario";
 import onboardingRouter from "./routes/onboarding";
 import { startSyncJob } from "./jobs/syncJob";
 import { startStockSnapshotJob, runStockSnapshotManual, getStockSnapshotStatus } from "./jobs/stockSnapshotJob";
+import { startMultiPrecoJob } from "./jobs/multiPrecoJob";
 import { setupSwagger } from "./swagger";
 
 const app = express();
@@ -95,4 +96,5 @@ io.on("connection", (socket) => {
 httpServer.listen(PORT, "0.0.0.0", () => {
   console.log(`[server] rodando em http://0.0.0.0:${PORT}`);
   startStockSnapshotJob().catch((err) => console.error("[stock-snapshot] Erro ao iniciar:", err));
+  startMultiPrecoJob();
 });

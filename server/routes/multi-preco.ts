@@ -155,7 +155,8 @@ router.post("/sync", async (req: Request, res: Response) => {
               CASE WHEN p.PRO_NIVEL2 = '1' THEN 'CHAVES' ELSE 'MERCADORIA' END AS GRUPO
        FROM TABELAS_PRODUTOS tp
        INNER JOIN PRODUTOS p ON p.PRO_CODIGO = tp.TBP_PRO_CODIGO
-       WHERE tp.TBP_TAB_CODIGO = 1`
+       WHERE tp.TBP_TAB_CODIGO = 1 AND tp.TBP_PRO_CODIGO in (35801,4799)`
+
     );
 
     const produtosSjcDdf: any[] = await fbQuery(
@@ -164,7 +165,8 @@ router.post("/sync", async (req: Request, res: Response) => {
               CASE WHEN p.PRO_NIVEL2 = '1' THEN 'CHAVES' ELSE 'MERCADORIA' END AS GRUPO
        FROM TABELAS_PRODUTOS tp
        INNER JOIN PRODUTOS p ON p.PRO_CODIGO = tp.TBP_PRO_CODIGO
-       WHERE tp.TBP_TAB_CODIGO = 4`
+       WHERE tp.TBP_TAB_CODIGO = 4 AND tp.TBP_PRO_CODIGO in (35801,4799)`
+
     );
 
     await fbDetach(dbSjc);

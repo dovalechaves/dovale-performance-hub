@@ -952,7 +952,7 @@ router.get("/conversations", async (req, res) => {
     let query = `
       SELECT id, usuario, display_name, status, stage, prd, created_at, updated_at
       FROM dbo.AI_CONVERSATIONS
-      WHERE status NOT IN ('excluida')
+      WHERE status NOT IN ('excluida', 'concluida')
     `;
     if (role !== "admin") {
       query += ` AND usuario = @usuario`;

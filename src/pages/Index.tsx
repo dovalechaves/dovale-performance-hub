@@ -82,6 +82,7 @@ const Index = () => {
   const [selectedSeller, setSelectedSeller] = useState<Seller | null>(null);
   const [tvMode, setTvMode] = useState(true); // gerente: padrão oculto (modo TV)
   const [modoVista, setModoVista] = useState<"mensal" | "diario">("diario");
+  const [mesSelecionado, setMesSelecionado] = useState(() => new Date().getMonth() + 1);
   const { celebrate } = useCelebration();
   const prevGoalsRef = useRef<Set<string>>(new Set());
   const initializedRef = useRef(false);
@@ -96,8 +97,8 @@ const Index = () => {
     setLoading(true);
     try {
       const now = new Date();
-      const mes = now.getMonth() + 1;
-      const ano = now.getFullYear();
+      const mes = loja === "riopreto" ? mesSelecionado : now.getMonth() + 1;
+      const ano = loja === "riopreto" ? 2026 : now.getFullYear();
 
       const [vendas, metas, representantes] = await Promise.all([
         modoVista === "diario" ? getVendasHoje(loja) : getVendas(loja, mes, ano),
@@ -140,13 +141,13 @@ const Index = () => {
     } finally {
       setLoading(false);
     }
-  }, [loja, modoVista]);
+  }, [loja, modoVista, mesSelecionado]);
 
   // Reseta referência ao trocar modo ou loja — evita celebração falsa na troca
   useEffect(() => {
     initializedRef.current = false;
     prevGoalsRef.current = new Set();
-  }, [modoVista, loja]);
+  }, [modoVista, loja, mesSelecionado]);
 
   // Carrega ao montar e quando muda a loja ou modo
   useEffect(() => {
@@ -223,6 +224,24 @@ const Index = () => {
                 >
                   {LOJAS.map(l => (
                     <option key={l.value} value={l.value}>{l.label}</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+              </div>
+            )}
+
+            {/* Seletor de mês — só riopreto */}
+            {loja === "riopreto" && (
+              <div className="relative ml-2">
+                <select
+                  value={mesSelecionado}
+                  onChange={e => setMesSelecionado(Number(e.target.value))}
+                  className="appearance-none rounded-lg border border-border bg-muted pl-3 pr-7 py-1.5 text-xs font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                >
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                    <option key={m} value={m}>
+                      {new Date(2026, m - 1).toLocaleString("pt-BR", { month: "long" }).replace(/^\w/, c => c.toUpperCase())} 2026
+                    </option>
                   ))}
                 </select>
                 <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />

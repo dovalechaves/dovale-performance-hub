@@ -53,6 +53,11 @@ interface AuthUser {
       role: Role;
       loja: string | null;
     };
+    score: {
+      canAccess: boolean;
+      role: Role;
+      loja: string | null;
+    };
   };
 }
 
@@ -75,6 +80,8 @@ interface AuthContextValue {
       assistente?: { role?: string; loja?: string | null; can_access?: boolean };
       multipreco?: { role?: string; loja?: string | null; can_access?: boolean };
       inventario?: { role?: string; loja?: string | null; can_access?: boolean };
+      onboarding?: { role?: string; loja?: string | null; can_access?: boolean };
+      score?: { role?: string; loja?: string | null; can_access?: boolean };
     },
     hubRole?: string
   ) => void;
@@ -105,6 +112,7 @@ function buildUser(
     multipreco?: { role?: string; loja?: string | null; can_access?: boolean };
     inventario?: { role?: string; loja?: string | null; can_access?: boolean };
     onboarding?: { role?: string; loja?: string | null; can_access?: boolean };
+    score?: { role?: string; loja?: string | null; can_access?: boolean };
   },
   apiHubRole?: string
 ): AuthUser {
@@ -128,6 +136,8 @@ function buildUser(
   const inventarioAccess = apiApps?.inventario?.can_access ?? false;
   const onboardingRole = resolveRole(usuario, apiApps?.onboarding?.role ?? apiRole);
   const onboardingAccess = apiApps?.onboarding?.can_access ?? false;
+  const scoreRole = resolveRole(usuario, apiApps?.score?.role ?? apiRole);
+  const scoreAccess = apiApps?.score?.can_access ?? false;
 
   return {
     usuario,
@@ -181,6 +191,11 @@ function buildUser(
         role: onboardingRole,
         loja: null,
       },
+      score: {
+        canAccess: scoreAccess,
+        role: scoreRole,
+        loja: null,
+      },
     },
   };
 }
@@ -211,6 +226,8 @@ function loadFromStorage(): AuthUser | null {
     const inventarioAccess = (parsed.apps as any)?.inventario?.canAccess ?? false;
     const onboardingRole = (parsed.apps as any)?.onboarding?.role ?? parsed.role;
     const onboardingAccess = (parsed.apps as any)?.onboarding?.canAccess ?? false;
+    const scoreRole = (parsed.apps as any)?.score?.role ?? parsed.role;
+    const scoreAccess = (parsed.apps as any)?.score?.canAccess ?? false;
 
     return {
       usuario: parsed.usuario,
@@ -262,6 +279,11 @@ function loadFromStorage(): AuthUser | null {
         onboarding: {
           canAccess: onboardingAccess,
           role: onboardingRole,
+          loja: null,
+        },
+        score: {
+          canAccess: scoreAccess,
+          role: scoreRole,
           loja: null,
         },
       },
@@ -317,6 +339,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       assistente?: { role?: string; loja?: string | null; can_access?: boolean };
       multipreco?: { role?: string; loja?: string | null; can_access?: boolean };
       inventario?: { role?: string; loja?: string | null; can_access?: boolean };
+      onboarding?: { role?: string; loja?: string | null; can_access?: boolean };
+      score?: { role?: string; loja?: string | null; can_access?: boolean };
     },
     hubRole?: string
   ) => {

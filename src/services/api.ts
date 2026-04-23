@@ -107,6 +107,12 @@ export interface AuthManagedUser {
       loja: string | null;
       can_access: boolean;
     };
+    score: {
+      app_key: "score";
+      role: "admin" | "manager" | "viewer";
+      loja: string | null;
+      can_access: boolean;
+    };
   };
 }
 

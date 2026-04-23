@@ -16,6 +16,7 @@ import AiAssistant from "./pages/AiAssistant.tsx";
 import MultiPreco from "./pages/MultiPreco.tsx";
 import Inventario from "./pages/Inventario.tsx";
 import Onboarding from "./pages/Onboarding.tsx";
+import Score from "./pages/Score.tsx";
 
 const queryClient = new QueryClient();
 
@@ -90,6 +91,14 @@ function OnboardingRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function ScoreRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.canAccessHub) return <Navigate to="/login" replace />;
+  if (!user.apps.score.canAccess) return <Navigate to="/hub" replace />;
+  return <>{children}</>;
+}
+
 function AdminManagerRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
@@ -119,6 +128,7 @@ const App = () => (
             <Route path="/multi-preco" element={<MultiPrecoRoute><MultiPreco /></MultiPrecoRoute>} />
             <Route path="/inventario" element={<InventarioRoute><Inventario /></InventarioRoute>} />
             <Route path="/onboarding" element={<OnboardingRoute><Onboarding /></OnboardingRoute>} />
+            <Route path="/score" element={<ScoreRoute><Score /></ScoreRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

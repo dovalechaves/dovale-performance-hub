@@ -50,6 +50,10 @@
     /* Custom tokens */
     --success: 145 65% 42%;
     --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 240 55% 12%;
+    --risk: 0 72% 51%;
+    --gauge-track: 240 10% 85%;
     --gold: 48 95% 50%;
     --gold-foreground: 240 55% 12%;
     --gradient-primary: linear-gradient(135deg, hsl(240 55% 24%), hsl(240 55% 32%));
@@ -64,10 +68,10 @@
     --background: 245 70% 10%;
     --foreground: 0 0% 95%;
 
-    --card: 245 70% 10%;
+    --card: 245 50% 14%;
     --card-foreground: 0 0% 95%;
 
-    --popover: 245 70% 10%;
+    --popover: 245 50% 14%;
     --popover-foreground: 0 0% 95%;
 
     --primary: 48 95% 55%;
@@ -82,7 +86,7 @@
     --accent: 48 95% 55%;
     --accent-foreground: 240 55% 12%;
 
-    --destructive: 0 62% 30%;
+    --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
 
     --border: 240 25% 15%;
@@ -100,6 +104,10 @@
 
     --success: 145 65% 42%;
     --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 220 25% 7%;
+    --risk: 0 72% 51%;
+    --gauge-track: 240 25% 20%;
     --gold: 48 95% 55%;
     --gold-foreground: 240 55% 12%;
     --gradient-primary: linear-gradient(135deg, hsl(48 95% 50%), hsl(48 95% 62%));
@@ -119,12 +127,10 @@
   }
 
   @media (prefers-reduced-motion: no-preference) {
-    *,
-    *::before,
-    *::after {
-      transition-property: background-color, border-color, color, fill, stroke, box-shadow, text-decoration-color;
-      transition-duration: 420ms;
-      transition-timing-function: var(--theme-ease);
+    body,
+    header,
+    main {
+      transition: background-color 300ms var(--theme-ease), color 300ms var(--theme-ease);
     }
   }
 }
@@ -150,6 +156,15 @@
   }
   .glow-gold {
     box-shadow: var(--shadow-gold);
+  }
+  .glow-success {
+    box-shadow: 0 0 20px -5px hsl(var(--success) / 0.4);
+  }
+  .glow-risk {
+    box-shadow: 0 0 20px -5px hsl(var(--risk) / 0.4);
+  }
+  .glass-card {
+    @apply bg-card/80 backdrop-blur-xl border border-border/50 shadow-lg;
   }
   .metal-texture {
     background-image: 

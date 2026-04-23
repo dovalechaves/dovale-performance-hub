@@ -4,13 +4,19 @@ import { getPool } from "../db/sqlserver";
 
 const router = Router();
 const VALID_ROLES = ["admin", "manager", "viewer"] as const;
+const VALID_HUB_ROLES = ["admin", "viewer"] as const;
 const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento", "assistente", "multipreco", "inventario", "onboarding"] as const;
 
 type Role = typeof VALID_ROLES[number];
+type HubRole = typeof VALID_HUB_ROLES[number];
 type AppKey = typeof MANAGED_APPS[number];
 
 function isRole(value: unknown): value is Role {
   return typeof value === "string" && VALID_ROLES.includes(value as Role);
+}
+
+function isHubRole(value: unknown): value is HubRole {
+  return typeof value === "string" && VALID_HUB_ROLES.includes(value as HubRole);
 }
 
 function isAppKey(value: unknown): value is AppKey {
@@ -30,6 +36,7 @@ interface ManagedUser {
   displayname: string;
   department: string;
   can_access_hub: boolean;
+  hub_role: HubRole;
   can_access_dashboard: boolean;
   role: Role;
   loja: string | null;
@@ -64,6 +71,14 @@ async function ensureAppsTable(pool: any): Promise<void> {
     )
     BEGIN
       ALTER TABLE dbo.USUARIOS_APPS ADD usu_codigo_sistema INT NULL;
+    END
+
+    IF NOT EXISTS (
+      SELECT 1 FROM sys.columns
+      WHERE object_id = OBJECT_ID('dbo.USUARIOS_LOJAS') AND name = 'hub_role'
+    )
+    BEGIN
+      ALTER TABLE dbo.USUARIOS_LOJAS ADD hub_role VARCHAR(20) NOT NULL DEFAULT 'viewer';
     END
   `);
 }
@@ -226,12 +241,12 @@ async function isAdminActor(pool: any, actorUsuario: string): Promise<boolean> {
   const result = await pool.request()
     .input("actor", normalized)
     .query(`
-      SELECT TOP 1 role
+      SELECT TOP 1 hub_role
       FROM dbo.USUARIOS_LOJAS
       WHERE LOWER(usuario) = @actor AND ativo = 1
     `);
 
-  return isRole(result.recordset[0]?.role) && result.recordset[0].role === "admin";
+  return result.recordset[0]?.hub_role === "admin";
 }
 
 /** POST /api/auth/login */
@@ -251,7 +266,7 @@ router.post("/login", async (req, res) => {
     if (usuario.endsWith(".teste")) {
       const testResult = await pool.request()
         .input("usuario", usuario)
-        .query(`SELECT senha_hash, role, loja, ativo FROM dbo.USUARIOS_LOJAS WHERE usuario = @usuario`);
+        .query(`SELECT senha_hash, role, loja, ativo, hub_role FROM dbo.USUARIOS_LOJAS WHERE usuario = @usuario`);
       const testUser = testResult.recordset[0];
       if (!testUser) return res.status(401).json({ error: "Usuário ou senha inválidos." });
       const senhaOk = await bcrypt.compare(senha, testUser.senha_hash);
@@ -271,11 +286,13 @@ router.post("/login", async (req, res) => {
         `);
       const apps = mergeApps(usuario, testUser.role, testUser.loja, canAccessHub, testAppsResult.recordset);
       const dashboardRole = apps.dashboard.role;
+      const hubRole: HubRole = isHubRole(testUser.hub_role) ? testUser.hub_role : "viewer";
 
       return res.json({
         token: `local_${Date.now()}`,
         usuario,
         displayname: usuario,
+        hub_role: hubRole,
         role: dashboardRole,
         loja: apps.dashboard.loja,
         can_access_hub: canAccessHub,
@@ -299,7 +316,7 @@ router.post("/login", async (req, res) => {
 
     const localResult = await pool.request()
       .input("usuario", usuario)
-      .query(`SELECT role, loja, ativo FROM dbo.USUARIOS_LOJAS WHERE usuario = @usuario`);
+      .query(`SELECT role, loja, ativo, hub_role FROM dbo.USUARIOS_LOJAS WHERE usuario = @usuario`);
 
     const localUser = localResult.recordset[0];
     const canAccessHub = isEnabledFlag(localUser?.ativo);
@@ -317,6 +334,7 @@ router.post("/login", async (req, res) => {
 
     const apps = mergeApps(usuario, localUser?.role, localUser?.loja, canAccessHub, appsResult.recordset);
     const dashboardRole = apps.dashboard.role;
+    const hubRole: HubRole = isHubRole(localUser?.hub_role) ? localUser.hub_role : "viewer";
     const displayname = String(
       adData?.displayname ||
       adData?.nome ||
@@ -329,6 +347,7 @@ router.post("/login", async (req, res) => {
       token: adData?.token || adData?.access_token || `ad_${Date.now()}`,
       usuario,
       displayname,
+      hub_role: hubRole,
       role: dashboardRole,
       loja: apps.dashboard.loja,
       can_access_hub: canAccessHub,
@@ -352,11 +371,12 @@ router.get("/me", async (req, res) => {
 
     const localResult = await pool.request()
       .input("usuario", usuario)
-      .query(`SELECT role, loja, ativo FROM dbo.USUARIOS_LOJAS WHERE usuario = @usuario`);
+      .query(`SELECT role, loja, ativo, hub_role FROM dbo.USUARIOS_LOJAS WHERE usuario = @usuario`);
     const localUser = localResult.recordset[0];
     if (!localUser) return res.status(404).json({ error: "Usuário não encontrado." });
 
     const canAccessHub = isEnabledFlag(localUser.ativo);
+    const hubRole: HubRole = isHubRole(localUser.hub_role) ? localUser.hub_role : "viewer";
 
     const appsResult = await pool.request()
       .input("usuario", usuario)
@@ -366,6 +386,7 @@ router.get("/me", async (req, res) => {
 
     res.json({
       usuario,
+      hub_role: hubRole,
       role: apps.dashboard.role,
       loja: apps.dashboard.loja,
       can_access_hub: canAccessHub,
@@ -400,7 +421,7 @@ router.get("/users", async (req, res) => {
 
     const adUsers = await adRes.json().catch(() => []);
     const [localResult, appResult] = await Promise.all([
-      pool.request().query(`SELECT usuario, role, loja, ativo FROM dbo.USUARIOS_LOJAS`),
+      pool.request().query(`SELECT usuario, role, loja, ativo, hub_role FROM dbo.USUARIOS_LOJAS`),
       pool.request().query(`
         SELECT usuario, app_key, role, loja, ativo, usu_codigo_sistema
         FROM dbo.USUARIOS_APPS
@@ -432,10 +453,12 @@ router.get("/users", async (req, res) => {
         const canAccessHub = isEnabledFlag(local?.ativo);
         const apps = mergeApps(usuario, local?.role, local?.loja, canAccessHub, appRowsByUser.get(key) ?? []);
 
+        const hubRole: HubRole = isHubRole(local?.hub_role) ? local.hub_role : "viewer";
         merged.push({
           usuario,
           displayname: String(ad?.displayname || ad?.name || usuario),
           department: String(ad?.department || ""),
+          hub_role: hubRole,
           role: apps.dashboard.role,
           loja: apps.dashboard.loja,
           can_access_hub: canAccessHub,
@@ -451,12 +474,14 @@ router.get("/users", async (req, res) => {
       const key = usuario.toLowerCase();
       if (seen.has(key)) continue;
       const canAccessHub = isEnabledFlag(r.ativo);
+      const hubRole: HubRole = isHubRole(r.hub_role) ? r.hub_role : "viewer";
       const apps = mergeApps(usuario, r.role, r.loja, canAccessHub, appRowsByUser.get(key) ?? []);
 
       merged.push({
         usuario,
         displayname: usuario,
         department: "",
+        hub_role: hubRole,
         role: apps.dashboard.role,
         loja: apps.dashboard.loja,
         can_access_hub: canAccessHub,
@@ -516,6 +541,7 @@ router.put("/role", async (req, res) => {
     loja,
     can_access_dashboard,
     can_access_hub,
+    hub_role,
     apps,
     actor_usuario,
   } = req.body;
@@ -537,6 +563,7 @@ router.put("/role", async (req, res) => {
     await ensureAppsTable(pool);
 
     const canAccessHub = can_access_hub !== false;
+    const resolvedHubRole: HubRole = isHubRole(hub_role) ? hub_role : "viewer";
     const normalizedApps = normalizeAppsPayload(
       String(usuario),
       apps,
@@ -553,14 +580,15 @@ router.put("/role", async (req, res) => {
       .input("role", dashboardApp.role)
       .input("loja", dashboardApp.loja ?? null)
       .input("ativo", hubAtivo)
+      .input("hub_role", resolvedHubRole)
       .query(`
         MERGE dbo.USUARIOS_LOJAS AS target
         USING (SELECT @usuario AS usuario) AS source
           ON target.usuario = source.usuario
         WHEN MATCHED THEN
-          UPDATE SET role = @role, loja = @loja, ativo = @ativo
+          UPDATE SET role = @role, loja = @loja, ativo = @ativo, hub_role = @hub_role
         WHEN NOT MATCHED THEN
-          INSERT (usuario, senha_hash, role, loja, ativo) VALUES (@usuario, '', @role, @loja, @ativo);
+          INSERT (usuario, senha_hash, role, loja, ativo, hub_role) VALUES (@usuario, '', @role, @loja, @ativo, @hub_role);
       `);
 
     // Extract usu_codigo_sistema from inventario app payload

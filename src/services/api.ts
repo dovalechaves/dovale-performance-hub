@@ -53,6 +53,7 @@ export interface AuthManagedUser {
   displayname: string;
   department: string;
   can_access_hub: boolean;
+  hub_role: "admin" | "viewer";
   role: "admin" | "manager" | "viewer";
   loja: string | null;
   can_access_dashboard: boolean;
@@ -161,6 +162,7 @@ export async function updateAuthUserRole(params: {
   actor_usuario: string;
   usuario: string;
   can_access_hub: boolean;
+  hub_role?: "admin" | "viewer";
   apps: AuthManagedUser["apps"];
 }): Promise<void> {
   const res = await fetch(`${BASE}/auth/role`, {

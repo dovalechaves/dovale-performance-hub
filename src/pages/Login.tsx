@@ -55,7 +55,8 @@ export default function Login() {
         data?.loja,
         data?.can_access_dashboard !== false,
         data?.can_access_hub !== false,
-        data?.apps
+        data?.apps,
+        data?.hub_role
       );
       navigate("/");
     } catch {

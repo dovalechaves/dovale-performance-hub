@@ -45,6 +45,13 @@ export const ROLE_LABELS: Record<Role, string> = {
   viewer:  "Visualizador",
 };
 
+export type HubRole = "admin" | "viewer";
+
+export const HUB_ROLE_LABELS: Record<HubRole, string> = {
+  admin:  "Administrador",
+  viewer: "Visualizador",
+};
+
 /** Usuários com roles fixas */
 export const STATIC_USER_ROLES: Record<string, Role> = {
   "gerente.teste":    "manager",

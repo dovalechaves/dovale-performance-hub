@@ -5,7 +5,7 @@ import { BarChart3, Calculator, LogOut, Sun, Moon, Users, RefreshCw, Loader2, Ch
 import logoBlue from "@/assets/logo-blue.png";
 import logoWhite from "@/assets/logo-white.png";
 import { API_BASE, LOJAS, getAuthUsers, updateAuthUserRole, type AuthManagedUser } from "@/services/api";
-import { ROLE_LABELS, type Role } from "@/lib/rbac";
+import { ROLE_LABELS, HUB_ROLE_LABELS, type HubRole, type Role } from "@/lib/rbac";
 
 const CALC_LOJAS = [
   { value: "fast", label: "Fast" },
@@ -112,7 +112,7 @@ export default function Hub() {
     localStorage.setItem("dovale_theme", dark ? "dark" : "light");
   }, [dark]);
 
-  const isAdmin = user?.apps.dashboard.role === "admin";
+  const isAdmin = user?.hubRole === "admin";
   const firstFromUser = user?.usuario.split(".")[0] ?? "";
   const firstFromDisplay = user?.displayName?.trim() ? user.displayName.trim().split(/\s+/)[0] : "";
   const displayLooksLikeLogin = !!user && firstFromDisplay.toLowerCase() === user.usuario.toLowerCase();
@@ -127,7 +127,7 @@ export default function Hub() {
   });
 
   const loadManagedUsers = useCallback(async () => {
-    if (!user || user.apps.dashboard.role !== "admin") return;
+    if (!user || user.hubRole !== "admin") return;
     setUsersLoading(true);
     setUsersError("");
     try {
@@ -141,7 +141,7 @@ export default function Hub() {
   }, [user]);
 
   useEffect(() => {
-    if (managementOpen && user?.apps.dashboard.role === "admin") {
+    if (managementOpen && user?.hubRole === "admin") {
       loadManagedUsers();
       // Load Firebird system users for inventario linking
       fetch(`${API_BASE}/inventario/usuarios-sistema`)
@@ -149,7 +149,7 @@ export default function Hub() {
         .then((data) => { if (Array.isArray(data)) setFbUsers(data); })
         .catch(() => {});
     }
-  }, [managementOpen, user?.apps.dashboard.role, loadManagedUsers]);
+  }, [managementOpen, user?.hubRole, loadManagedUsers]);
 
   const persistUser = async (next: AuthManagedUser) => {
     if (!user) return;
@@ -160,6 +160,7 @@ export default function Hub() {
         actor_usuario: user.usuario,
         usuario: next.usuario,
         can_access_hub: next.can_access_hub,
+        hub_role: next.hub_role,
         apps: next.apps,
       });
       setSavedUser(next.usuario);
@@ -233,7 +234,7 @@ export default function Hub() {
             {user && (
               <div className="hidden sm:flex flex-col items-end">
                 <span className="text-xs font-semibold text-foreground leading-tight">{greetingName}</span>
-                <span className="text-[10px] uppercase tracking-widest text-primary">{user.roleLabel}</span>
+                <span className="text-[10px] uppercase tracking-widest text-primary">Hub: {user.hubRoleLabel}</span>
               </div>
             )}
             {isAdmin && (
@@ -351,6 +352,7 @@ export default function Hub() {
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Nome</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Departamento</th>
                     <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Acesso Hub</th>
+                    <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Hub</th>
                     <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Painel</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Painel</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Loja Painel</th>
@@ -375,13 +377,13 @@ export default function Hub() {
                 <tbody>
                   {usersLoading ? (
                     <tr>
-                      <td colSpan={22} className="px-4 py-8 text-center text-muted-foreground">
+                      <td colSpan={23} className="px-4 py-8 text-center text-muted-foreground">
                         <Loader2 className="w-5 h-5 animate-spin mx-auto" />
                       </td>
                     </tr>
                   ) : filteredManagedUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={22} className="px-4 py-8 text-center text-muted-foreground text-xs">
+                      <td colSpan={23} className="px-4 py-8 text-center text-muted-foreground text-xs">
                         {appUserFilter === "all"
                           ? "Nenhum usuário encontrado para a busca informada."
                           : "Nenhum usuário habilitado no Hub e no app selecionado."}
@@ -444,6 +446,29 @@ export default function Hub() {
                             disabled={savingUser === u.usuario}
                             className="h-4 w-4 rounded border-border bg-muted text-primary focus:ring-primary/50 disabled:opacity-40"
                           />
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="relative inline-block">
+                            <select
+                              value={u.hub_role}
+                              onChange={async (e) => {
+                                const nextHubRole = e.target.value as HubRole;
+                                const next: AuthManagedUser = {
+                                  ...u,
+                                  hub_role: nextHubRole,
+                                };
+                                updateManagedUser(u.usuario, () => next);
+                                await persistUser(next);
+                              }}
+                              disabled={savingUser === u.usuario || !u.can_access_hub}
+                              className="appearance-none rounded-lg border border-border bg-muted px-3 py-1.5 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40"
+                            >
+                              {(Object.keys(HUB_ROLE_LABELS) as HubRole[]).map((r) => (
+                                <option key={r} value={r}>{HUB_ROLE_LABELS[r]}</option>
+                              ))}
+                            </select>
+                            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-center">
                           <input

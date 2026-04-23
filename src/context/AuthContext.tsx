@@ -1,11 +1,13 @@
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from "react";
-import { Role, Permission, hasPermission, resolveRole, ROLE_LABELS } from "@/lib/rbac";
+import { Role, Permission, hasPermission, resolveRole, ROLE_LABELS, HubRole, HUB_ROLE_LABELS } from "@/lib/rbac";
 
 interface AuthUser {
   usuario: string;
   displayName: string;
   role: Role;
   roleLabel: string;
+  hubRole: HubRole;
+  hubRoleLabel: string;
   token: string;
   loja?: string | null;
   canAccessHub: boolean;
@@ -73,12 +75,18 @@ interface AuthContextValue {
       assistente?: { role?: string; loja?: string | null; can_access?: boolean };
       multipreco?: { role?: string; loja?: string | null; can_access?: boolean };
       inventario?: { role?: string; loja?: string | null; can_access?: boolean };
-    }
+    },
+    hubRole?: string
   ) => void;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+function resolveHubRole(raw?: string): HubRole {
+  if (raw === "admin" || raw === "viewer") return raw;
+  return "viewer";
+}
 
 function buildUser(
   usuario: string,
@@ -97,8 +105,10 @@ function buildUser(
     multipreco?: { role?: string; loja?: string | null; can_access?: boolean };
     inventario?: { role?: string; loja?: string | null; can_access?: boolean };
     onboarding?: { role?: string; loja?: string | null; can_access?: boolean };
-  }
+  },
+  apiHubRole?: string
 ): AuthUser {
+  const hubRole = resolveHubRole(apiHubRole);
   const dashboardRole = resolveRole(usuario, apiApps?.dashboard?.role ?? apiRole);
   const dashboardLoja = apiApps?.dashboard?.loja ?? loja ?? null;
   const dashboardAccess = apiApps?.dashboard?.can_access ?? canAccessDashboard;
@@ -124,6 +134,8 @@ function buildUser(
     displayName: displayName?.trim() ? displayName : usuario,
     role: dashboardRole,
     roleLabel: ROLE_LABELS[dashboardRole],
+    hubRole,
+    hubRoleLabel: HUB_ROLE_LABELS[hubRole],
     token,
     loja: dashboardLoja,
     canAccessHub,
@@ -180,8 +192,10 @@ function loadFromStorage(): AuthUser | null {
     const parsed = JSON.parse(raw) as Partial<AuthUser>;
     if (!parsed.usuario || !parsed.token || !parsed.role) return null;
     const dashboardRole = parsed.apps?.dashboard?.role ?? parsed.role;
-    const dashboardAccess = parsed.apps?.dashboard?.canAccess ?? parsed.canAccessDashboard ?? true;
+    const canAccessHub = parsed.canAccessHub ?? true;
+    const canAccessDashboard = parsed.apps?.dashboard?.canAccess ?? parsed.canAccessDashboard ?? true;
     const dashboardLoja = parsed.apps?.dashboard?.loja ?? parsed.loja ?? null;
+    const hubRole = resolveHubRole((parsed as any).hubRole);
     const calculadoraRole = parsed.apps?.calculadora?.role ?? parsed.role;
     const calculadoraAccess = parsed.apps?.calculadora?.canAccess ?? (dashboardRole !== "viewer");
     const disparoRole = parsed.apps?.disparo?.role ?? parsed.role;
@@ -204,12 +218,14 @@ function loadFromStorage(): AuthUser | null {
       token: parsed.token,
       role: dashboardRole,
       roleLabel: ROLE_LABELS[dashboardRole],
+      hubRole,
+      hubRoleLabel: HUB_ROLE_LABELS[hubRole],
       loja: dashboardLoja,
       canAccessHub: parsed.canAccessHub ?? true,
-      canAccessDashboard: dashboardAccess,
+      canAccessDashboard: canAccessDashboard,
       apps: {
         dashboard: {
-          canAccess: dashboardAccess,
+          canAccess: canAccessDashboard,
           role: dashboardRole,
           loja: dashboardLoja,
         },
@@ -276,7 +292,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           data.loja,
           data.can_access_dashboard,
           data.can_access_hub,
-          data.apps
+          data.apps,
+          data.hub_role
         );
         localStorage.setItem("dovale_auth", JSON.stringify(refreshed));
         setUser(refreshed);
@@ -300,9 +317,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       assistente?: { role?: string; loja?: string | null; can_access?: boolean };
       multipreco?: { role?: string; loja?: string | null; can_access?: boolean };
       inventario?: { role?: string; loja?: string | null; can_access?: boolean };
-    }
+    },
+    hubRole?: string
   ) => {
-    const authUser = buildUser(usuario, displayName, token, apiRole, loja, canAccessDashboard, canAccessHub, apps);
+    const authUser = buildUser(usuario, displayName, token, apiRole, loja, canAccessDashboard, canAccessHub, apps, hubRole);
     localStorage.setItem("dovale_auth", JSON.stringify(authUser));
     setUser(authUser);
   }, []);

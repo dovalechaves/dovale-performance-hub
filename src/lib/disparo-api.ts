@@ -123,7 +123,7 @@ export async function uploadContatos(file: File): Promise<{ lista_id: number; to
   return json;
 }
 
-export async function uploadMidia(file: File): Promise<{ media_url: string }> {
+export async function uploadMidia(file: File): Promise<{ media_url: string; meta_handle?: string | null }> {
   const form = new FormData();
   form.append("file", file);
   const r = await authFetch(`${API_BASE}/api/disparo/upload-midia`, { method: "POST", body: form });

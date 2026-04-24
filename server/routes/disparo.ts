@@ -202,10 +202,17 @@ router.post("/templates", async (req: Request, res: Response) => {
     const { payload, erro } = montarPayloadCriacaoTemplate(req.body ?? {});
     if (erro) return res.status(400).json({ erro });
 
+    // Handle pré-gerado pelo endpoint /upload-midia — evita re-upload e timeout
+    const preHandle = String(req.body.header_meta_handle ?? "").trim();
     const wabaId = process.env.wpp_waba_id ?? process.env.wpp_conta_id;
     for (const comp of payload!.components ?? []) {
       if (comp.type?.toUpperCase() !== "HEADER") continue;
       if (!["IMAGE", "VIDEO", "DOCUMENT"].includes(comp.format?.toUpperCase())) continue;
+      if (preHandle) {
+        comp.example = { header_handle: [preHandle] };
+        console.log("[disparo] Usando handle pré-gerado:", preHandle);
+        continue;
+      }
       const handles = comp.example?.header_handle ?? [];
       if (!handles.length) continue;
       const url = String(handles[0] ?? "").trim();
@@ -309,7 +316,7 @@ router.post("/template-etiquetas", async (req: Request, res: Response) => {
 
 // ── Upload mídia ─────────────────────────────────────────────────────────────
 
-router.post("/upload-midia", uploadMidia.single("file"), (req: Request, res: Response) => {
+router.post("/upload-midia", uploadMidia.single("file"), async (req: Request, res: Response) => {
   console.log("[disparo] POST /upload-midia req.file:", !!req.file, "originalname:", req.file?.originalname);
   if (!req.file) return res.status(400).json({ erro: "Nenhum arquivo de mídia enviado" });
   const ext = path.extname(req.file.originalname).toLowerCase();
@@ -317,7 +324,19 @@ router.post("/upload-midia", uploadMidia.single("file"), (req: Request, res: Res
   const destino = path.join(MEDIA_DIR, novoNome);
   fs.renameSync(req.file.path, destino);
   const basePublica = (process.env.PUBLIC_BASE_URL ?? "").replace(/\/+$/, "") || `http://localhost:${process.env.SERVER_PORT ?? 3001}`;
-  res.status(201).json({ mensagem: "Mídia enviada com sucesso", media_url: `${basePublica}/api/disparo/media/${novoNome}` });
+  const mediaUrl = `${basePublica}/api/disparo/media/${novoNome}`;
+
+  // Pré-gera handle Meta para agilizar criação de template (evita re-upload e timeout)
+  let metaHandle: string | null = null;
+  const wabaId = process.env.wpp_waba_id ?? process.env.wpp_conta_id;
+  if (wabaId) {
+    console.log("[disparo] Pré-gerando handle Meta para:", novoNome);
+    const { handle } = await meta.gerarHandleDeArquivoLocal(destino, wabaId);
+    metaHandle = handle;
+    console.log("[disparo] Handle pré-gerado:", metaHandle ?? "falhou");
+  }
+
+  res.status(201).json({ mensagem: "Mídia enviada com sucesso", media_url: mediaUrl, meta_handle: metaHandle });
 });
 
 router.get("/media/:filename", (req: Request, res: Response) => {

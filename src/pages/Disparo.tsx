@@ -44,6 +44,7 @@ export default function Disparo() {
   const [novoTemplate, setNovoTemplate] = useState({
     name: "", category: "MARKETING", language_code: "pt_BR",
     header_type: "NONE", header_text: "", header_media_example_url: "",
+    header_meta_handle: "",
     body_text: "", footer_text: "", etiqueta: "",
   });
   const [templateMediaFile, setTemplateMediaFile] = useState<File | null>(null);
@@ -330,6 +331,7 @@ export default function Disparo() {
       setNovoTemplate({
         name: "", category: "MARKETING", language_code: "pt_BR",
         header_type: "NONE", header_text: "", header_media_example_url: "",
+        header_meta_handle: "",
         body_text: "", footer_text: "", etiqueta: "",
       });
       api.fetchTemplatesGerenciar().then(setTemplatesGerenciar);
@@ -733,6 +735,7 @@ export default function Disparo() {
                       try {
                         const r = await api.uploadMidia(templateMediaFile);
                         updateNovo("header_media_example_url", r.media_url);
+                        if (r.meta_handle) updateNovo("header_meta_handle", r.meta_handle);
                         toast.success("Mídia enviada!");
                       } catch (e: any) { toast.error(e.message); }
                       finally { setTemplateMediaUploading(false); }
@@ -748,7 +751,10 @@ export default function Disparo() {
                 <Input
                   placeholder="https://exemplo.com/video.mp4"
                   value={novoTemplate.header_media_example_url}
-                  onChange={(e) => updateNovo("header_media_example_url", e.target.value)}
+                  onChange={(e) => {
+                    updateNovo("header_media_example_url", e.target.value);
+                    updateNovo("header_meta_handle", "");
+                  }}
                 />
               </div>
             )}

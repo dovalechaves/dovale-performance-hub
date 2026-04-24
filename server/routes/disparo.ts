@@ -327,13 +327,17 @@ router.post("/upload-midia", uploadMidia.single("file"), async (req: Request, re
   const mediaUrl = `${basePublica}/api/disparo/media/${novoNome}`;
 
   // Pré-gera handle Meta para agilizar criação de template (evita re-upload e timeout)
+  // Timeout de 55s garante resposta antes do limite do proxy/Cloudflare (~100s)
   let metaHandle: string | null = null;
   const wabaId = process.env.wpp_waba_id ?? process.env.wpp_conta_id;
   if (wabaId) {
     console.log("[disparo] Pré-gerando handle Meta para:", novoNome);
-    const { handle } = await meta.gerarHandleDeArquivoLocal(destino, wabaId);
+    const timeout = new Promise<{ handle: null; error: string }>((resolve) =>
+      setTimeout(() => resolve({ handle: null, error: "timeout" }), 55_000),
+    );
+    const { handle } = await Promise.race([meta.gerarHandleDeArquivoLocal(destino, wabaId), timeout]);
     metaHandle = handle;
-    console.log("[disparo] Handle pré-gerado:", metaHandle ?? "falhou");
+    console.log("[disparo] Handle pré-gerado:", metaHandle ?? "falhou (fallback na criação do template)");
   }
 
   res.status(201).json({ mensagem: "Mídia enviada com sucesso", media_url: mediaUrl, meta_handle: metaHandle });

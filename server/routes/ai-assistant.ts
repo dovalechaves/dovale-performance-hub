@@ -8,7 +8,6 @@ const router = Router();
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// ── Chatwoot TI (notificação de demandas) ──
 const CW_TI_BASE = "http://192.168.10.181:3000";
 const CW_TI_TOKEN = "o4Y7pWQePkSsSw5uKczFRqZ9";
 const CW_TI_INBOX = 5;
@@ -658,8 +657,8 @@ async function getTrelloCardStatus(cardId: string): Promise<{ list: string; boar
 router.post("/projects", async (req, res) => {
   try {
     const { conversation_id, usuario, display_name, titulo, prd_content } = req.body ?? {};
-    if (!usuario || !prd_content) {
-      return res.status(400).json({ error: "usuario e prd_content são obrigatórios." });
+    if (!usuario || !prd_content || !titulo?.trim()) {
+      return res.status(400).json({ error: "usuario, titulo e prd_content são obrigatórios." });
     }
     const pool = await getPool();
     const result = await pool
@@ -667,7 +666,7 @@ router.post("/projects", async (req, res) => {
       .input("conversation_id", sql.VarChar(100), conversation_id || null)
       .input("usuario", sql.VarChar(100), usuario)
       .input("display_name", sql.NVarChar(200), display_name || usuario)
-      .input("titulo", sql.NVarChar(500), titulo || "Novo Requisito")
+      .input("titulo", sql.NVarChar(500), titulo.trim())
       .input("prd_content", sql.NVarChar(sql.MAX), prd_content)
       .query(`
         INSERT INTO dbo.AI_REQUESTS (conversation_id, usuario, display_name, titulo, status, prd_content)

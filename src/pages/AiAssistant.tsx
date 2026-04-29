@@ -329,6 +329,7 @@ export default function AiAssistant() {
 
   const submitProject = useCallback(async () => {
     if (!chat.prd || !user || submitting) return;
+    if (!submitTitle.trim()) return;
     setSubmitting(true);
     try {
       const res = await fetch(`${BASE}/ai-assistant/projects`, {
@@ -338,7 +339,7 @@ export default function AiAssistant() {
           conversation_id: chat.conversationId,
           usuario: user.usuario,
           display_name: user.displayName,
-          titulo: submitTitle || "Novo Requisito",
+          titulo: submitTitle.trim(),
           prd_content: chat.prd,
         }),
       });
@@ -591,7 +592,7 @@ export default function AiAssistant() {
             <button onClick={() => setView("chat")} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${view === "chat" ? "bg-cyan-500/15 text-cyan-600" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}>
               <MessageSquare className="w-3.5 h-3.5" /> Nova Demanda
             </button>
-            <button onClick={() => setView("projects")} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${view === "projects" ? "bg-cyan-500/15 text-cyan-600" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}>
+            <button onClick={() => { setView("projects"); setSelectedProject(null); }} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${view === "projects" || view === "detail" ? "bg-cyan-500/15 text-cyan-600" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}>
               <FolderOpen className="w-3.5 h-3.5" /> Demandas
             </button>
           </div>
@@ -670,10 +671,10 @@ export default function AiAssistant() {
               <div className="border-t border-border bg-gradient-card">
                 <div className="container mx-auto max-w-3xl px-4 py-4 space-y-3">
                   <div className="flex items-center gap-2">
-                    <input type="text" value={submitTitle} onChange={(e) => setSubmitTitle(e.target.value)} placeholder="Titulo do projeto (ex: Automacao de pedidos)" className="flex-1 rounded-lg border border-border bg-muted px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-cyan-500/50" />
+                    <input type="text" value={submitTitle} onChange={(e) => setSubmitTitle(e.target.value)} placeholder="Titulo do projeto (obrigatório)" className={`flex-1 rounded-lg border bg-muted px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-cyan-500/50 ${!submitTitle.trim() ? "border-red-500/60" : "border-border"}`} />
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <button onClick={submitProject} disabled={submitting} className="inline-flex items-center gap-2 rounded-lg bg-cyan-500 px-4 py-2 text-xs font-semibold text-white hover:bg-cyan-600 transition-colors disabled:opacity-40">
+                    <button onClick={submitProject} disabled={submitting || !submitTitle.trim()} className="inline-flex items-center gap-2 rounded-lg bg-cyan-500 px-4 py-2 text-xs font-semibold text-white hover:bg-cyan-600 transition-colors disabled:opacity-40">
                       {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <SendHorizonal className="w-3.5 h-3.5" />}
                       Aprovar e Enviar para TI
                     </button>

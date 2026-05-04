@@ -149,13 +149,16 @@ router.post("/sync", async (req: Request, res: Response) => {
     // ── 1. Read source (SJC Firebird) ──
     const dbSjc = await fbConnect(sjcPath);
 
+    const FILTER_PRODUTOS = `('173','682','4799','2072','5150','9445','866','604','600','3911','3600','211','1203','1198','558','414','874','183','1183','88','190','589','3589','9337','8600','2811','2895')`;
+
     const produtosSjc: any[] = await fbQuery(
       dbSjc,
       `SELECT tp.TBP_PRO_CODIGO, tp.TBP_PRECO, tp.TBP_TAB_CODIGO,
               CASE WHEN p.PRO_NIVEL2 = '1' THEN 'CHAVES' ELSE 'MERCADORIA' END AS GRUPO
        FROM TABELAS_PRODUTOS tp
        INNER JOIN PRODUTOS p ON p.PRO_CODIGO = tp.TBP_PRO_CODIGO
-       WHERE tp.TBP_TAB_CODIGO = 1`
+       WHERE tp.TBP_TAB_CODIGO = 1
+         AND tp.TBP_PRO_CODIGO IN ${FILTER_PRODUTOS}`
 
     );
 
@@ -165,7 +168,8 @@ router.post("/sync", async (req: Request, res: Response) => {
               CASE WHEN p.PRO_NIVEL2 = '1' THEN 'CHAVES' ELSE 'MERCADORIA' END AS GRUPO
        FROM TABELAS_PRODUTOS tp
        INNER JOIN PRODUTOS p ON p.PRO_CODIGO = tp.TBP_PRO_CODIGO
-       WHERE tp.TBP_TAB_CODIGO = 4`
+       WHERE tp.TBP_TAB_CODIGO = 4
+         AND tp.TBP_PRO_CODIGO IN ${FILTER_PRODUTOS}`
 
     );
 

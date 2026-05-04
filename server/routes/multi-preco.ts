@@ -323,8 +323,10 @@ router.post("/sync", async (req: Request, res: Response) => {
               send({ status: "error", message: `Produto ${id} → ${cleanName} Tabela ATACADO: Não encontrado/alterado`, productCode: String(id), storeName: cleanName, oldPrice, newPrice: preco, tableName: "ATACADO" });
               sqlInserts.push([String(id), cleanName, dt, pDb, usuario, "ERRO", "ATACADO"]);
             } else {
-              send({ status: "success", message: `Produto ${id} → ${cleanName} Tabela ATACADO: ${fmtBRL(preco)}`, productCode: String(id), storeName: cleanName, oldPrice, newPrice: preco, tableName: "ATACADO" });
-              sqlInserts.push([String(id), cleanName, dt, pDb, usuario, "SUCESSO", "ATACADO"]);
+              const statusOp = Math.round(oldPrice * 100) === Math.round(pDb * 100) ? " (Mantido)" : "";
+              const statusDb = statusOp ? "MANTIDO" : "ATUALIZADO";
+              send({ status: "success", message: `Produto ${id} → ${cleanName} Tabela ATACADO: ${fmtBRL(preco)}${statusOp}`, productCode: String(id), storeName: cleanName, oldPrice, newPrice: preco, tableName: "ATACADO" });
+              sqlInserts.push([String(id), cleanName, dt, pDb, usuario, statusDb, "ATACADO"]);
             }
           }
 
@@ -342,8 +344,10 @@ router.post("/sync", async (req: Request, res: Response) => {
               send({ status: "error", message: `Produto ${id} → ${cleanName} Tabela DDF: Não encontrado/alterado`, productCode: String(id), storeName: cleanName, oldPrice, newPrice: preco, tableName: "DDF" });
               sqlInserts.push([String(id), cleanName, dt, pDb, usuario, "ERRO", "DDF"]);
             } else {
-              send({ status: "success", message: `Produto ${id} → ${cleanName} Tabela DDF: ${fmtBRL(preco)}`, productCode: String(id), storeName: cleanName, oldPrice, newPrice: preco, tableName: "DDF" });
-              sqlInserts.push([String(id), cleanName, dt, pDb, usuario, "SUCESSO", "DDF"]);
+              const statusOp = Math.round(oldPrice * 100) === Math.round(pDb * 100) ? " (Mantido)" : "";
+              const statusDb = statusOp ? "MANTIDO" : "ATUALIZADO";
+              send({ status: "success", message: `Produto ${id} → ${cleanName} Tabela DDF: ${fmtBRL(preco)}${statusOp}`, productCode: String(id), storeName: cleanName, oldPrice, newPrice: preco, tableName: "DDF" });
+              sqlInserts.push([String(id), cleanName, dt, pDb, usuario, statusDb, "DDF"]);
             }
           }
 
@@ -387,8 +391,10 @@ router.post("/sync", async (req: Request, res: Response) => {
               send({ status: "error", message: `Produto ${id} → ${cleanName} Tabela ATACADO: Não encontrado/alterado`, productCode: String(id), storeName: cleanName, oldPrice, newPrice: preco, tableName: "ATACADO" });
               sqlInserts.push([String(id), cleanName, dt, pDb, usuario, "ERRO", "ATACADO"]);
             } else {
-              send({ status: "success", message: `Produto ${id} → ${cleanName} Tabela ATACADO: ${fmtBRL(preco)}`, productCode: String(id), storeName: cleanName, oldPrice, newPrice: preco, tableName: "ATACADO" });
-              sqlInserts.push([String(id), cleanName, dt, pDb, usuario, "SUCESSO", "ATACADO"]);
+              const statusOp = Math.round(oldPrice * 100) === Math.round(pDb * 100) ? " (Mantido)" : "";
+              const statusDb = statusOp ? "MANTIDO" : "ATUALIZADO";
+              send({ status: "success", message: `Produto ${id} → ${cleanName} Tabela ATACADO: ${fmtBRL(preco)}${statusOp}`, productCode: String(id), storeName: cleanName, oldPrice, newPrice: preco, tableName: "ATACADO" });
+              sqlInserts.push([String(id), cleanName, dt, pDb, usuario, statusDb, "ATACADO"]);
             }
           }
 
@@ -410,8 +416,10 @@ router.post("/sync", async (req: Request, res: Response) => {
               send({ status: "error", message: `Produto ${id} → ${cleanName} Tabela DDF: Não encontrado/alterado`, productCode: String(id), storeName: cleanName, oldPrice, newPrice: preco, tableName: "DDF" });
               sqlInserts.push([String(id), cleanName, dt, pDb, usuario, "ERRO", "DDF"]);
             } else {
-              send({ status: "success", message: `Produto ${id} → ${cleanName} Tabela DDF: ${fmtBRL(preco)}`, productCode: String(id), storeName: cleanName, oldPrice, newPrice: preco, tableName: "DDF" });
-              sqlInserts.push([String(id), cleanName, dt, pDb, usuario, "SUCESSO", "DDF"]);
+              const statusOp = Math.round(oldPrice * 100) === Math.round(pDb * 100) ? " (Mantido)" : "";
+              const statusDb = statusOp ? "MANTIDO" : "ATUALIZADO";
+              send({ status: "success", message: `Produto ${id} → ${cleanName} Tabela DDF: ${fmtBRL(preco)}${statusOp}`, productCode: String(id), storeName: cleanName, oldPrice, newPrice: preco, tableName: "DDF" });
+              sqlInserts.push([String(id), cleanName, dt, pDb, usuario, statusDb, "DDF"]);
             }
           }
 

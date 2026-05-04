@@ -36,23 +36,33 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 // ── CSV Export ──
 function exportCsv(logs: PriceLog[], userName: string) {
   if (!logs.length) return;
-  const header = "Código Produto;Loja;Valor Anterior;Valor Novo;Data/Hora;Status;Usuário;Tabela\n";
-  const rows = logs.map((l) =>
-    [
-      l.productCode,
-      l.storeName,
-      l.oldPrice?.toFixed(2).replace(".", ",") ?? "",
-      l.newPrice.toFixed(2).replace(".", ","),
-      l.timestamp.toLocaleString("pt-BR"),
-      l.status === "success" ? "SUCESSO" : "NÃO ALTERADO/ERRO",
-      userName,
-      l.tableName || "",
-    ].join(";")
-  );
-  const blob = new Blob(["\uFEFF" + header + rows.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const rows = [
+    ["Data/Hora", "Status", "Loja", "Codigo", "Valor Anterior", "Novo Preco", "Tabela", "Mensagem"].join(";"),
+  ];
+  logs.forEach((l) => {
+    let statusStr = "ERRO";
+    if (l.status === "success") {
+      statusStr = l.message?.includes("(Mantido)") ? "MANTIDO" : "ATUALIZADO";
+    }
+    rows.push(
+      [
+        l.timestamp.toLocaleString("pt-BR"),
+        statusStr,
+        l.storeName || "",
+        l.productCode || "",
+        l.oldPrice !== undefined ? l.oldPrice.toFixed(2).replace(".", ",") : "",
+        l.newPrice.toFixed(2).replace(".", ","),
+        l.tableName || "",
+        l.message || "",
+      ]
+        .map((v) => String(v).replace(/"/g, '""'))
+        .join(";")
+    );
+  });
+  const blob = new Blob(["﻿" + rows.join("\n")], { type: "text/csv;charset=utf-8;" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `sync_precos_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `Relatorio_Sync_${userName.replace(/\s+/g, "_")}_${Date.now()}.csv`;
   a.click();
   URL.revokeObjectURL(a.href);
 }

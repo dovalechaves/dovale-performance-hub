@@ -102,9 +102,13 @@ function buildCsv(logs: SyncEvent[]): string {
   const now = new Date().toLocaleString("pt-BR");
 
   const lines = logs.map((log) => {
+    let statusAmigavel = "ERRO";
+    if (log.status === "success") {
+      statusAmigavel = String(log.message || "").includes("(Mantido)") ? "MANTIDO" : "ATUALIZADO";
+    }
     return [
       now,
-      toCsvValue(log.status || ""),
+      statusAmigavel,
       toCsvValue(log.storeName || ""),
       toCsvValue(log.productCode || ""),
       formatPrice(log.oldPrice),

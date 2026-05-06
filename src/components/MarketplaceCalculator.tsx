@@ -194,6 +194,7 @@ const MarketplaceCalculator = () => {
 
   // Custo operacional do produto buscado
   const [custoOpUnit, setCustoOpUnit] = useState<number | null>(null);
+  const [custoRealOverride, setCustoRealOverride] = useState("");
   const [valorParticipacao] = useState(2000000);
 
   // Product search
@@ -238,6 +239,8 @@ const MarketplaceCalculator = () => {
     setSimErro(null);
   }, [marketplace, custoProduto, listingType, pesoGramas, desconto, descontoFrete, precoVenda, quantidade]);
 
+  useEffect(() => { setCustoRealOverride(""); }, [custoProduto, custoOpUnit]);
+
   // Local calculation (always available)
   const results = useMemo(() => {
     const custoBase = parseFloat(custoProduto) || 0;
@@ -271,7 +274,7 @@ const MarketplaceCalculator = () => {
       shipping = estimateMagaluShipping(peso, MAGALU_TIER_DISCOUNT[magaluTier]) * (1 - descontoFrete / 100);
     }
 
-    const cost = custoBase + (custoOpUnit ?? 0);
+    const cost = custoRealOverride !== "" ? (parseFloat(custoRealOverride) || 0) : custoBase + (custoOpUnit ?? 0);
 
     const imposto = price * TAX_RATE;
     const profit = price - taxa - shipping - imposto - cost;
@@ -285,7 +288,7 @@ const MarketplaceCalculator = () => {
       imposto,
       margemCalculada: calculatedMargin,
     };
-  }, [precoVenda, desconto, descontoFrete, custoProduto, custoOpUnit, marketplace, isML, listingType, pesoGramas, magaluTier]);
+  }, [precoVenda, desconto, descontoFrete, custoProduto, custoOpUnit, custoRealOverride, marketplace, isML, listingType, pesoGramas, magaluTier]);
 
   const buscarProduto = async () => {
     if (!codigoProduto.trim()) return;
@@ -361,7 +364,7 @@ const MarketplaceCalculator = () => {
     setIsSimulating(true);
     setSimErro(null);
     try {
-      const custo = parseFloat(custoProduto) || 0;
+      const custo = custoRealOverride !== "" ? (parseFloat(custoRealOverride) || 0) : (parseFloat(custoProduto) || 0) + (custoOpUnit ?? 0);
       const basePrice = parseFloat(precoVenda) || 0;
       const finalPrice = basePrice * (1 - desconto / 100);
       const payload: any = {
@@ -493,11 +496,13 @@ const MarketplaceCalculator = () => {
           <div className="space-y-2 mb-6">
             <label className={`${labelClass} text-primary`}>Custo Real (R$)</label>
             <input
-              type="text"
-              readOnly
-              value={custoProduto !== "" ? fmt((parseFloat(custoProduto) || 0) + (custoOpUnit ?? 0)) : "—"}
-              placeholder="—"
-              className={`${inputClass} opacity-70 cursor-not-allowed text-primary font-bold`}
+              type="number"
+              min="0"
+              step="0.01"
+              value={custoRealOverride !== "" ? custoRealOverride : custoProduto !== "" ? ((parseFloat(custoProduto) || 0) + (custoOpUnit ?? 0)).toFixed(2) : ""}
+              onChange={e => setCustoRealOverride(e.target.value)}
+              placeholder="0,00"
+              className={`${inputClass} text-primary font-bold`}
             />
           </div>
 
@@ -675,8 +680,8 @@ const MarketplaceCalculator = () => {
             {custoOpUnit != null && (
               <ResultRow label="Custo Operacional" value={fmt(custoOpUnit)} />
             )}
-            {custoOpUnit != null && (
-              <ResultRow label="Custo Real" value={fmt((parseFloat(custoProduto) || 0) + custoOpUnit)} accent />
+            {(custoOpUnit != null || custoRealOverride !== "") && (
+              <ResultRow label="Custo Real" value={fmt(custoRealOverride !== "" ? (parseFloat(custoRealOverride) || 0) : (parseFloat(custoProduto) || 0) + (custoOpUnit ?? 0))} accent />
             )}
             <ResultRow label="Preço do Produto" value={fmt(parseFloat(precoVenda) || 0)} />
             <ResultRow label="Desconto" value={`${desconto}%`} />

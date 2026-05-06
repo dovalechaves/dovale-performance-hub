@@ -281,7 +281,6 @@ router.post("/sync", async (req: Request, res: Response) => {
             storeName: cleanName,
           });
 
-          // Execute all updates (ATACADO + DDF in one query per product)
           for (const [idProduto, precos] of unificados) {
             let pAtac = precos.atacado !== null ? Number(precos.atacado) : 0;
             let pDdf = precos.ddf !== null ? Number(precos.ddf) : 0;
@@ -289,7 +288,6 @@ router.post("/sync", async (req: Request, res: Response) => {
               pAtac *= 1.1;
               pDdf *= 1.1;
             }
-            // Fetch old prices before update
             const [oldRows] = (await conn.execute(
               "SELECT Preco, Preco3 FROM pacad WHERE codigopro = ?",
               [String(idProduto).trim()]
@@ -305,7 +303,6 @@ router.post("/sync", async (req: Request, res: Response) => {
             precos.rowcount = result.affectedRows;
           }
 
-          // ATACADO logs
           for (const p of produtosSjc) {
             const id = p.TBP_PRO_CODIGO;
             let preco = Number(p.TBP_PRECO) || 0;

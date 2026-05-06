@@ -59,6 +59,7 @@ const LojaCalculator = () => {
 
   // Custo operacional rateado por produto (mesma lógica da indústria)
   const [custoOpUnit, setCustoOpUnit] = useState<number | null>(null);
+  const [custoRealOverride, setCustoRealOverride] = useState("");
   const [custoOpData, setCustoOpData] = useState<Record<number, CustoOperacionalItem>>({});
   const custoOpRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -95,6 +96,8 @@ const LojaCalculator = () => {
     setCustoOpUnit(item?.custo_operacional_unit ?? null);
   }, [codigoProduto, custoOpData]);
 
+  useEffect(() => { setCustoRealOverride(""); }, [custoProduto, custoOpUnit]);
+
   const buscarProduto = async () => {
     if (!codigoProduto.trim()) return;
     setIsLoadingProduto(true);
@@ -125,7 +128,7 @@ const LojaCalculator = () => {
     const taxa = price * ML_FEE;
     const imposto = price * TAX_RATE;
     const opCost = custoOpUnit ?? 0;
-    const cost = custoBase + opCost;
+    const cost = custoRealOverride !== "" ? (parseFloat(custoRealOverride) || 0) : custoBase + opCost;
     const profit = price - taxa - imposto - cost;
     const calculatedMargin = cost > 0 ? (profit / cost) * 100 : 0;
 
@@ -137,7 +140,7 @@ const LojaCalculator = () => {
       custoOp: opCost,
       margemCalculada: calculatedMargin,
     };
-  }, [precoVenda, desconto, custoProduto, custoOpUnit]);
+  }, [precoVenda, desconto, custoProduto, custoOpUnit, custoRealOverride]);
 
   const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -259,11 +262,13 @@ const LojaCalculator = () => {
           <div className="space-y-2 mb-6">
             <label className={`${labelClass} text-primary`}>Custo Real (R$)</label>
             <input
-              type="text"
-              readOnly
-              value={custoProduto !== "" ? fmt((parseFloat(custoProduto) || 0) + (custoOpUnit ?? 0)) : "—"}
-              placeholder="—"
-              className={`${inputClass} opacity-70 cursor-not-allowed text-primary font-bold`}
+              type="number"
+              min="0"
+              step="0.01"
+              value={custoRealOverride !== "" ? custoRealOverride : custoProduto !== "" ? ((parseFloat(custoProduto) || 0) + (custoOpUnit ?? 0)).toFixed(2) : ""}
+              onChange={e => setCustoRealOverride(e.target.value)}
+              placeholder="0,00"
+              className={`${inputClass} text-primary font-bold`}
             />
           </div>
 
@@ -329,8 +334,8 @@ const LojaCalculator = () => {
             {custoOpUnit != null && (
               <ResultRow label="Custo Operacional" value={fmt(custoOpUnit)} />
             )}
-            {custoOpUnit != null && (
-              <ResultRow label="Custo Real" value={fmt((parseFloat(custoProduto) || 0) + custoOpUnit)} accent />
+            {(custoOpUnit != null || custoRealOverride !== "") && (
+              <ResultRow label="Custo Real" value={fmt(custoRealOverride !== "" ? (parseFloat(custoRealOverride) || 0) : (parseFloat(custoProduto) || 0) + (custoOpUnit ?? 0))} accent />
             )}
             <ResultRow label="Preço do Produto" value={fmt(parseFloat(precoVenda) || 0)} />
             <ResultRow label="Desconto" value={`${desconto}%`} />

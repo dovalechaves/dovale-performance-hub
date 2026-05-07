@@ -950,8 +950,11 @@ router.get("/conversations", async (req, res) => {
     const request = pool.request().input("usuario", sql.VarChar(100), String(usuario));
     let query = `
       SELECT id, usuario, display_name, status, stage, prd, created_at, updated_at
-      FROM dbo.AI_CONVERSATIONS
-      WHERE status NOT IN ('excluida', 'concluida')
+      FROM dbo.AI_CONVERSATIONS c
+      WHERE status != 'excluida'
+        AND (status != 'concluida' OR NOT EXISTS (
+          SELECT 1 FROM dbo.AI_REQUESTS r WHERE r.conversation_id = c.id
+        ))
     `;
     if (role !== "admin") {
       query += ` AND usuario = @usuario`;

@@ -58,6 +58,11 @@ interface AuthUser {
       role: Role;
       loja: string | null;
     };
+    cobranca: {
+      canAccess: boolean;
+      role: Role;
+      loja: string | null;
+    };
   };
 }
 
@@ -82,6 +87,7 @@ interface AuthContextValue {
       inventario?: { role?: string; loja?: string | null; can_access?: boolean };
       onboarding?: { role?: string; loja?: string | null; can_access?: boolean };
       score?: { role?: string; loja?: string | null; can_access?: boolean };
+      cobranca?: { role?: string; loja?: string | null; can_access?: boolean };
     },
     hubRole?: string
   ) => void;
@@ -113,6 +119,7 @@ function buildUser(
     inventario?: { role?: string; loja?: string | null; can_access?: boolean };
     onboarding?: { role?: string; loja?: string | null; can_access?: boolean };
     score?: { role?: string; loja?: string | null; can_access?: boolean };
+    cobranca?: { role?: string; loja?: string | null; can_access?: boolean };
   },
   apiHubRole?: string
 ): AuthUser {
@@ -138,6 +145,8 @@ function buildUser(
   const onboardingAccess = apiApps?.onboarding?.can_access ?? false;
   const scoreRole = resolveRole(usuario, apiApps?.score?.role ?? apiRole);
   const scoreAccess = apiApps?.score?.can_access ?? false;
+  const cobrancaRole = resolveRole(usuario, apiApps?.cobranca?.role ?? apiRole);
+  const cobrancaAccess = apiApps?.cobranca?.can_access ?? false;
 
   return {
     usuario,
@@ -196,6 +205,11 @@ function buildUser(
         role: scoreRole,
         loja: null,
       },
+      cobranca: {
+        canAccess: cobrancaAccess,
+        role: cobrancaRole,
+        loja: null,
+      },
     },
   };
 }
@@ -228,6 +242,8 @@ function loadFromStorage(): AuthUser | null {
     const onboardingAccess = (parsed.apps as any)?.onboarding?.canAccess ?? false;
     const scoreRole = (parsed.apps as any)?.score?.role ?? parsed.role;
     const scoreAccess = (parsed.apps as any)?.score?.canAccess ?? false;
+    const cobrancaRole = (parsed.apps as any)?.cobranca?.role ?? parsed.role;
+    const cobrancaAccess = (parsed.apps as any)?.cobranca?.canAccess ?? false;
 
     return {
       usuario: parsed.usuario,
@@ -286,6 +302,11 @@ function loadFromStorage(): AuthUser | null {
           role: scoreRole,
           loja: null,
         },
+        cobranca: {
+          canAccess: cobrancaAccess,
+          role: cobrancaRole,
+          loja: null,
+        },
       },
     };
   } catch {
@@ -341,6 +362,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       inventario?: { role?: string; loja?: string | null; can_access?: boolean };
       onboarding?: { role?: string; loja?: string | null; can_access?: boolean };
       score?: { role?: string; loja?: string | null; can_access?: boolean };
+      cobranca?: { role?: string; loja?: string | null; can_access?: boolean };
     },
     hubRole?: string
   ) => {

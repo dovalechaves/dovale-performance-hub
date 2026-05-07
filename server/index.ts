@@ -15,9 +15,11 @@ import multiPrecoRouter from "./routes/multi-preco";
 import inventarioRouter, { setInventarioIO } from "./routes/inventario";
 import onboardingRouter from "./routes/onboarding";
 import scoreRouter from "./routes/score";
+import cobrancaRouter from "./routes/cobranca";
 import { startSyncJob } from "./jobs/syncJob";
 import { startStockSnapshotJob, runStockSnapshotManual, getStockSnapshotStatus } from "./jobs/stockSnapshotJob";
 import { startMultiPrecoJob } from "./jobs/multiPrecoJob";
+import { startCobrancaJob } from "./jobs/cobrancaJob";
 import { setupSwagger } from "./swagger";
 
 const app = express();
@@ -38,6 +40,7 @@ app.use("/api/multi-preco",     multiPrecoRouter);
 app.use("/api/inventario",      inventarioRouter);
 app.use("/api/onboarding",      onboardingRouter);
 app.use("/api/score",           scoreRouter);
+app.use("/api/cobranca",        cobrancaRouter);
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
@@ -99,4 +102,5 @@ httpServer.listen(PORT, "0.0.0.0", () => {
   console.log(`[server] rodando em http://0.0.0.0:${PORT}`);
   startStockSnapshotJob().catch((err) => console.error("[stock-snapshot] Erro ao iniciar:", err));
   startMultiPrecoJob();
+  startCobrancaJob();
 });

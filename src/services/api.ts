@@ -113,6 +113,12 @@ export interface AuthManagedUser {
       loja: string | null;
       can_access: boolean;
     };
+    cobranca: {
+      app_key: "cobranca";
+      role: "admin" | "manager" | "viewer";
+      loja: string | null;
+      can_access: boolean;
+    };
   };
 }
 

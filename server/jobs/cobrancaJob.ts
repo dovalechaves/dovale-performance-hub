@@ -212,12 +212,17 @@ async function verificarPagamentosEBonus(pool: any): Promise<void> {
   }
 }
 
-export async function executarCobranca(manual = false): Promise<{ enviados: number; falhos: number; ignorados: number }> {
-  console.log(`[cobranca] iniciando execução ${manual ? "MANUAL" : "automática"}...`);
+const SIMULACAO = process.env.COBRANCA_SIMULACAO === "true";
+
+export async function executarCobranca(manual = false): Promise<{ enviados: number; falhos: number; ignorados: number; simulacao: boolean }> {
+  console.log(`[cobranca] iniciando execução ${manual ? "MANUAL" : "automática"}${SIMULACAO ? " [SIMULAÇÃO]" : ""}...`);
   const pool = await getPool();
   await ensureCobrancaTables(pool);
 
-  const templatesAprovados = await obterTemplatesAprovados();
+  // Em simulação aceita qualquer template definido no mapa, sem consultar a Meta
+  const templatesAprovados = SIMULACAO
+    ? new Set(Object.values(SITUACAO_TEMPLATE))
+    : await obterTemplatesAprovados();
   console.log(`[cobranca] templates aprovados: ${[...templatesAprovados].join(", ") || "nenhum"}`);
 
   let enviados = 0, falhos = 0, ignorados = 0;
@@ -233,7 +238,7 @@ export async function executarCobranca(manual = false): Promise<{ enviados: numb
     }
 
     for (const b of boletos) {
-      const situacao: string = b.SITUACAO;
+      const situacao: string = (b.SITUACAO ?? "").trim();
       if (!situacao) { ignorados++; continue; }
 
       const templateNome = SITUACAO_TEMPLATE[situacao];
@@ -253,8 +258,18 @@ export async function executarCobranca(manual = false): Promise<{ enviados: numb
         continue;
       }
 
-      const { data, error } = await enviarTemplate(telefone, templateNome);
-      const wamid = data?.messages?.[0]?.id ?? null;
+      let wamid: string | null = null;
+      let error = "";
+
+      if (SIMULACAO) {
+        wamid = `sim_${Date.now()}_${b.REC_ID}`;
+        console.log(`[cobranca][SIM] ${fonte} rec_id=${b.REC_ID} → ${templateNome} → ${telefone}`);
+      } else {
+        const result = await enviarTemplate(telefone, templateNome);
+        wamid = result.data?.messages?.[0]?.id ?? null;
+        error = result.error ?? "";
+      }
+
       const status = error ? "FALHOU" : "ENVIADO";
 
       if (error) {
@@ -288,8 +303,8 @@ export async function executarCobranca(manual = false): Promise<{ enviados: numb
 
   await verificarPagamentosEBonus(pool);
 
-  console.log(`[cobranca] concluído — enviados: ${enviados}, falhos: ${falhos}, ignorados: ${ignorados}`);
-  return { enviados, falhos, ignorados };
+  console.log(`[cobranca] concluído — enviados: ${enviados}, falhos: ${falhos}, ignorados: ${ignorados}${SIMULACAO ? " [SIMULAÇÃO]" : ""}`);
+  return { enviados, falhos, ignorados, simulacao: SIMULACAO };
 }
 
 export function startCobrancaJob(): void {

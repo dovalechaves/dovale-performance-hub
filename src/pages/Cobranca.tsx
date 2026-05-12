@@ -4,7 +4,10 @@ import { useAuth } from "@/context/AuthContext";
 import {
   ArrowLeft, Send, History, Gift, RefreshCw, Loader2, CheckCircle2,
   XCircle, AlertCircle, Download, MessageSquare, ChevronLeft, ChevronRight,
+  BellRing, Sun, Moon,
 } from "lucide-react";
+import logoBlue from "@/assets/logo-blue.png";
+import logoWhite from "@/assets/logo-white.png";
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? "http://localhost:3001/api").replace(/\/$/, "");
 
@@ -96,8 +99,8 @@ const SITUACAO_COLOR: Record<string, string> = {
 
 function formatDate(s: string): string {
   if (!s) return "—";
-  const d = new Date(s);
-  return isNaN(d.getTime()) ? s : d.toLocaleDateString("pt-BR");
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : s;
 }
 
 function formatDateTime(s: string): string {
@@ -114,13 +117,17 @@ export default function Cobranca() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>("painel");
+  const [dark, setDark] = useState(() => localStorage.getItem("dovale_theme") !== "light");
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", dark);
+    localStorage.setItem("dovale_theme", dark ? "dark" : "light");
+  }, [dark]);
 
   // Painel
   const [painel, setPainel] = useState<PainelData | null>(null);
   const [painelLoading, setPainelLoading] = useState(false);
   const [painelError, setPainelError] = useState("");
-
-  // Histórico
   const [historico, setHistorico] = useState<HistoricoData | null>(null);
   const [histLoading, setHistLoading] = useState(false);
   const [histPage, setHistPage] = useState(1);
@@ -130,28 +137,24 @@ export default function Cobranca() {
   const [filtroDataInicio, setFiltroDataInicio] = useState("");
   const [filtroDataFim, setFiltroDataFim] = useState("");
   const [filtroBusca, setFiltroBusca] = useState("");
-
-  // Bônus
   const [bonusResumo, setBonusResumo] = useState<BonusResumo[]>([]);
   const [bonusDetalhes, setBonusDetalhes] = useState<BonusDetalhe[]>([]);
   const [bonusLoading, setBonusLoading] = useState(false);
   const [bonusMes, setBonusMes] = useState("");
   const [exportando, setExportando] = useState(false);
-
-  // Templates
+  const [exportandoHist, setExportandoHist] = useState(false);
   const [templates, setTemplates] = useState<TemplateStatus[]>([]);
-
-  // Disparo manual
+  const [painelPage, setPainelPage] = useState(1);
+  const PAINEL_PAGE_SIZE = 25;
   const [disparando, setDisparando] = useState(false);
   const [disparoMsg, setDisparoMsg] = useState("");
-
+  const [modoSimulacao, setModoSimulacao] = useState(false);
   const canSeeBonus = user?.apps.cobranca.role === "admin" || user?.apps.cobranca.role === "manager";
-
   const token = user?.token ?? "";
-
   const loadPainel = useCallback(async () => {
     setPainelLoading(true);
     setPainelError("");
+    setPainelPage(1);
     try {
       const r = await fetch(`${API_BASE}/cobranca/painel`, { headers: authHeader(token) });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -215,6 +218,7 @@ export default function Cobranca() {
       });
       const data = await r.json();
       if (data.ok) {
+        setModoSimulacao(!!data.simulacao);
         setDisparoMsg(`Concluído — ${data.enviados} enviados, ${data.falhos} falhos, ${data.ignorados} ignorados.`);
         loadPainel();
       } else {
@@ -224,6 +228,30 @@ export default function Cobranca() {
       setDisparoMsg(`Erro: ${e.message}`);
     }
     setDisparando(false);
+  };
+
+  const handleExportarHistorico = async () => {
+    setExportandoHist(true);
+    try {
+      const params = new URLSearchParams();
+      if (filtroSituacao) params.set("situacao", filtroSituacao);
+      if (filtroStatus) params.set("status", filtroStatus);
+      if (filtroFonte) params.set("fonte", filtroFonte);
+      if (filtroDataInicio) params.set("dataInicio", filtroDataInicio);
+      if (filtroDataFim) params.set("dataFim", filtroDataFim);
+      if (filtroBusca) params.set("busca", filtroBusca);
+      const r = await fetch(`${API_BASE}/cobranca/historico/exportar?${params}`, { headers: authHeader(token) });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const hoje = new Date().toISOString().slice(0, 10);
+      a.download = `historico_cobranca_${hoje}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {}
+    setExportandoHist(false);
   };
 
   const handleExportarBonus = async () => {
@@ -245,23 +273,36 @@ export default function Cobranca() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b border-border bg-gradient-card">
+    <div className="min-h-screen bg-background flex flex-col">
+      <header className="border-b border-border bg-gradient-card shrink-0">
         <div className="container mx-auto px-6 py-4 flex items-center gap-4">
-          <button
-            onClick={() => navigate("/hub")}
-            className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors"
-          >
+          <button onClick={() => navigate("/hub")} className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors">
             <ArrowLeft className="w-4 h-4" />
           </button>
-          <div>
-            <h1 className="text-base font-semibold text-foreground">Cobrança Automatizada</h1>
-            <p className="text-xs text-muted-foreground">Disparo automático de mensagens WhatsApp para clientes com boletos</p>
+          <div className="h-5 w-px bg-border" />
+          <button onClick={() => navigate("/hub")} className="relative h-9 w-36 overflow-hidden" title="Ir para o Hub">
+            <img src={logoBlue} alt="Dovale" className={`absolute inset-0 h-full w-auto object-contain transition-all duration-700 ${dark ? "opacity-0 scale-90 blur-sm" : "opacity-100 scale-100"}`} />
+            <img src={logoWhite} alt="Dovale" className={`absolute inset-0 h-full w-auto object-contain transition-all duration-700 ${dark ? "opacity-100 scale-100" : "opacity-0 scale-90 blur-sm"}`} />
+          </button>
+          <div className="h-5 w-px bg-border" />
+          <div className="flex items-center gap-2">
+            <BellRing className="w-5 h-5 text-emerald-500" />
+            <div>
+              <h1 className="text-sm font-mono font-bold text-foreground tracking-tight">COBRANÇA AUTOMATIZADA</h1>
+              <p className="text-[10px] font-mono text-muted-foreground">Disparo automático de mensagens WhatsApp</p>
+            </div>
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            {user && <span className="text-xs text-muted-foreground hidden sm:inline">{user.displayName}</span>}
+            <button onClick={() => setDark((d) => !d)} className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-primary/10 transition-colors">
+              {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
           </div>
         </div>
       </header>
 
-      <main className="container mx-auto px-6 py-8 space-y-6">
+      <main className="flex-1 overflow-y-auto">
+        <div className="container mx-auto px-6 py-8 space-y-6">
         {/* Tabs */}
         <div className="flex gap-1 border-b border-border">
           {([
@@ -287,6 +328,16 @@ export default function Cobranca() {
         {/* ── PAINEL ── */}
         {tab === "painel" && (
           <div className="space-y-6">
+            {/* Banner simulação */}
+            {modoSimulacao && (
+              <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                <p className="text-xs text-amber-400 font-medium">
+                  Modo simulação ativo — nenhuma mensagem foi enviada de verdade. Os registros no histórico são fictícios.
+                </p>
+              </div>
+            )}
+
             {/* Status templates */}
             {templates.length > 0 && (
               <div className="rounded-xl border border-border bg-muted/20 p-4">
@@ -365,48 +416,79 @@ export default function Cobranca() {
               <div className="flex justify-center py-12">
                 <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
               </div>
-            ) : painel && painel.disparos.length > 0 ? (
-              <div className="rounded-xl border border-border overflow-x-auto">
-                <table className="w-full text-xs min-w-[700px]">
-                  <thead>
-                    <tr className="border-b border-border bg-muted/40">
-                      {["Cliente", "Telefone", "Situação", "Template", "Status", "Pago", "Hora"].map((h) => (
-                        <th key={h} className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {painel.disparos.map((d) => (
-                      <tr key={d.id} className="border-b border-border/50 last:border-0 hover:bg-muted/20 transition-colors">
-                        <td className="px-4 py-3">
-                          <p className="font-medium text-foreground">{d.cli_nome || d.cli_codigo}</p>
-                          <p className="text-muted-foreground">{d.rec_numero} · {formatCurrency(d.rec_valor)}</p>
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground">{d.telefone || "—"}</td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex px-2 py-0.5 rounded-full border text-[10px] ${SITUACAO_COLOR[d.situacao] ?? "bg-muted text-muted-foreground border-border"}`}>
-                            {d.situacao}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 font-mono text-muted-foreground">{d.template_nome || "—"}</td>
-                        <td className="px-4 py-3">
-                          {d.status === "ENVIADO"
-                            ? <span className="inline-flex items-center gap-1 text-green-400"><CheckCircle2 className="w-3 h-3" />Enviado</span>
-                            : <span className="inline-flex items-center gap-1 text-red-400" title={d.erro ?? ""}><XCircle className="w-3 h-3" />Falhou</span>
-                          }
-                        </td>
-                        <td className="px-4 py-3">
-                          {d.pago_apos_disparo
-                            ? <span className="text-green-400">Sim</span>
-                            : <span className="text-muted-foreground">Não</span>}
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground">{formatDateTime(d.data_disparo)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
+            ) : painel && painel.disparos.length > 0 ? (() => {
+              const totalPages = Math.ceil(painel.disparos.length / PAINEL_PAGE_SIZE);
+              const pageDisparos = painel.disparos.slice((painelPage - 1) * PAINEL_PAGE_SIZE, painelPage * PAINEL_PAGE_SIZE);
+              return (
+                <>
+                  <div className="rounded-xl border border-border overflow-x-auto">
+                    <table className="w-full text-xs min-w-[700px]">
+                      <thead>
+                        <tr className="border-b border-border bg-muted/40">
+                          {["Cliente", "Telefone", "Situação", "Vencimento", "Valor", "Template", "Status", "Pago", "Hora"].map((h) => (
+                            <th key={h} className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pageDisparos.map((d) => (
+                          <tr key={d.id} className="border-b border-border/50 last:border-0 hover:bg-muted/20 transition-colors">
+                            <td className="px-4 py-3">
+                              <p className="font-medium text-foreground">{d.cli_nome || d.cli_codigo}</p>
+                              <p className="text-muted-foreground">Nº {d.rec_numero}</p>
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground">{d.telefone || "—"}</td>
+                            <td className="px-4 py-3">
+                              <span className={`inline-flex px-2 py-0.5 rounded-full border text-[10px] ${SITUACAO_COLOR[d.situacao] ?? "bg-muted text-muted-foreground border-border"}`}>
+                                {d.situacao}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{formatDate(d.rec_vencimento)}</td>
+                            <td className="px-4 py-3 text-foreground">{formatCurrency(d.rec_valor)}</td>
+                            <td className="px-4 py-3 font-mono text-muted-foreground">{d.template_nome || "—"}</td>
+                            <td className="px-4 py-3">
+                              {d.status === "ENVIADO"
+                                ? <span className="inline-flex items-center gap-1 text-green-400"><CheckCircle2 className="w-3 h-3" />Enviado</span>
+                                : <span className="inline-flex items-center gap-1 text-red-400" title={d.erro ?? ""}><XCircle className="w-3 h-3" />Falhou</span>
+                              }
+                            </td>
+                            <td className="px-4 py-3">
+                              {d.pago_apos_disparo
+                                ? <span className="text-green-400">Sim</span>
+                                : <span className="text-muted-foreground">Não</span>}
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{formatDateTime(d.data_disparo)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {totalPages > 1 && (
+                    <div className="flex items-center justify-between mt-2">
+                      <p className="text-xs text-muted-foreground">
+                        Página {painelPage} de {totalPages} · {painel.disparos.length} registros
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setPainelPage((p) => Math.max(1, p - 1))}
+                          disabled={painelPage === 1}
+                          className="p-1.5 rounded-lg bg-secondary text-muted-foreground disabled:opacity-40 hover:text-foreground"
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => setPainelPage((p) => Math.min(totalPages, p + 1))}
+                          disabled={painelPage >= totalPages}
+                          className="p-1.5 rounded-lg bg-secondary text-muted-foreground disabled:opacity-40 hover:text-foreground"
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })() : (
               <div className="rounded-xl border border-border bg-muted/20 px-6 py-10 text-center">
                 <MessageSquare className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
                 <p className="text-sm text-muted-foreground">Nenhum disparo realizado hoje.</p>
@@ -474,6 +556,14 @@ export default function Cobranca() {
                 <RefreshCw className={`w-3.5 h-3.5 ${histLoading ? "animate-spin" : ""}`} />
                 Filtrar
               </button>
+              <button
+                onClick={handleExportarHistorico}
+                disabled={exportandoHist}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40"
+              >
+                {exportandoHist ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                Exportar CSV
+              </button>
             </div>
 
             {histLoading ? (
@@ -485,7 +575,7 @@ export default function Cobranca() {
                   <table className="w-full text-xs min-w-[800px]">
                     <thead>
                       <tr className="border-b border-border bg-muted/40">
-                        {["Data/Hora", "Origem", "Cliente", "Telefone", "Situação", "Valor", "Status", "Pago", "Tipo"].map((h) => (
+                        {["Data/Hora", "Origem", "Cliente", "Telefone", "Situação", "Vencimento", "Valor", "Status", "Pago", "Tipo"].map((h) => (
                           <th key={h} className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">{h}</th>
                         ))}
                       </tr>
@@ -497,7 +587,7 @@ export default function Cobranca() {
                           <td className="px-4 py-3 uppercase font-mono text-muted-foreground">{d.fonte}</td>
                           <td className="px-4 py-3">
                             <p className="font-medium text-foreground">{d.cli_nome || d.cli_codigo}</p>
-                            <p className="text-muted-foreground">Nº {d.rec_numero} · Venc. {formatDate(d.rec_vencimento)}</p>
+                            <p className="text-muted-foreground">Nº {d.rec_numero}</p>
                           </td>
                           <td className="px-4 py-3 text-muted-foreground">{d.telefone || "—"}</td>
                           <td className="px-4 py-3">
@@ -505,6 +595,7 @@ export default function Cobranca() {
                               {d.situacao}
                             </span>
                           </td>
+                          <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{formatDate(d.rec_vencimento)}</td>
                           <td className="px-4 py-3 text-foreground">{formatCurrency(d.rec_valor)}</td>
                           <td className="px-4 py-3">
                             {d.status === "ENVIADO"
@@ -656,6 +747,7 @@ export default function Cobranca() {
             )}
           </div>
         )}
+        </div>
       </main>
     </div>
   );

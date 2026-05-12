@@ -103,7 +103,61 @@ router.get("/historico", async (req, res) => {
   }
 });
 
-/** GET /api/cobranca/bonus — resumo mensal de bônus */
+/** GET /api/cobranca/historico/exportar — CSV com os mesmos filtros do histórico */
+router.get("/historico/exportar", async (req, res) => {
+  try {
+    const pool = await getPool();
+    const { situacao, status, fonte, dataInicio, dataFim, busca } = req.query as Record<string, string>;
+    const filters: string[] = [];
+    const request = pool.request();
+    if (situacao) { filters.push("situacao = @situacao"); request.input("situacao", situacao); }
+    if (status)   { filters.push("status = @status");     request.input("status", status); }
+    if (fonte)    { filters.push("fonte = @fonte");        request.input("fonte", fonte); }
+    if (dataInicio) { filters.push("CAST(data_disparo AS DATE) >= @dataInicio"); request.input("dataInicio", dataInicio); }
+    if (dataFim)    { filters.push("CAST(data_disparo AS DATE) <= @dataFim");    request.input("dataFim", dataFim); }
+    if (busca) {
+      filters.push("(cli_nome LIKE @busca OR cli_codigo LIKE @busca OR rec_numero LIKE @busca OR telefone LIKE @busca)");
+      request.input("busca", `%${busca}%`);
+    }
+
+    const where = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
+
+    const result = await request.query(`
+      SELECT
+        id, fonte, rec_numero,
+        CONVERT(VARCHAR, rec_vencimento, 103)  AS rec_vencimento,
+        rec_valor, cli_codigo, cli_nome, telefone, situacao, template_nome,
+        CONVERT(VARCHAR, data_disparo, 103)    AS data_disparo_data,
+        CONVERT(VARCHAR, data_disparo, 108)    AS data_disparo_hora,
+        status, erro, manual, pago_apos_disparo
+      FROM dbo.COBRANCA_DISPAROS
+      ${where}
+      ORDER BY data_disparo DESC
+    `);
+
+    const rows = result.recordset;
+    const header = "ID;Origem;Nº Boleto;Vencimento;Valor;Cód. Cliente;Cliente;Telefone;Situação;Template;Data;Hora;Status;Erro;Tipo;Pago após disparo\n";
+    const csv = header + rows.map((r: any) =>
+      [
+        r.id, r.fonte, r.rec_numero ?? "", r.rec_vencimento ?? "",
+        Number(r.rec_valor).toFixed(2), r.cli_codigo ?? "", r.cli_nome ?? "",
+        r.telefone ?? "", r.situacao ?? "", r.template_nome ?? "",
+        r.data_disparo_data ?? "", r.data_disparo_hora ?? "",
+        r.status ?? "", (r.erro ?? "").replace(/;/g, ","),
+        r.manual ? "Manual" : "Auto",
+        r.pago_apos_disparo ? "Sim" : "Não",
+      ].join(";")
+    ).join("\n");
+
+    const hoje = new Date().toISOString().slice(0, 10);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="historico_cobranca_${hoje}.csv"`);
+    res.send("﻿" + csv);
+  } catch (err: any) {
+    res.status(500).json({ erro: err.message });
+  }
+});
+
 router.get("/bonus", async (req, res) => {
   try {
     const pool = await getPool();

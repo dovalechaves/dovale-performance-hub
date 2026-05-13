@@ -487,9 +487,8 @@ export default function SugestaoCompras() {
             </div>
           </CardContent>
         </Card>
-      </main>
-
       </div>
+      </main>
       {/* Modal de alerta de estoque */}
       {alerta.aberto && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">

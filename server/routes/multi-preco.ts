@@ -123,8 +123,13 @@ router.post("/sync", async (req: Request, res: Response) => {
   // Setup streaming
   res.setHeader("Content-Type", "application/x-ndjson");
   res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
+
+  // Heartbeat: envia linha vazia a cada 8s para manter QUIC/proxy vivo
+  const heartbeat = setInterval(() => { try { res.write("\n"); } catch { /* stream fechada */ } }, 8000);
+  req.on("close", () => clearInterval(heartbeat));
 
   const usuario = String(req.query.usuario || "Sistema");
   const send = (evt: SyncEvent) => {
@@ -140,6 +145,7 @@ router.post("/sync", async (req: Request, res: Response) => {
 
   if (!sjcPath || targetEntries.length === 0) {
     send({ status: "error", message: "Configuração de banco de dados ausente (SJC_DB_PATH / TARGET_DBS).", storeName: "API" });
+    clearInterval(heartbeat);
     return res.end();
   }
 
@@ -511,6 +517,7 @@ router.post("/sync", async (req: Request, res: Response) => {
   } catch (e: any) {
     send({ status: "error", message: `Erro crítico: ${e.message}`, storeName: "API" });
   }
+  clearInterval(heartbeat);
   res.end();
 });
 

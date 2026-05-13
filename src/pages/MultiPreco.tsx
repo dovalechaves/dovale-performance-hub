@@ -55,7 +55,7 @@ function exportCsv(logs: PriceLog[], userName: string) {
         l.tableName || "",
         l.message || "",
       ]
-        .map((v) => String(v).replace(/"/g, '""'))
+        .map((v) => `"${String(v).replace(/"/g, '""')}"`)
         .join(";")
     );
   });
@@ -303,7 +303,7 @@ export default function MultiPreco() {
       {(savingStore || isCompleted) && (
         <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center">
           {savingStore && !isCompleted && (
-            <div className="bg-card border border-border shadow-lg rounded-xl p-8 max-w-sm w-full mx-4 flex flex-col items-center text-center space-y-4">
+            <div className="bg-card border border-border shadow-lg rounded-xl p-8 max-w-sm w-full mx-4 flex flex-col items-center text-center space-y-4 animate-in fade-in zoom-in duration-200">
               <Loader2 className="w-12 h-12 text-cyan-500 animate-spin" />
               <h3 className="text-lg font-bold font-mono text-card-foreground">Aguarde...</h3>
               <p className="text-sm font-mono text-muted-foreground">Adicionando Dados no LOG de sistema.<br /><span className="text-cyan-500 font-bold text-base mt-2 block">{savingStore}</span></p>
@@ -314,7 +314,7 @@ export default function MultiPreco() {
             </div>
           )}
           {isCompleted && (
-            <div className="bg-card border border-border shadow-lg rounded-xl p-8 max-w-sm w-full mx-4 flex flex-col items-center text-center space-y-6">
+            <div className="bg-card border border-border shadow-lg rounded-xl p-8 max-w-sm w-full mx-4 flex flex-col items-center text-center space-y-6 animate-in fade-in zoom-in duration-200">
               <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center">
                 <CheckCircle2 className="w-8 h-8 text-green-500" />
               </div>

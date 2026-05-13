@@ -18,6 +18,8 @@ import Inventario from "./pages/Inventario.tsx";
 import Onboarding from "./pages/Onboarding.tsx";
 import Score from "./pages/Score.tsx";
 import Cobranca from "./pages/Cobranca.tsx";
+import EcommerceDisparo from "./pages/EcommerceDisparo.tsx";
+import React from "react";
 
 const queryClient = new QueryClient();
 
@@ -108,6 +110,14 @@ function CobrancaRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function EcommerceDisparoRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.canAccessHub) return <Navigate to="/login" replace />;
+  if (!user.apps.ecommercedisparo.canAccess) return <Navigate to="/hub" replace />;
+  return <>{children}</>;
+}
+
 function AdminManagerRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
@@ -139,6 +149,7 @@ const App = () => (
             <Route path="/onboarding" element={<OnboardingRoute><Onboarding /></OnboardingRoute>} />
             <Route path="/score" element={<ScoreRoute><Score /></ScoreRoute>} />
             <Route path="/cobranca" element={<CobrancaRoute><Cobranca /></CobrancaRoute>} />
+            <Route path="/ecommerce-disparo" element={<EcommerceDisparoRoute><EcommerceDisparo /></EcommerceDisparoRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

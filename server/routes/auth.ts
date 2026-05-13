@@ -5,7 +5,18 @@ import { getPool } from "../db/sqlserver";
 const router = Router();
 const VALID_ROLES = ["admin", "manager", "viewer"] as const;
 const VALID_HUB_ROLES = ["admin", "viewer"] as const;
-const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento", "assistente", "multipreco", "inventario", "onboarding", "score", "cobranca"] as const;
+const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento", "assistente", "multipreco", "inventario", "onboarding", "score", "cobranca", "ecommercedisparo"] as const;
+const ECOMMERCE_DISPARO_ALLOWED = (process.env.ECOMMERCE_DISPARO_ALLOWED_USERS ?? "henrique.berbert,andreza")
+  .split(",")
+  .map((u) => u.trim().toLowerCase())
+  .filter(Boolean);
+
+function canAccessEcommerceDisparo(usuario: string, hubRole?: string): boolean {
+  if (hubRole === "admin") return true;
+  const normalized = String(usuario || "").trim().toLowerCase();
+  if (!normalized) return false;
+  return ECOMMERCE_DISPARO_ALLOWED.some((allowed) => normalized === allowed || normalized.includes(allowed));
+}
 
 type Role = typeof VALID_ROLES[number];
 type HubRole = typeof VALID_HUB_ROLES[number];
@@ -87,7 +98,7 @@ function normalizeRoleForUser(usuario: string, candidate: unknown): Role {
   return isRole(candidate) ? candidate : "viewer";
 }
 
-function buildDefaultApps(usuario: string, localRole: unknown, localLoja: unknown, canAccessHub: boolean) {
+function buildDefaultApps(usuario: string, localRole: unknown, localLoja: unknown, canAccessHub: boolean, hubRole?: string) {
   const baseRole = normalizeRoleForUser(usuario, localRole);
   const dashboardRole = baseRole;
   const dashboardLoja = dashboardRole === "manager" ? (localLoja ? String(localLoja) : "bh") : null;
@@ -155,6 +166,12 @@ function buildDefaultApps(usuario: string, localRole: unknown, localLoja: unknow
       loja: null,
       can_access: false,
     },
+    ecommercedisparo: {
+      app_key: "ecommercedisparo" as AppKey,
+      role: baseRole,
+      loja: null,
+      can_access: canAccessHub && canAccessEcommerceDisparo(usuario, hubRole),
+    },
   };
 }
 
@@ -163,9 +180,10 @@ function mergeApps(
   localRole: unknown,
   localLoja: unknown,
   canAccessHub: boolean,
-  appRows: any[]
+  appRows: any[],
+  hubRole?: string
 ): ManagedUser["apps"] {
-  const defaults = buildDefaultApps(usuario, localRole, localLoja, canAccessHub);
+  const defaults = buildDefaultApps(usuario, localRole, localLoja, canAccessHub, hubRole);
   const merged: ManagedUser["apps"] = {
     dashboard: { ...defaults.dashboard },
     calculadora: { ...defaults.calculadora },
@@ -177,6 +195,7 @@ function mergeApps(
     onboarding: { ...defaults.onboarding },
     score: { ...defaults.score },
     cobranca: { ...defaults.cobranca },
+    ecommercedisparo: { ...defaults.ecommercedisparo },
   };
 
   for (const row of appRows) {
@@ -187,7 +206,9 @@ function mergeApps(
       app_key: appKey,
       role,
       loja: (appKey === "dashboard" || appKey === "calculadora" || appKey === "fechamento") && role === "manager" ? (row?.loja ? String(row.loja) : null) : null,
-      can_access: isEnabledFlag(row?.ativo),
+      can_access: appKey === "ecommercedisparo"
+        ? isEnabledFlag(row?.ativo) && canAccessEcommerceDisparo(usuario, hubRole)
+        : isEnabledFlag(row?.ativo),
       ...(appKey === "inventario" && row?.usu_codigo_sistema != null ? { usu_codigo_sistema: Number(row.usu_codigo_sistema) } : {}),
     };
   }
@@ -207,9 +228,10 @@ function normalizeAppsPayload(
   legacyRole: unknown,
   legacyLoja: unknown,
   canAccessHub: boolean,
-  legacyCanAccessDashboard: unknown
+  legacyCanAccessDashboard: unknown,
+  hubRole?: string
 ): ManagedUser["apps"] {
-  const defaults = buildDefaultApps(usuario, legacyRole, legacyLoja, canAccessHub);
+  const defaults = buildDefaultApps(usuario, legacyRole, legacyLoja, canAccessHub, hubRole);
   const merged: ManagedUser["apps"] = {
     dashboard: {
       ...defaults.dashboard,
@@ -224,6 +246,7 @@ function normalizeAppsPayload(
     onboarding: { ...defaults.onboarding },
     score: { ...defaults.score },
     cobranca: { ...defaults.cobranca },
+    ecommercedisparo: { ...defaults.ecommercedisparo },
   };
 
   if (payload && typeof payload === "object") {
@@ -236,7 +259,9 @@ function normalizeAppsPayload(
         app_key: appKey,
         role,
         loja: (appKey === "dashboard" || appKey === "calculadora" || appKey === "fechamento") && role === "manager" ? (raw.loja ? String(raw.loja) : null) : null,
-        can_access: typeof raw.can_access === "boolean" ? raw.can_access : merged[appKey].can_access,
+        can_access: appKey === "ecommercedisparo"
+          ? (typeof raw.can_access === "boolean" ? raw.can_access : merged[appKey].can_access) && canAccessEcommerceDisparo(usuario, hubRole)
+          : typeof raw.can_access === "boolean" ? raw.can_access : merged[appKey].can_access,
       };
     }
   }
@@ -300,9 +325,9 @@ router.post("/login", async (req, res) => {
           FROM dbo.USUARIOS_APPS
           WHERE usuario = @usuario
         `);
-      const apps = mergeApps(usuario, testUser.role, testUser.loja, canAccessHub, testAppsResult.recordset);
-      const dashboardRole = apps.dashboard.role;
       const hubRole: HubRole = isHubRole(testUser.hub_role) ? testUser.hub_role : "viewer";
+      const apps = mergeApps(usuario, testUser.role, testUser.loja, canAccessHub, testAppsResult.recordset, hubRole);
+      const dashboardRole = apps.dashboard.role;
 
       return res.json({
         token: `local_${Date.now()}`,
@@ -348,9 +373,9 @@ router.post("/login", async (req, res) => {
         WHERE usuario = @usuario
       `);
 
-    const apps = mergeApps(usuario, localUser?.role, localUser?.loja, canAccessHub, appsResult.recordset);
-    const dashboardRole = apps.dashboard.role;
     const hubRole: HubRole = isHubRole(localUser?.hub_role) ? localUser.hub_role : "viewer";
+    const apps = mergeApps(usuario, localUser?.role, localUser?.loja, canAccessHub, appsResult.recordset, hubRole);
+    const dashboardRole = apps.dashboard.role;
     const displayname = String(
       adData?.displayname ||
       adData?.nome ||
@@ -398,7 +423,7 @@ router.get("/me", async (req, res) => {
       .input("usuario", usuario)
       .query(`SELECT app_key, role, loja, ativo, usu_codigo_sistema FROM dbo.USUARIOS_APPS WHERE usuario = @usuario`);
 
-    const apps = mergeApps(usuario, localUser.role, localUser.loja, canAccessHub, appsResult.recordset);
+    const apps = mergeApps(usuario, localUser.role, localUser.loja, canAccessHub, appsResult.recordset, hubRole);
 
     res.json({
       usuario,
@@ -441,7 +466,7 @@ router.get("/users", async (req, res) => {
       pool.request().query(`
         SELECT usuario, app_key, role, loja, ativo, usu_codigo_sistema
         FROM dbo.USUARIOS_APPS
-        WHERE app_key IN ('dashboard', 'calculadora', 'disparo', 'fechamento', 'assistente', 'multipreco', 'inventario', 'onboarding', 'score')
+        WHERE app_key IN ('dashboard', 'calculadora', 'disparo', 'fechamento', 'assistente', 'multipreco', 'inventario', 'onboarding', 'score', 'cobranca', 'ecommercedisparo')
       `),
     ]);
 
@@ -467,9 +492,8 @@ router.get("/users", async (req, res) => {
         seen.add(key);
         const local = localMap.get(key);
         const canAccessHub = isEnabledFlag(local?.ativo);
-        const apps = mergeApps(usuario, local?.role, local?.loja, canAccessHub, appRowsByUser.get(key) ?? []);
-
         const hubRole: HubRole = isHubRole(local?.hub_role) ? local.hub_role : "viewer";
+        const apps = mergeApps(usuario, local?.role, local?.loja, canAccessHub, appRowsByUser.get(key) ?? [], hubRole);
         merged.push({
           usuario,
           displayname: String(ad?.displayname || ad?.name || usuario),
@@ -491,7 +515,7 @@ router.get("/users", async (req, res) => {
       if (seen.has(key)) continue;
       const canAccessHub = isEnabledFlag(r.ativo);
       const hubRole: HubRole = isHubRole(r.hub_role) ? r.hub_role : "viewer";
-      const apps = mergeApps(usuario, r.role, r.loja, canAccessHub, appRowsByUser.get(key) ?? []);
+      const apps = mergeApps(usuario, r.role, r.loja, canAccessHub, appRowsByUser.get(key) ?? [], hubRole);
 
       merged.push({
         usuario,
@@ -586,7 +610,8 @@ router.put("/role", async (req, res) => {
       role,
       loja,
       canAccessHub,
-      can_access_dashboard
+      can_access_dashboard,
+      resolvedHubRole
     );
     const dashboardApp = normalizedApps.dashboard;
     const hubAtivo = canAccessHub ? 1 : 0;

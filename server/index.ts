@@ -16,6 +16,7 @@ import inventarioRouter, { setInventarioIO } from "./routes/inventario";
 import onboardingRouter from "./routes/onboarding";
 import scoreRouter from "./routes/score";
 import cobrancaRouter from "./routes/cobranca";
+import ecommerceDisparoRouter from "./routes/ecommerce-disparo";
 import { startSyncJob } from "./jobs/syncJob";
 import { startStockSnapshotJob, runStockSnapshotManual, getStockSnapshotStatus } from "./jobs/stockSnapshotJob";
 import { startMultiPrecoJob } from "./jobs/multiPrecoJob";
@@ -41,6 +42,7 @@ app.use("/api/inventario",      inventarioRouter);
 app.use("/api/onboarding",      onboardingRouter);
 app.use("/api/score",           scoreRouter);
 app.use("/api/cobranca",        cobrancaRouter);
+app.use("/api/ecommerce-disparo", ecommerceDisparoRouter);
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });

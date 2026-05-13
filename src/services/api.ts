@@ -119,6 +119,12 @@ export interface AuthManagedUser {
       loja: string | null;
       can_access: boolean;
     };
+    ecommercedisparo: {
+      app_key: "ecommercedisparo";
+      role: "admin" | "manager" | "viewer";
+      loja: string | null;
+      can_access: boolean;
+    };
   };
 }
 

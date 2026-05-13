@@ -68,6 +68,11 @@ interface AuthUser {
       role: Role;
       loja: string | null;
     };
+    sugestaocompras: {
+      canAccess: boolean;
+      role: Role;
+      loja: string | null;
+    };
   };
 }
 
@@ -94,6 +99,7 @@ interface AuthContextValue {
       score?: { role?: string; loja?: string | null; can_access?: boolean };
       cobranca?: { role?: string; loja?: string | null; can_access?: boolean };
       ecommercedisparo?: { role?: string; loja?: string | null; can_access?: boolean };
+      sugestaocompras?: { role?: string; loja?: string | null; can_access?: boolean };
     },
     hubRole?: string
   ) => void;
@@ -127,6 +133,7 @@ function buildUser(
     score?: { role?: string; loja?: string | null; can_access?: boolean };
     cobranca?: { role?: string; loja?: string | null; can_access?: boolean };
     ecommercedisparo?: { role?: string; loja?: string | null; can_access?: boolean };
+    sugestaocompras?: { role?: string; loja?: string | null; can_access?: boolean };
   },
   apiHubRole?: string
 ): AuthUser {
@@ -156,6 +163,8 @@ function buildUser(
   const cobrancaAccess = apiApps?.cobranca?.can_access ?? false;
   const ecommerceDisparoRole = resolveRole(usuario, apiApps?.ecommercedisparo?.role ?? apiRole);
   const ecommerceDisparoAccess = apiApps?.ecommercedisparo?.can_access ?? false;
+  const sugestaoComprasRole = resolveRole(usuario, apiApps?.sugestaocompras?.role ?? apiRole);
+  const sugestaoComprasAccess = apiApps?.sugestaocompras?.can_access ?? false;
 
   return {
     usuario,
@@ -224,6 +233,11 @@ function buildUser(
         role: ecommerceDisparoRole,
         loja: null,
       },
+      sugestaocompras: {
+        canAccess: sugestaoComprasAccess,
+        role: sugestaoComprasRole,
+        loja: null,
+      },
     },
   };
 }
@@ -260,6 +274,8 @@ function loadFromStorage(): AuthUser | null {
     const cobrancaAccess = (parsed.apps as any)?.cobranca?.canAccess ?? false;
     const ecommerceDisparoRole = (parsed.apps as any)?.ecommercedisparo?.role ?? parsed.role;
     const ecommerceDisparoAccess = (parsed.apps as any)?.ecommercedisparo?.canAccess ?? false;
+    const sugestaoComprasRole = (parsed.apps as any)?.sugestaocompras?.role ?? parsed.role;
+    const sugestaoComprasAccess = (parsed.apps as any)?.sugestaocompras?.canAccess ?? false;
 
     return {
       usuario: parsed.usuario,
@@ -328,6 +344,11 @@ function loadFromStorage(): AuthUser | null {
           role: ecommerceDisparoRole,
           loja: null,
         },
+        sugestaocompras: {
+          canAccess: sugestaoComprasAccess,
+          role: sugestaoComprasRole,
+          loja: null,
+        },
       },
     };
   } catch {
@@ -385,6 +406,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       score?: { role?: string; loja?: string | null; can_access?: boolean };
       cobranca?: { role?: string; loja?: string | null; can_access?: boolean };
       ecommercedisparo?: { role?: string; loja?: string | null; can_access?: boolean };
+      sugestaocompras?: { role?: string; loja?: string | null; can_access?: boolean };
     },
     hubRole?: string
   ) => {

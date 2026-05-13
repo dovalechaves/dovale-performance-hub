@@ -65,6 +65,27 @@ const lojas: Record<string, FirebirdConfig> = {
     user: process.env.DB_FIREBIRD_MG_USER || process.env.DB_FIREBIRD_SPM_USER || process.env.DB_FIREBIRD_ECOMMERCE_USER!,
     password: process.env.DB_FIREBIRD_MG_PASSWORD || process.env.DB_FIREBIRD_SPM_PASSWORD || process.env.DB_FIREBIRD_ECOMMERCE_PASSWORD!,
   },
+  fortaleza: {
+    host: process.env.DB_FIREBIRD_FORTALEZA_HOST!,
+    port: Number(process.env.DB_FIREBIRD_FORTALEZA_PORT) || 3050,
+    database: process.env.DB_FIREBIRD_FORTALEZA_PATH!,
+    user: process.env.DB_FIREBIRD_FORTALEZA_USER!,
+    password: process.env.DB_FIREBIRD_FORTALEZA_PASSWORD!,
+  },
+  uberlandia: {
+    host: process.env.DB_FIREBIRD_UBERLANDIA_HOST!,
+    port: Number(process.env.DB_FIREBIRD_UBERLANDIA_PORT) || 3050,
+    database: process.env.DB_FIREBIRD_UBERLANDIA_PATH!,
+    user: process.env.DB_FIREBIRD_UBERLANDIA_USER!,
+    password: process.env.DB_FIREBIRD_UBERLANDIA_PASSWORD!,
+  },
+  goiania: {
+    host: process.env.DB_FIREBIRD_GOIANIA_HOST!,
+    port: Number(process.env.DB_FIREBIRD_GOIANIA_PORT) || 3050,
+    database: process.env.DB_FIREBIRD_GOIANIA_PATH!,
+    user: process.env.DB_FIREBIRD_GOIANIA_USER!,
+    password: process.env.DB_FIREBIRD_GOIANIA_PASSWORD!,
+  },
 };
 
 export function queryFirebird<T = Record<string, unknown>>(

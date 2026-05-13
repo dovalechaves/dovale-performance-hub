@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import { BarChart3, Calculator, LogOut, Sun, Moon, Users, RefreshCw, Loader2, ChevronDown, Settings2, Send, Archive, Bot, Database, ClipboardList, UserPlus, ShieldCheck, BellRing, ShoppingCart } from "lucide-react";
+import { BarChart3, Calculator, LogOut, Sun, Moon, Users, RefreshCw, Loader2, ChevronDown, Settings2, Send, Archive, Bot, Database, ClipboardList, UserPlus, ShieldCheck, BellRing, ShoppingCart, Sparkles } from "lucide-react";
 import logoBlue from "@/assets/logo-blue.png";
 import logoWhite from "@/assets/logo-white.png";
 import { API_BASE, LOJAS, getAuthUsers, updateAuthUserRole, type AuthManagedUser } from "@/services/api";
@@ -99,6 +99,13 @@ const APPS: AppCard[] = [
     route: "/ecommerce-disparo",
     color: "from-sky-500/20 to-emerald-600/10 border-sky-500/30 hover:border-sky-500/60",
   },
+  {
+    title: "Sugestão de Compras",
+    description: "Calcule sugestões de reposição por loja com base no histórico de vendas Microsys.",
+    icon: <Sparkles className="w-8 h-8" />,
+    route: "/sugestao-compras",
+    color: "from-violet-500/20 to-violet-600/10 border-violet-500/30 hover:border-violet-500/60",
+  },
 ];
 
 const APP_BY_ROUTE: Record<string, keyof AuthManagedUser["apps"]> = {
@@ -113,6 +120,7 @@ const APP_BY_ROUTE: Record<string, keyof AuthManagedUser["apps"]> = {
   "/score": "score",
   "/cobranca": "cobranca",
   "/ecommerce-disparo": "ecommercedisparo",
+  "/sugestao-compras": "sugestaocompras",
 };
 
 export default function Hub() {
@@ -401,6 +409,8 @@ export default function Hub() {
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Cobr.</th>
                     <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Ecommerce</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role EC</th>
+                    <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Sug. Compras</th>
+                    <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role SC</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Status</th>
                   </tr>
                 </thead>
@@ -478,6 +488,10 @@ export default function Hub() {
                                   ecommercedisparo: {
                                     ...u.apps.ecommercedisparo,
                                     can_access: enabled ? u.apps.ecommercedisparo.can_access : false,
+                                  },
+                                  sugestaocompras: {
+                                    ...u.apps.sugestaocompras,
+                                    can_access: enabled ? u.apps.sugestaocompras.can_access : false,
                                   },
                                 },
                                 can_access_dashboard: enabled ? u.apps.dashboard.can_access : false,
@@ -1138,6 +1152,57 @@ export default function Hub() {
                                     ...u.apps,
                                     ecommercedisparo: {
                                       ...u.apps.ecommercedisparo,
+                                      role: nextRole,
+                                    },
+                                  },
+                                };
+                                updateManagedUser(u.usuario, () => next);
+                                await persistUser(next);
+                              }}
+                              disabled={savingUser === u.usuario || !u.can_access_hub}
+                              className="appearance-none rounded-lg border border-border bg-muted px-3 py-1.5 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40"
+                            >
+                              {(Object.keys(ROLE_LABELS) as Role[]).map((r) => (
+                                <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                              ))}
+                            </select>
+                            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={u.apps.sugestaocompras.can_access}
+                            onChange={async (e) => {
+                              const next: AuthManagedUser = {
+                                ...u,
+                                apps: {
+                                  ...u.apps,
+                                  sugestaocompras: {
+                                    ...u.apps.sugestaocompras,
+                                    can_access: e.target.checked,
+                                  },
+                                },
+                              };
+                              updateManagedUser(u.usuario, () => next);
+                              await persistUser(next);
+                            }}
+                            disabled={savingUser === u.usuario || !u.can_access_hub}
+                            className="h-4 w-4 rounded border-border bg-muted text-primary focus:ring-primary/50 disabled:opacity-40"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="relative inline-block">
+                            <select
+                              value={u.apps.sugestaocompras.role}
+                              onChange={async (e) => {
+                                const nextRole = e.target.value as Role;
+                                const next: AuthManagedUser = {
+                                  ...u,
+                                  apps: {
+                                    ...u.apps,
+                                    sugestaocompras: {
+                                      ...u.apps.sugestaocompras,
                                       role: nextRole,
                                     },
                                   },

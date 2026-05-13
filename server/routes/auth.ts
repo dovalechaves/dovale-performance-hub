@@ -5,7 +5,7 @@ import { getPool } from "../db/sqlserver";
 const router = Router();
 const VALID_ROLES = ["admin", "manager", "viewer"] as const;
 const VALID_HUB_ROLES = ["admin", "viewer"] as const;
-const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento", "assistente", "multipreco", "inventario", "onboarding", "score", "cobranca", "ecommercedisparo"] as const;
+const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento", "assistente", "multipreco", "inventario", "onboarding", "score", "cobranca", "ecommercedisparo", "sugestaocompras"] as const;
 const ECOMMERCE_DISPARO_ALLOWED = (process.env.ECOMMERCE_DISPARO_ALLOWED_USERS ?? "henrique.berbert,andreza")
   .split(",")
   .map((u) => u.trim().toLowerCase())
@@ -172,6 +172,12 @@ function buildDefaultApps(usuario: string, localRole: unknown, localLoja: unknow
       loja: null,
       can_access: canAccessHub && canAccessEcommerceDisparo(usuario, hubRole),
     },
+    sugestaocompras: {
+      app_key: "sugestaocompras" as AppKey,
+      role: baseRole,
+      loja: null,
+      can_access: false,
+    },
   };
 }
 
@@ -196,6 +202,7 @@ function mergeApps(
     score: { ...defaults.score },
     cobranca: { ...defaults.cobranca },
     ecommercedisparo: { ...defaults.ecommercedisparo },
+    sugestaocompras: { ...defaults.sugestaocompras },
   };
 
   for (const row of appRows) {
@@ -247,6 +254,7 @@ function normalizeAppsPayload(
     score: { ...defaults.score },
     cobranca: { ...defaults.cobranca },
     ecommercedisparo: { ...defaults.ecommercedisparo },
+    sugestaocompras: { ...defaults.sugestaocompras },
   };
 
   if (payload && typeof payload === "object") {
@@ -466,7 +474,7 @@ router.get("/users", async (req, res) => {
       pool.request().query(`
         SELECT usuario, app_key, role, loja, ativo, usu_codigo_sistema
         FROM dbo.USUARIOS_APPS
-        WHERE app_key IN ('dashboard', 'calculadora', 'disparo', 'fechamento', 'assistente', 'multipreco', 'inventario', 'onboarding', 'score', 'cobranca', 'ecommercedisparo')
+        WHERE app_key IN ('dashboard', 'calculadora', 'disparo', 'fechamento', 'assistente', 'multipreco', 'inventario', 'onboarding', 'score', 'cobranca', 'ecommercedisparo', 'sugestaocompras')
       `),
     ]);
 

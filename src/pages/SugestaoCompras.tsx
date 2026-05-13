@@ -9,15 +9,16 @@ import {
   TrendingUp,
   Package,
   ShoppingCart,
-  Sparkles,
   Loader2,
   Download,
   ArrowLeft,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge"; // usado nas linhas da tabela (sugestão)
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
@@ -37,6 +38,9 @@ import {
 } from "@/components/ui/table";
 import * as XLSX from "xlsx";
 import { API_BASE } from "@/services/api";
+import { useAuth } from "@/context/AuthContext";
+import logoBlue from "@/assets/logo-blue.png";
+import logoWhite from "@/assets/logo-white.png";
 
 type Periodo = 30 | 90 | 180;
 
@@ -65,6 +69,8 @@ const formatBRL = (v: number) =>
 
 export default function SugestaoCompras() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const [dark, setDark] = useState(() => localStorage.getItem("dovale_theme") !== "light");
   const [lojas, setLojas] = useState<Loja[]>([]);
   const [lojaId, setLojaId] = useState("");
   const [periodo, setPeriodo] = useState<Periodo>(30);
@@ -78,6 +84,11 @@ export default function SugestaoCompras() {
     titulo: string;
     itens: { id: string; codigo: string; solicitado: number; disponivelSjc: number; disponivelMg: number }[];
   }>({ aberto: false, titulo: "", itens: [] });
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", dark);
+    localStorage.setItem("dovale_theme", dark ? "dark" : "light");
+  }, [dark]);
 
   useEffect(() => {
     fetch(`${API_BASE}/sugestao-compras/lojas`)
@@ -231,34 +242,42 @@ export default function SugestaoCompras() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b border-border bg-gradient-card sticky top-0 z-10">
-        <div className="container mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => navigate("/hub")}
-              className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors"
-              title="Voltar ao Hub"
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </button>
-            <div className="h-5 w-px bg-border" />
-            <div className="h-9 w-9 rounded-xl flex items-center justify-center bg-primary text-primary-foreground">
-              <Sparkles className="h-5 w-5" />
-            </div>
+    <div className="min-h-screen bg-background flex flex-col">
+      <header className="border-b border-border bg-gradient-card shrink-0">
+        <div className="container mx-auto px-6 py-4 flex items-center gap-4">
+          <button
+            onClick={() => navigate("/hub")}
+            className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+          <div className="h-5 w-px bg-border" />
+          <button onClick={() => navigate("/hub")} className="relative h-9 w-36 overflow-hidden" title="Ir para o Hub">
+            <img src={logoBlue} alt="Dovale" className={`absolute inset-0 h-full w-auto object-contain transition-all duration-700 ${dark ? "opacity-0 scale-90 blur-sm" : "opacity-100 scale-100"}`} />
+            <img src={logoWhite} alt="Dovale" className={`absolute inset-0 h-full w-auto object-contain transition-all duration-700 ${dark ? "opacity-100 scale-100" : "opacity-0 scale-90 blur-sm"}`} />
+          </button>
+          <div className="h-5 w-px bg-border" />
+          <div className="flex items-center gap-2">
+            <ShoppingCart className="w-5 h-5 text-violet-500" />
             <div>
-              <h1 className="text-base font-semibold tracking-tight">Sugestão de Compras</h1>
-              <p className="text-xs text-muted-foreground">Integração Microsys · Departamento Administrativo</p>
+              <h1 className="text-sm font-mono font-bold text-foreground tracking-tight">SUGESTÃO DE COMPRAS</h1>
+              <p className="text-[10px] font-mono text-muted-foreground">Integração Microsys · Dpto. Administrativo</p>
             </div>
           </div>
-          <Badge variant="secondary" className="hidden sm:inline-flex">
-            <span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
-            Firebird
-          </Badge>
+          <div className="ml-auto flex items-center gap-2">
+            {user && <span className="text-xs text-muted-foreground hidden sm:inline">{user.displayName}</span>}
+            <button
+              onClick={() => setDark((d) => !d)}
+              className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-primary/10 transition-colors"
+            >
+              {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+          </div>
         </div>
       </header>
 
-      <main className="container mx-auto px-6 py-8 space-y-6">
+      <main className="flex-1 overflow-y-auto">
+      <div className="container mx-auto px-6 py-8 space-y-6">
         {/* Filtros */}
         <Card>
           <CardContent className="p-5 grid gap-4 md:grid-cols-[1fr_1fr_2fr_auto] items-end">
@@ -470,6 +489,7 @@ export default function SugestaoCompras() {
         </Card>
       </main>
 
+      </div>
       {/* Modal de alerta de estoque */}
       {alerta.aberto && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">

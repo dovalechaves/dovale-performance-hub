@@ -21,7 +21,6 @@ export default function ProdutosEcommerce() {
           </h1>
         </div>
       </header>
-
       <main className="container mx-auto px-6 py-10">
         <ProductsTable />
       </main>

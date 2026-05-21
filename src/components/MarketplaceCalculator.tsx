@@ -174,6 +174,8 @@ const MarketplaceCalculator = () => {
   const [desconto, setDesconto] = useState(0);
   const [descontoFrete, setDescontoFrete] = useState(0);
   const [quantidade, setQuantidade] = useState(1);
+  const [mode, setMode] = useState<"normal" | "inverso">("normal");
+  const [margemDesejada, setMargemDesejada] = useState(30);
 
   // Specific items / attributes
   const [categoriaId, setCategoriaId] = useState("");
@@ -280,6 +282,9 @@ const MarketplaceCalculator = () => {
     const profit = price - taxa - shipping - imposto - cost;
     const calculatedMargin = cost > 0 ? (profit / cost) * 100 : 0;
 
+    const custoMaximo = price > 0 ? (price - taxa - shipping - imposto) / (1 + margemDesejada / 100) : 0;
+    const lucroInverso = price - taxa - shipping - imposto - custoMaximo;
+
     return {
       valorFinal: price,
       lucroPorVenda: profit,
@@ -287,8 +292,10 @@ const MarketplaceCalculator = () => {
       frete: shipping,
       imposto,
       margemCalculada: calculatedMargin,
+      custoMaximo,
+      lucroInverso,
     };
-  }, [precoVenda, desconto, descontoFrete, custoProduto, custoOpUnit, custoRealOverride, marketplace, isML, listingType, pesoGramas, magaluTier]);
+  }, [precoVenda, desconto, descontoFrete, custoProduto, custoOpUnit, custoRealOverride, marketplace, isML, listingType, pesoGramas, magaluTier, margemDesejada, mode]);
 
   const buscarProduto = async () => {
     if (!codigoProduto.trim()) return;
@@ -400,9 +407,29 @@ const MarketplaceCalculator = () => {
       {/* Form */}
       <div className="animate-fade-up-delay-1">
         <div className="bg-card rounded-2xl p-8 shadow-[0_1px_3px_hsl(240_10%_80%/0.3),0_8px_32px_hsl(240_10%_80%/0.12)] transition-shadow duration-300 hover:shadow-[0_2px_6px_hsl(240_10%_80%/0.35),0_12px_40px_hsl(240_10%_80%/0.18)]">
-          <h2 className="font-display text-xl font-bold tracking-tight text-foreground mb-8 uppercase">
+          <h2 className="font-display text-xl font-bold tracking-tight text-foreground mb-6 uppercase">
             Calculadora
           </h2>
+
+          {/* Mode Toggle */}
+          <div className="flex gap-1 mb-8 p-1 bg-secondary rounded-xl">
+            <button
+              onClick={() => setMode("normal")}
+              className={`flex-1 py-2 rounded-lg text-xs font-semibold uppercase tracking-widest transition-colors ${
+                mode === "normal" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Normal
+            </button>
+            <button
+              onClick={() => setMode("inverso")}
+              className={`flex-1 py-2 rounded-lg text-xs font-semibold uppercase tracking-widest transition-colors ${
+                mode === "inverso" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Inverso
+            </button>
+          </div>
 
           {/* Marketplace */}
           <div className="space-y-2 mb-6">
@@ -423,33 +450,35 @@ const MarketplaceCalculator = () => {
 
 
           {/* Busca de Produto */}
-          <div className="space-y-2 mb-6">
-            <label className={labelClass}>Código do Produto</label>
-            <div className="flex gap-2">
-              <input
-                type="number"
-                min="1"
-                value={codigoProduto}
-                onChange={(e) => setCodigoProduto(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && buscarProduto()}
-                placeholder="Ex: 12345"
-                className={`${inputClass} flex-1`}
-              />
-              <button
-                onClick={buscarProduto}
-                disabled={isLoadingProduto || !codigoProduto.trim()}
-                className="px-4 py-3.5 bg-primary text-primary-foreground rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-40 whitespace-nowrap"
-              >
-                {isLoadingProduto ? "..." : "Buscar"}
-              </button>
+          {mode === "normal" && (
+            <div className="space-y-2 mb-6">
+              <label className={labelClass}>Código do Produto</label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  min="1"
+                  value={codigoProduto}
+                  onChange={(e) => setCodigoProduto(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && buscarProduto()}
+                  placeholder="Ex: 12345"
+                  className={`${inputClass} flex-1`}
+                />
+                <button
+                  onClick={buscarProduto}
+                  disabled={isLoadingProduto || !codigoProduto.trim()}
+                  className="px-4 py-3.5 bg-primary text-primary-foreground rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-40 whitespace-nowrap"
+                >
+                  {isLoadingProduto ? "..." : "Buscar"}
+                </button>
+              </div>
+              {produtoNome && (
+                <p className="text-xs text-primary font-medium truncate">{produtoNome}</p>
+              )}
+              {produtoErro && (
+                <p className="text-xs text-destructive font-medium">{produtoErro}</p>
+              )}
             </div>
-            {produtoNome && (
-              <p className="text-xs text-primary font-medium truncate">{produtoNome}</p>
-            )}
-            {produtoErro && (
-              <p className="text-xs text-destructive font-medium">{produtoErro}</p>
-            )}
-          </div>
+          )}
 
           <div className="space-y-2 mb-6">
             <label className={labelClass}>Preço do Produto (R$)</label>
@@ -464,47 +493,84 @@ const MarketplaceCalculator = () => {
             />
           </div>
 
-          <div className="space-y-2 mb-6">
-            <label className={labelClass}>Custo do Produto (R$)</label>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={custoProduto}
-              readOnly
-              placeholder="0,00"
-              className={`${inputClass} opacity-70 cursor-not-allowed`}
-            />
-            {custoProduto !== "" && (
-              <p className="text-xs text-[#00A650] font-medium mt-1">✅ Custo importado do sistema</p>
-            )}
-          </div>
+          {mode === "normal" && (
+            <>
+              <div className="space-y-2 mb-6">
+                <label className={labelClass}>Custo do Produto (R$)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={custoProduto}
+                  readOnly
+                  placeholder="0,00"
+                  className={`${inputClass} opacity-70 cursor-not-allowed`}
+                />
+                {custoProduto !== "" && (
+                  <p className="text-xs text-[#00A650] font-medium mt-1">✅ Custo importado do sistema</p>
+                )}
+              </div>
 
-          {/* Custo Operacional */}
-          <div className="space-y-2 mb-6">
-            <label className={labelClass}>Custo Operacional (R$)</label>
-            <input
-              type="text"
-              readOnly
-              value={custoOpUnit != null ? fmt(custoOpUnit) : "—"}
-              placeholder="—"
-              className={`${inputClass} opacity-70 cursor-not-allowed`}
-            />
-          </div>
+              {/* Custo Operacional */}
+              <div className="space-y-2 mb-6">
+                <label className={labelClass}>Custo Operacional (R$)</label>
+                <input
+                  type="text"
+                  readOnly
+                  value={custoOpUnit != null ? fmt(custoOpUnit) : "—"}
+                  placeholder="—"
+                  className={`${inputClass} opacity-70 cursor-not-allowed`}
+                />
+              </div>
 
-          {/* Custo Real */}
-          <div className="space-y-2 mb-6">
-            <label className={`${labelClass} text-primary`}>Custo Real (R$)</label>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={custoRealOverride !== "" ? custoRealOverride : custoProduto !== "" ? ((parseFloat(custoProduto) || 0) + (custoOpUnit ?? 0)).toFixed(2) : ""}
-              onChange={e => setCustoRealOverride(e.target.value)}
-              placeholder="0,00"
-              className={`${inputClass} text-primary font-bold`}
-            />
-          </div>
+              {/* Custo Real */}
+              <div className="space-y-2 mb-6">
+                <label className={`${labelClass} text-primary`}>Custo Real (R$)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={custoRealOverride !== "" ? custoRealOverride : custoProduto !== "" ? ((parseFloat(custoProduto) || 0) + (custoOpUnit ?? 0)).toFixed(2) : ""}
+                  onChange={e => setCustoRealOverride(e.target.value)}
+                  placeholder="0,00"
+                  className={`${inputClass} text-primary font-bold`}
+                />
+              </div>
+            </>
+          )}
+
+          {mode === "inverso" && (
+            <div className="space-y-3 mb-6">
+              <div className="flex items-center justify-between">
+                <label className={`${labelClass} text-primary`}>Margem Desejada</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    max="500"
+                    step="0.1"
+                    value={margemDesejada}
+                    onChange={(e) => setMargemDesejada(Number(e.target.value))}
+                    className="w-20 bg-secondary border-0 rounded-lg px-2 py-1 text-sm font-medium text-right focus:ring-2 focus:ring-primary outline-none"
+                  />
+                  <span className="text-sm font-bold text-primary tabular-nums">%</span>
+                </div>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="200"
+                step="0.1"
+                value={margemDesejada}
+                onChange={(e) => setMargemDesejada(Number(e.target.value))}
+                className="w-full h-2 rounded-full appearance-none cursor-pointer bg-secondary accent-primary"
+              />
+              <div className="flex justify-between text-[10px] text-muted-foreground font-medium">
+                <span>0%</span>
+                <span>200%</span>
+              </div>
+            </div>
+          )}
 
           <div className="space-y-2 mb-6">
             <label className={labelClass}>Peso do Produto (g)</label>
@@ -513,11 +579,12 @@ const MarketplaceCalculator = () => {
               min="1"
               step="1"
               value={pesoGramas}
-              readOnly
+              readOnly={mode === "normal"}
+              onChange={mode === "inverso" ? (e) => setPesoGramas(e.target.value) : undefined}
               placeholder="500"
-              className={`${inputClass} opacity-70 cursor-not-allowed`}
+              className={mode === "normal" ? `${inputClass} opacity-70 cursor-not-allowed` : inputClass}
             />
-            {custoProduto !== "" && (
+            {mode === "normal" && custoProduto !== "" && (
               <p className="text-xs text-[#00A650] font-medium mt-1">✅ Peso importado do sistema</p>
             )}
           </div>
@@ -676,12 +743,19 @@ const MarketplaceCalculator = () => {
 
           <div className="space-y-5">
             <ResultRow label="Marketplace" value={marketplace ? MARKETPLACE_LABELS[marketplace] : "—"} />
-            <ResultRow label="Custo do Produto" value={fmt(parseFloat(custoProduto) || 0)} />
-            {custoOpUnit != null && (
-              <ResultRow label="Custo Operacional" value={fmt(custoOpUnit)} />
+            {mode === "normal" && (
+              <>
+                <ResultRow label="Custo do Produto" value={fmt(parseFloat(custoProduto) || 0)} />
+                {custoOpUnit != null && (
+                  <ResultRow label="Custo Operacional" value={fmt(custoOpUnit)} />
+                )}
+                {(custoOpUnit != null || custoRealOverride !== "") && (
+                  <ResultRow label="Custo Real" value={fmt(custoRealOverride !== "" ? (parseFloat(custoRealOverride) || 0) : (parseFloat(custoProduto) || 0) + (custoOpUnit ?? 0))} accent />
+                )}
+              </>
             )}
-            {(custoOpUnit != null || custoRealOverride !== "") && (
-              <ResultRow label="Custo Real" value={fmt(custoRealOverride !== "" ? (parseFloat(custoRealOverride) || 0) : (parseFloat(custoProduto) || 0) + (custoOpUnit ?? 0))} accent />
+            {mode === "inverso" && (
+              <ResultRow label="Margem Desejada" value={`${margemDesejada}%`} colorClass="text-primary" />
             )}
             <ResultRow label="Preço do Produto" value={fmt(parseFloat(precoVenda) || 0)} />
             <ResultRow label="Desconto" value={`${desconto}%`} />
@@ -700,11 +774,19 @@ const MarketplaceCalculator = () => {
               </>
             )}
 
-            <ResultRow 
-              label="Margem de Lucro Final" 
-              value={`${results.margemCalculada.toFixed(2)}%`} 
-              colorClass={results.margemCalculada >= 0 ? "text-[#00A650]" : "text-destructive"} 
-            />
+            {mode === "normal" ? (
+              <ResultRow
+                label="Margem de Lucro Final"
+                value={`${results.margemCalculada.toFixed(2)}%`}
+                colorClass={results.margemCalculada >= 0 ? "text-[#00A650]" : "text-destructive"}
+              />
+            ) : (
+              <ResultRow
+                label="Custo Máximo Permitido"
+                value={fmt(results.custoMaximo)}
+                colorClass={results.custoMaximo >= 0 ? "text-[#00A650]" : "text-destructive"}
+              />
+            )}
 
             {/* Detalhamento real do ML */}
             {mlSim && (
@@ -766,14 +848,25 @@ const MarketplaceCalculator = () => {
                 </span>
               </div>
               <div className="h-px bg-primary-foreground/15" />
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-primary-foreground/70 uppercase tracking-wide">
-                  Lucro por Venda
-                </span>
-                <span className={`text-2xl font-bold tabular-nums ${results.lucroPorVenda >= 0 ? "text-[#00A650]" : "text-destructive"}`}>
-                  {fmt(results.lucroPorVenda)}
-                </span>
-              </div>
+              {mode === "normal" ? (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-primary-foreground/70 uppercase tracking-wide">
+                    Lucro por Venda
+                  </span>
+                  <span className={`text-2xl font-bold tabular-nums ${results.lucroPorVenda >= 0 ? "text-[#00A650]" : "text-destructive"}`}>
+                    {fmt(results.lucroPorVenda)}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-primary-foreground/70 uppercase tracking-wide">
+                    Custo Máximo ({margemDesejada}%)
+                  </span>
+                  <span className={`text-2xl font-bold tabular-nums ${results.custoMaximo >= 0 ? "text-[#00A650]" : "text-destructive"}`}>
+                    {fmt(results.custoMaximo)}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         </div>

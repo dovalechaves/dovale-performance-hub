@@ -59,12 +59,24 @@ router.get("/lojas", (_req, res) => {
   res.json(lojas);
 });
 
-/** GET /api/sugestao-compras/sugestoes?loja=2 */
+/** GET /api/sugestao-compras/sugestoes?loja=2  (SSE stream) */
 router.get("/sugestoes", async (req, res) => {
   const lojaId = String(req.query.loja || "2");
   const config = LOJAS_CONFIG[lojaId];
 
   if (!config) return res.status(400).json({ error: "Loja não configurada." });
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
+
+  const send = (event: string, data: unknown) =>
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+
+  const pingInterval = setInterval(() => res.write(": ping\n\n"), 25000);
+  req.on("close", () => clearInterval(pingInterval));
 
   const sql = `
     WITH params AS (
@@ -133,19 +145,27 @@ router.get("/sugestoes", async (req, res) => {
       };
     });
 
-    if (items.length > 0) {
-      const estoqueSjc = await getEstoqueBase("1", items.map((i) => i.codigo)).catch((err) => {
-        console.error("[sugestao-compras] Erro ao buscar estoque SJC na listagem:", err);
-        return {} as Record<string, number>;
-      });
-      items.forEach((i) => { i.estoqueSjc = estoqueSjc[i.codigo] || 0; });
+    const CHUNK = 200;
+    for (let i = 0; i < items.length; i += CHUNK) {
+      send("chunk", items.slice(i, i + CHUNK));
     }
 
-    res.json(items);
+    if (items.length > 0) {
+      const estoqueSjc = await getEstoqueBase("1", items.map((i) => i.codigo)).catch((err) => {
+        console.error("[sugestao-compras] Erro ao buscar estoque SJC:", err);
+        return {} as Record<string, number>;
+      });
+      send("estoque", estoqueSjc);
+    }
+
+    send("done", { total: items.length });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[sugestao-compras] Erro na query de sugestões (${config.nome}):`, message);
-    res.status(500).json({ error: `Erro de conexão com a loja ${config.nome}: ${message}` });
+    send("error", { error: `Erro de conexão com a loja ${config.nome}: ${message}` });
+  } finally {
+    clearInterval(pingInterval);
+    res.end();
   }
 });
 

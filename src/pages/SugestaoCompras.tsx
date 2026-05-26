@@ -100,25 +100,56 @@ export default function SugestaoCompras() {
       .catch(() => toast.error("Falha ao carregar lojas."));
   }, []);
 
-  const consultarBanco = async () => {
+  const consultarBanco = () => {
     if (!lojaId) { toast.warning("Selecione uma loja primeiro."); return; }
     setCarregando(true);
-    try {
-      const r = await fetch(`${API_BASE}/sugestao-compras/sugestoes?loja=${lojaId}`);
-      if (!r.ok) {
-        const err = await r.json().catch(() => ({}));
-        throw new Error((err as any).error || "Erro ao buscar dados do servidor");
-      }
-      const data: SugestaoItem[] = await r.json();
-      setItens(data);
-      setSelecionados(new Set(data.slice(0, 100).map((i) => i.id)));
-      setAjustes({});
-      toast.success("Consulta finalizada com sucesso!");
-    } catch (error: any) {
-      toast.error(error.message || "Falha ao carregar sugestões.");
-    } finally {
+    setItens([]);
+    setSelecionados(new Set());
+    setAjustes({});
+
+    const buffer: SugestaoItem[] = [];
+    let finished = false;
+    const es = new EventSource(`${API_BASE}/sugestao-compras/sugestoes?loja=${lojaId}`);
+
+    es.addEventListener("chunk", (e: MessageEvent) => {
+      const chunk: SugestaoItem[] = JSON.parse(e.data);
+      buffer.push(...chunk);
+      setItens([...buffer]);
+    });
+
+    es.addEventListener("estoque", (e: MessageEvent) => {
+      const sjc: Record<string, number> = JSON.parse(e.data);
+      setItens((prev) => prev.map((i) => ({ ...i, estoqueSjc: sjc[i.codigo] || 0 })));
+    });
+
+    es.addEventListener("done", () => {
+      finished = true;
+      es.close();
+      setSelecionados(new Set(buffer.slice(0, 100).map((i) => i.id)));
       setCarregando(false);
-    }
+      toast.success("Consulta finalizada com sucesso!");
+    });
+
+    es.addEventListener("error", (e: MessageEvent) => {
+      finished = true;
+      es.close();
+      try {
+        const data = JSON.parse(e.data);
+        toast.error(data.error || "Falha ao carregar sugestões.");
+      } catch {
+        toast.error("Falha ao carregar sugestões.");
+      }
+      setCarregando(false);
+    });
+
+    es.onerror = () => {
+      if (!finished) {
+        finished = true;
+        es.close();
+        toast.error("Falha na conexão com o servidor.");
+        setCarregando(false);
+      }
+    };
   };
 
   const itensFiltrados = useMemo(() => {
@@ -367,7 +398,15 @@ export default function SugestaoCompras() {
         <Card className="overflow-hidden">
           <CardHeader className="flex-row items-center justify-between gap-3 space-y-0 border-b border-border/60 bg-muted/30">
             <div>
-              <CardTitle className="text-base">Itens sugeridos</CardTitle>
+              <CardTitle className="text-base flex items-center gap-2">
+                Itens sugeridos
+                {carregando && itens.length > 0 && (
+                  <span className="flex items-center gap-1 text-xs font-normal text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    {itens.length} recebidos...
+                  </span>
+                )}
+              </CardTitle>
               <p className="text-xs text-muted-foreground mt-1">
                 Ajuste as quantidades antes de submeter ao Microsys.
               </p>
@@ -412,7 +451,7 @@ export default function SugestaoCompras() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {carregando ? (
+                  {carregando && itens.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={9} className="h-72 text-center">
                         <div className="flex flex-col items-center justify-center space-y-4">

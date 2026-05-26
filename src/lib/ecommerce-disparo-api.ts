@@ -15,10 +15,12 @@ export interface CanalResumo {
 
 export interface TrafegoPagoItem {
   origem: string;
-  investimento: number;
-  receita: number;
-  roas: number;
-  conversao: number;
+  investimento: number | null;
+  receita: number | null;
+  roas: number | null;
+  conversao: number | null;
+  fonte?: string;
+  status?: string;
 }
 
 export interface EcommerceReport {
@@ -79,8 +81,9 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return json as T;
 }
 
-export async function fetchEcommerceReport(usuario: string, periodo: PeriodoRelatorio): Promise<EcommerceReport> {
+export async function fetchEcommerceReport(usuario: string, periodo: PeriodoRelatorio, data?: string): Promise<EcommerceReport> {
   const params = new URLSearchParams({ periodo });
+  if (data) params.set("data", data);
   const res = await fetch(`${BASE}/overview?${params}`, { headers: headers(usuario) });
   return handleResponse<EcommerceReport>(res);
 }

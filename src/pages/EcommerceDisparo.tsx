@@ -54,6 +54,9 @@ export default function EcommerceDisparo() {
   const [dark, setDark] = useState(() => localStorage.getItem("dovale_theme") !== "light");
   const [tab, setTab] = useState<Tab>("painel");
   const [periodo, setPeriodo] = useState<PeriodoRelatorio>("diario");
+  const [dataSelecionada, setDataSelecionada] = useState<string>(
+    () => new Date().toISOString().split("T")[0]
+  );
   const [report, setReport] = useState<EcommerceReport | null>(null);
   const [historico, setHistorico] = useState<HistoricoEnvio[]>([]);
   const [preview, setPreview] = useState("");
@@ -72,14 +75,14 @@ export default function EcommerceDisparo() {
     if (!usuario) return;
     setLoading(true);
     try {
-      const data = await fetchEcommerceReport(usuario, periodo);
+      const data = await fetchEcommerceReport(usuario, periodo, periodo === "diario" ? dataSelecionada : undefined);
       setReport(data);
     } catch (e: unknown) {
       toast.error(errorMessage(e, "Falha ao carregar relatório"));
     } finally {
       setLoading(false);
     }
-  }, [usuario, periodo]);
+  }, [usuario, periodo, dataSelecionada]);
 
   const loadHistorico = useCallback(async () => {
     if (!usuario) return;
@@ -193,7 +196,7 @@ export default function EcommerceDisparo() {
               ))}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <select
                 value={periodo}
                 onChange={(e) => setPeriodo(e.target.value as PeriodoRelatorio)}
@@ -202,6 +205,15 @@ export default function EcommerceDisparo() {
                 <option value="diario">Relatório diário</option>
                 <option value="mensal">Relatório mensal</option>
               </select>
+              {periodo === "diario" && (
+                <input
+                  type="date"
+                  value={dataSelecionada}
+                  max={new Date().toISOString().split("T")[0]}
+                  onChange={(e) => setDataSelecionada(e.target.value)}
+                  className="rounded-lg border border-border bg-muted px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                />
+              )}
               <button onClick={loadReport} disabled={loading} className="inline-flex items-center gap-1.5 rounded-lg bg-secondary px-3 py-2 text-xs text-muted-foreground hover:bg-primary/10 hover:text-foreground transition-colors disabled:opacity-40">
                 <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
                 Atualizar
@@ -282,10 +294,16 @@ export default function EcommerceDisparo() {
                         {report.trafego_pago.map((item) => (
                           <div key={item.origem} className="grid grid-cols-2 md:grid-cols-5 gap-3 rounded-lg border border-border bg-muted/20 p-3 text-xs">
                             <p className="font-semibold text-foreground md:col-span-1">{item.origem}</p>
-                            <p><span className="text-muted-foreground">Inv.</span> {formatCurrency(item.investimento)}</p>
-                            <p><span className="text-muted-foreground">Receita</span> {formatCurrency(item.receita)}</p>
-                            <p><span className="text-muted-foreground">ROAS</span> {item.roas.toFixed(2)}x</p>
-                            <p><span className="text-muted-foreground">Conv.</span> {formatPercent(item.conversao)}</p>
+                            {item.status ? (
+                              <p className="md:col-span-4 text-yellow-500 font-medium">{item.status}</p>
+                            ) : (
+                              <>
+                                <p><span className="text-muted-foreground">Inv.</span> {formatCurrency(item.investimento ?? 0)}</p>
+                                <p><span className="text-muted-foreground">Receita</span> {formatCurrency(item.receita ?? 0)}</p>
+                                <p><span className="text-muted-foreground">ROAS</span> {(item.roas ?? 0).toFixed(2)}x</p>
+                                <p><span className="text-muted-foreground">Conv.</span> {formatPercent(item.conversao ?? 0)}</p>
+                              </>
+                            )}
                           </div>
                         ))}
                       </div>

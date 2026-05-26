@@ -112,7 +112,6 @@ const LojaCalculator = () => {
       setCustoProduto(Number(data.custo).toFixed(2));
       if (data.peso) setPesoGramas(String(data.peso));
       setProdutoNome(data.resumo);
-      // Atualiza custo op do produto
       const cod = Number(codigoProduto);
       const item = custoOpData[cod];
       setCustoOpUnit(item?.custo_operacional_unit ?? null);
@@ -127,7 +126,6 @@ const LojaCalculator = () => {
     const custoBase = parseFloat(custoProduto) || 0;
     const basePrice = parseFloat(precoVenda) || 0;
     const price = basePrice * (1 - desconto / 100);
-
     const taxa = price * ML_FEE;
     const imposto = price * TAX_RATE;
     const opCost = custoOpUnit ?? 0;
@@ -161,7 +159,6 @@ const LojaCalculator = () => {
             Calculadora Loja
           </h2>
 
-          {/* Mode Toggle */}
           <div className="flex gap-1 mb-8 p-1 bg-secondary rounded-xl">
             <button
               onClick={() => setMode("normal")}
@@ -181,7 +178,6 @@ const LojaCalculator = () => {
             </button>
           </div>
 
-          {/* Loja */}
           <div className="space-y-2 mb-6">
             <label className={labelClass}>Loja</label>
             <div className="relative">

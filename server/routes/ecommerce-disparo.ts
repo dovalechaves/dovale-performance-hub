@@ -1,5 +1,8 @@
 import { NextFunction, Request, Response, Router } from "express";
 import { getPool } from "../db/sqlserver";
+import { getShopeeAdsData } from "../services/shopee-ads.service";
+import { getMlAdsRaw } from "../services/ml-ads.service";
+import { getCanaisDiario, getCanaisMensal, getCanaisRaw } from "../services/ecommerce-canais.service";
 
 const router = Router();
 
@@ -10,7 +13,7 @@ const ALLOWED_USERS = (process.env.ECOMMERCE_DISPARO_ALLOWED_USERS ?? "henrique.
 
 type Periodo = "diario" | "mensal";
 
-interface CanalResumo {
+export interface CanalResumo {
   canal: string;
   faturamento: number;
   pedidos: number;
@@ -70,25 +73,37 @@ const historico = [
   { id: 4, periodo: "mensal", data_envio: "2026-05-01T08:30:00.000Z", destinatario: "Andreza", status: "SIMULADO" },
 ];
 
-function getReport(periodo: Periodo) {
-  const canais = periodo === "mensal" ? canaisMensal : canaisDiario;
+async function getReport(periodo: Periodo, data?: string) {
+  const canaisDb = periodo === "mensal" ? await getCanaisMensal() : await getCanaisDiario(data);
+  const canais = canaisDb ?? (periodo === "mensal" ? canaisMensal : canaisDiario);
   const faturamento = canais.reduce((acc, c) => acc + c.faturamento, 0);
   const pedidos = canais.reduce((acc, c) => acc + c.pedidos, 0);
   const margemMedia = canais.reduce((acc, c) => acc + c.margem, 0) / canais.length;
   const conversaoMedia = canais.reduce((acc, c) => acc + c.conversao, 0) / canais.length;
-  const roas = periodo === "mensal" ? 5.18 : 4.72;
-  const investimento = periodo === "mensal" ? 214300 : 11870;
-  const receitaPaga = investimento * roas;
   const ticketMedio = faturamento / pedidos;
   const meta = periodo === "mensal" ? 3200000 : 165000;
+
+  const shopeeAds = await getShopeeAdsData(periodo);
+
+  const shopeeInvestimento = shopeeAds.expense > 0 ? shopeeAds.expense : (periodo === "mensal" ? 40000 : 2220);
+  const shopeeReceita     = shopeeAds.gmv > 0     ? shopeeAds.gmv     : (periodo === "mensal" ? 193700 : 10680);
+  const shopeeRoas        = shopeeAds.roas > 0    ? shopeeAds.roas    : 4.84;
+  const shopeeConversao   = shopeeAds.orders > 0 && shopeeAds.clicks > 0
+    ? parseFloat(((shopeeAds.orders / shopeeAds.clicks) * 100).toFixed(2))
+    : 3.1;
+
+  const investimentoTotal = (periodo === "mensal" ? 78200 + 96100 : 4360 + 5290) + shopeeInvestimento;
+  const receitaTotal      = (periodo === "mensal" ? 354900 + 561200 : 19780 + 31480) + shopeeReceita;
+  const roasGeral         = investimentoTotal > 0 ? parseFloat((receitaTotal / investimentoTotal).toFixed(2)) : 0;
 
   return {
     periodo,
     gerado_em: new Date().toISOString(),
-    fonte: "mock_tray_marketplaces",
+    fonte: shopeeAds.fonte === "api" ? "shopee_api+mock_outros" : "mock_tray_marketplaces",
     integracoes: {
       tray: "mockado",
       whatsapp: "simulado",
+      shopee_ads: shopeeAds.fonte,
     },
     destinatarios: [
       { nome: "Henrique Berbert", telefone: process.env.ECOMMERCE_DISPARO_HENRIQUE ?? "+55 12 99999-0001" },
@@ -103,10 +118,10 @@ function getReport(periodo: Periodo) {
       pedidos,
       ticket_medio: ticketMedio,
       conversao: conversaoMedia,
-      roas,
+      roas: roasGeral,
       margem: margemMedia,
-      investimento,
-      receita_paga: receitaPaga,
+      investimento: investimentoTotal,
+      receita_paga: receitaTotal,
       meta,
       realizado_meta: (faturamento / meta) * 100,
       projecao_fechamento: periodo === "mensal" ? 3265400 : 174800,
@@ -118,9 +133,8 @@ function getReport(periodo: Periodo) {
     },
     canais,
     trafego_pago: [
-      { origem: "Meta Ads", investimento: periodo === "mensal" ? 78200 : 4360, receita: periodo === "mensal" ? 354900 : 19780, roas: 4.54, conversao: 2.9 },
-      { origem: "Google Ads", investimento: periodo === "mensal" ? 96100 : 5290, receita: periodo === "mensal" ? 561200 : 31480, roas: 5.84, conversao: 3.7 },
-      { origem: "Marketplace Ads", investimento: periodo === "mensal" ? 40000 : 2220, receita: periodo === "mensal" ? 193700 : 10680, roas: 4.84, conversao: 3.1 },
+      { origem: "Shopee Ads",      investimento: shopeeInvestimento, receita: shopeeReceita, roas: shopeeRoas, conversao: shopeeConversao, fonte: shopeeAds.fonte },
+      { origem: "Mercado Livre Ads", investimento: null, receita: null, roas: null, conversao: null, fonte: "sem_permissao", status: "Sem permissão API - ML" },
     ],
     pontos_criticos: [
       "Shopee abaixo do ritmo esperado, com queda de margem e ticket menor.",
@@ -135,8 +149,8 @@ function getReport(periodo: Periodo) {
   };
 }
 
-function montarMensagem(periodo: Periodo): string {
-  const report = getReport(periodo);
+async function montarMensagem(periodo: Periodo): Promise<string> {
+  const report = await getReport(periodo);
   const label = periodo === "mensal" ? "MENSAL" : "DIARIO";
   const topCanal = [...report.canais].sort((a, b) => b.faturamento - a.faturamento)[0];
   const canais = report.canais
@@ -160,32 +174,41 @@ function montarMensagem(periodo: Periodo): string {
     canais,
     "",
     "Pontos criticos:",
-    ...report.pontos_criticos.map((item) => `- ${item}`),
+    ...report.pontos_criticos.map((item: string) => `- ${item}`),
     "",
     "Direcionamentos:",
-    ...report.direcionamentos.map((item) => `- ${item}`),
+    ...report.direcionamentos.map((item: string) => `- ${item}`),
   ].join("\n");
 }
 
 router.use(requireAccess);
 
-router.get("/overview", (req, res) => {
+router.get("/overview", async (req, res) => {
   const periodo = req.query.periodo === "mensal" ? "mensal" : "diario";
-  res.json(getReport(periodo));
+  const data = typeof req.query.data === "string" ? req.query.data : undefined;
+  res.json(await getReport(periodo, data));
 });
 
 router.get("/historico", (_req, res) => {
   res.json({ total: historico.length, items: historico });
 });
 
-router.post("/preview", (req, res) => {
-  const periodo = req.body?.periodo === "mensal" ? "mensal" : "diario";
-  res.json({ periodo, mensagem: montarMensagem(periodo), modo_simulacao: true });
+router.get("/teste-ml", async (_req, res) => {
+  res.json(await getMlAdsRaw());
 });
 
-router.post("/enviar", (req, res) => {
+router.get("/teste-canais", async (_req, res) => {
+  res.json(await getCanaisRaw());
+});
+
+router.post("/preview", async (req, res) => {
   const periodo = req.body?.periodo === "mensal" ? "mensal" : "diario";
-  const report = getReport(periodo);
+  res.json({ periodo, mensagem: await montarMensagem(periodo), modo_simulacao: true });
+});
+
+router.post("/enviar", async (req, res) => {
+  const periodo = req.body?.periodo === "mensal" ? "mensal" : "diario";
+  const report = await getReport(periodo);
   res.json({
     ok: true,
     periodo,

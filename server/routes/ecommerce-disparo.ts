@@ -2,7 +2,7 @@ import { NextFunction, Request, Response, Router } from "express";
 import { getPool } from "../db/sqlserver";
 import { getShopeeAdsData } from "../services/shopee-ads.service";
 import { getMlAdsRaw } from "../services/ml-ads.service";
-import { getCanaisDiario, getCanaisMensal, getCanaisRaw } from "../services/ecommerce-canais.service";
+import { getCanaisDiario, getCanaisMensal, getCanaisRaw, CanalResumo } from "../services/ecommerce-canais.service";
 
 const router = Router();
 
@@ -13,15 +13,6 @@ const ALLOWED_USERS = (process.env.ECOMMERCE_DISPARO_ALLOWED_USERS ?? "henrique.
 
 type Periodo = "diario" | "mensal";
 
-export interface CanalResumo {
-  canal: string;
-  faturamento: number;
-  pedidos: number;
-  ticket_medio: number;
-  conversao: number;
-  margem: number;
-  variacao: number;
-}
 
 function usuarioAutorizado(usuario: string): boolean {
   const normalized = usuario.trim().toLowerCase();

@@ -1,5 +1,14 @@
 import { getPool } from "../db/sqlserver";
-import type { CanalResumo } from "../routes/ecommerce-disparo";
+
+export interface CanalResumo {
+  canal: string;
+  faturamento: number;
+  pedidos: number;
+  ticket_medio: number;
+  conversao: number;
+  margem: number;
+  variacao: number;
+}
 
 const TABELA = "DOVALE.dbo.[TI-MARKETING_95-VendaEcommerce]";
 

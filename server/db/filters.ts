@@ -18,7 +18,7 @@ const IGNORAR_CODIGOS: Record<string, number[]> = {
 
 // Códigos PERMITIDOS por loja (whitelist — somente esses aparecem)
 const PERMITIR_CODIGOS: Record<string, number[]> = {
-  campinas: [24, 42, 6, 29, 3, 43],       // BEATRIZ, CAMILA, CHICO, Ester, LOJA, MAIARA
+  campinas: [24, 42, 6, 29, 3, 43,21],       // BEATRIZ, CAMILA, CHICO, Ester, LOJA, MAIARA,RODRIGO
 };
 
 // Filtros por nome CONTAINING (auto-descoberta — não precisa manter códigos)

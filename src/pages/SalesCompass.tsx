@@ -1256,11 +1256,14 @@ function RelatoriosView({ loja: initialLoja, isAdmin, onBack }:
 // ── PÁGINA PRINCIPAL
 // ══════════════════════════════════════════════════════════════════════════════
 export default function SalesCompass() {
-  const { user, logout } = useAuth();
+  const { user, logout, refreshUser } = useAuth();
   const navigate = useNavigate();
   const [dark, setDark] = useState(() => localStorage.getItem("dovale_theme") !== "light");
   const [view, setView] = useState<ViewType>("rep");
   const [selectedCategoria, setSelectedCategoria] = useState<Categoria>("A");
+
+  // Atualiza permissões ao abrir o app — reflete mudanças feitas no Hub sem precisar de logout
+  useEffect(() => { refreshUser(); }, []);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);

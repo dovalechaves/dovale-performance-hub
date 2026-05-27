@@ -85,6 +85,7 @@ interface AuthUser {
 interface AuthContextValue {
   user: AuthUser | null;
   can: (permission: Permission) => boolean;
+  refreshUser: () => Promise<void>;
   login: (
     usuario: string,
     displayName: string | undefined,
@@ -389,30 +390,31 @@ const API_BASE = (import.meta.env.VITE_API_URL ?? "http://localhost:3001/api").r
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(loadFromStorage);
 
-  // Silently refresh permissions from DB on every page load
-  useEffect(() => {
+  const refreshUser = useCallback(async () => {
     const stored = loadFromStorage();
     if (!stored?.usuario || !stored?.token) return;
-    fetch(`${API_BASE}/auth/me?usuario=${encodeURIComponent(stored.usuario)}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!data?.apps) return;
-        const refreshed = buildUser(
-          stored.usuario,
-          stored.displayName,
-          stored.token,
-          data.role,
-          data.loja,
-          data.can_access_dashboard,
-          data.can_access_hub,
-          data.apps,
-          data.hub_role
-        );
-        localStorage.setItem("dovale_auth", JSON.stringify(refreshed));
-        setUser(refreshed);
-      })
-      .catch(() => { /* silent fail — keep cached data */ });
+    try {
+      const r = await fetch(`${API_BASE}/auth/me?usuario=${encodeURIComponent(stored.usuario)}`);
+      const data = r.ok ? await r.json() : null;
+      if (!data?.apps) return;
+      const refreshed = buildUser(
+        stored.usuario,
+        stored.displayName,
+        stored.token,
+        data.role,
+        data.loja,
+        data.can_access_dashboard,
+        data.can_access_hub,
+        data.apps,
+        data.hub_role
+      );
+      localStorage.setItem("dovale_auth", JSON.stringify(refreshed));
+      setUser(refreshed);
+    } catch { /* silent fail — keep cached data */ }
   }, []);
+
+  // Silently refresh permissions from DB on every page load
+  useEffect(() => { refreshUser(); }, []);
 
   const login = useCallback((
     usuario: string,
@@ -458,7 +460,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <AuthContext.Provider value={{ user, can, login, logout }}>
+    <AuthContext.Provider value={{ user, can, refreshUser, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

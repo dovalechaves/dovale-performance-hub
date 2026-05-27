@@ -1270,18 +1270,23 @@ export default function SalesCompass() {
   const appConfig = (user as any)?.apps?.salescompass;
   const role      = appConfig?.role ?? "viewer";
   const loja      = appConfig?.loja ?? "l3";
-  // Managers with their own rep code can use RepView for their own carteira
   const repCodigo: number = Number(appConfig?.usu_codigo_sistema) || 0;
   const repLogin  = user?.usuario ?? "";
 
+  // ── Papel no Sales Compass ──────────────────────────────────────────────
+  // admin  → painel completo com seleção de loja
+  // manager → painel da loja fixa com seleção de vendedor
+  // viewer  → apenas a própria carteira
   const isAdmin   = role === "admin" || user?.hubRole === "admin";
-  const isGerente = role === "manager" || role === "admin" || user?.hubRole === "admin";
+  const isGerente = role === "manager" || isAdmin;
+  // Gerente "híbrido" ou vendedor com código próprio → pode ver RepView
+  const hasOwnCarteira = !isAdmin && repCodigo > 0;
 
   useEffect(() => {
-    if (isAdmin)   { setView("admin");   return; }
-    if (isGerente) { setView("gerente"); return; }
-    setView("rep");
-  }, [isAdmin, isGerente]);
+    if (isAdmin)                      { setView("admin");   return; }
+    if (isGerente && !hasOwnCarteira) { setView("gerente"); return; }
+    setView("rep"); // viewer, ou gerente híbrido com código próprio
+  }, [isAdmin, isGerente, hasOwnCarteira]);
 
   const viewLabels: Record<ViewType,string> = {
     rep: "Minha Carteira", categoria: `Categoria ${selectedCategoria}`,
@@ -1305,11 +1310,13 @@ export default function SalesCompass() {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Nav tabs → apenas gerente e admin veem */}
             {isGerente && (
               <div className="hidden sm:flex items-center gap-1">
-                {!isAdmin && (
+                {/* "Minha Carteira" só para gerente híbrido (tem código próprio) */}
+                {hasOwnCarteira && (
                   <button onClick={() => setView("rep")}
-                    className={`px-3 py-1.5 rounded-lg text-xs transition-colors ${view==="rep" ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground hover:text-foreground"}`}>
+                    className={`px-3 py-1.5 rounded-lg text-xs transition-colors ${view==="rep"||view==="categoria" ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground hover:text-foreground"}`}>
                     Minha Carteira
                   </button>
                 )}
@@ -1337,20 +1344,32 @@ export default function SalesCompass() {
 
       {/* Conteúdo */}
       <main className="flex-1 flex flex-col">
-        {view === "rep" && (
+        {/* ── Viewer / Gerente híbrido: minha carteira ──────────────────── */}
+        {(view === "rep" || view === "categoria") && !isGerente && repCodigo === 0 && (
+          // Vendedor sem código de representante configurado
+          <div className="flex-1 flex flex-col items-center justify-center gap-4 text-muted-foreground px-4">
+            <AlertCircle className="w-16 h-16 opacity-20" />
+            <p className="text-lg font-semibold">Sem acesso configurado</p>
+            <p className="text-sm text-center max-w-sm">Nenhum código de representante foi vinculado à sua conta. Solicite ao administrador a configuração do <strong>Rep SCmp</strong> no gerenciamento do Hub.</p>
+          </div>
+        )}
+        {view === "rep" && (hasOwnCarteira || !isGerente) && repCodigo > 0 && (
           <RepView loja={loja} repCodigo={repCodigo} repLogin={repLogin} dark={dark}
             onSetView={setView} onSetCategoria={c => setSelectedCategoria(c)} />
         )}
-        {view === "categoria" && (
+        {view === "categoria" && repCodigo > 0 && (
           <CategoriaView loja={loja} repCodigo={repCodigo} repLogin={repLogin}
             categoria={selectedCategoria} onBack={() => setView("rep")} />
         )}
+        {/* ── Gerente: painel da loja fixa ──────────────────────────────── */}
         {view === "gerente" && (
           <GerenteView loja={loja} repLogin={repLogin} isAdmin={false} onSetView={setView} />
         )}
+        {/* ── Admin: painel com seleção de loja ────────────────────────── */}
         {view === "admin" && (
           <GerenteView loja={loja} repLogin={repLogin} isAdmin={true} onSetView={setView} />
         )}
+        {/* ── Relatórios ──────────────────────────────────────────────── */}
         {view === "relatorios" && (
           <RelatoriosView loja={loja} isAdmin={isAdmin}
             onBack={() => setView(isAdmin ? "admin" : isGerente ? "gerente" : "rep")} />

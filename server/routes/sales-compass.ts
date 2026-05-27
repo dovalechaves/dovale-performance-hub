@@ -70,25 +70,42 @@ function toTitleCase(str: string): string {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// GET /api/sales-compass/clientes?loja=l3&rep_codigo=571
+// GET /api/sales-compass/clientes?loja=l3&rep_codigo=571  (SSE stream)
+// Resolve o Cloudflare 524 mantendo a conexão viva com pings enquanto o
+// Firebird processa. Os dados chegam em chunks progressivos para o frontend.
 // ────────────────────────────────────────────────────────────────────────────
 router.get("/clientes", async (req, res) => {
+  const lojaKey = String(req.query.loja || "").toLowerCase().trim();
+  const repCodigoStr = req.query.rep_codigo;
+
+  if (repCodigoStr === undefined || repCodigoStr === "") {
+    return res.status(400).json({ error: "rep_codigo é obrigatório." });
+  }
+  if (!lojaKey) {
+    return res.status(400).json({ error: "loja é obrigatória." });
+  }
+
+  const repCodigo = Number(repCodigoStr);
+  const fbKey = LOJA_TO_FB[lojaKey];
+  if (!fbKey) {
+    return res.status(404).json({ error: `Loja "${lojaKey}" não configurada no Sales Compass.` });
+  }
+
+  // ── Abre SSE imediatamente — evita 524 do Cloudflare ────────────────────
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
+
+  const send = (event: string, data: unknown) =>
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+
+  const pingInterval = setInterval(() => res.write(": ping\n\n"), 25000);
+  req.on("close", () => clearInterval(pingInterval));
+
   try {
-    const lojaKey = String(req.query.loja || "").toLowerCase().trim();
-    const repCodigoStr = req.query.rep_codigo;
-
-    if (repCodigoStr === undefined || repCodigoStr === "") {
-      return res.status(400).json({ error: "rep_codigo é obrigatório." });
-    }
-    if (!lojaKey) {
-      return res.status(400).json({ error: "loja é obrigatória." });
-    }
-
-    const repCodigo = Number(repCodigoStr);
-    const fbKey = LOJA_TO_FB[lojaKey];
-    if (!fbKey) {
-      return res.status(404).json({ error: `Loja "${lojaKey}" não configurada no Sales Compass.` });
-    }
+    send("progress", { status: "querying", message: "Consultando base de dados..." });
 
     const whereRep = repCodigo !== 0
       ? "(c.cli_rep_codigo = ? OR CAST(c.cli_rep_codigo AS INTEGER) = ?)"
@@ -117,16 +134,13 @@ router.get("/clientes", async (req, res) => {
     `;
 
     const params = repCodigo !== 0 ? [String(repCodigo), repCodigo] : [];
-
     const rows = await queryFirebird<any>(fbKey, fbSql, params);
 
-    // Agrupa por cliente
+    send("progress", { status: "processing", message: `Processando ${rows.length} registros...` });
+
+    // ── Agrupa por cliente ───────────────────────────────────────────────
     const clientesMap: Record<string, {
-      id: string;
-      nome: string;
-      telefone: string;
-      cidade: string;
-      repId: any;
+      id: string; nome: string; telefone: string; cidade: string; repId: any;
       pedidos: Map<any, { data: any; valor: number }>;
       produtos: Record<string, number>;
     }> = {};
@@ -154,44 +168,51 @@ router.get("/clientes", async (req, res) => {
       }
     }
 
-    const clientes = Object.values(clientesMap).map((c) => {
-      const pedidos = Array.from(c.pedidos.values()).sort(
-        (a, b) => new Date(b.data).getTime() - new Date(a.data).getTime()
-      );
-      const ultima = pedidos[0] ?? null;
-      const valorTotal = pedidos.reduce((acc, p) => acc + p.valor, 0);
-      const ticketMedio = pedidos.length > 0 ? valorTotal / pedidos.length : 0;
-      const diasSemComprar = ultima?.data
-        ? Math.floor((Date.now() - new Date(ultima.data).getTime()) / 86400000)
-        : 9999;
+    // ── Mapeia para objeto final e envia em batches ──────────────────────
+    const allEntries = Object.values(clientesMap);
+    const BATCH_SIZE = 150;
 
-      const topProdutos = Object.entries(c.produtos)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3)
-        .map(([n]) => n);
+    for (let i = 0; i < allEntries.length; i += BATCH_SIZE) {
+      const batch = allEntries.slice(i, i + BATCH_SIZE).map((c) => {
+        const pedidos = Array.from(c.pedidos.values()).sort(
+          (a, b) => new Date(b.data).getTime() - new Date(a.data).getTime()
+        );
+        const ultima = pedidos[0] ?? null;
+        const valorTotal = pedidos.reduce((acc, p) => acc + p.valor, 0);
+        const ticketMedio = pedidos.length > 0 ? valorTotal / pedidos.length : 0;
+        const diasSemComprar = ultima?.data
+          ? Math.floor((Date.now() - new Date(ultima.data).getTime()) / 86400000)
+          : 9999;
 
-      // Frequência mensal: pelo menos 3 pedidos únicos e comprou há ≤30 dias
-      const frequenciaMensal = pedidos.length >= 3 && diasSemComprar <= 30;
+        const topProdutos = Object.entries(c.produtos)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3)
+          .map(([n]) => n);
 
-      return {
-        id: c.id,
-        nome: c.nome,
-        telefone: c.telefone,
-        cidade: c.cidade,
-        categoria: ticketMedio > 800 ? "A" : ticketMedio > 500 ? "B" : ticketMedio > 300 ? "C" : "D",
-        produtoFavorito: topProdutos.length > 0 ? topProdutos.join(", ") : "Diversos",
-        ultimaCompra: ultima?.data ? new Date(ultima.data).toISOString() : new Date().toISOString(),
-        valorUltimaCompra: ultima?.valor ?? 0,
-        ticketMedio,
-        frequenciaMensal,
-        repId: c.repId,
-      };
-    });
+        return {
+          id: c.id,
+          nome: c.nome,
+          telefone: c.telefone,
+          cidade: c.cidade,
+          categoria: ticketMedio > 800 ? "A" : ticketMedio > 500 ? "B" : ticketMedio > 300 ? "C" : "D",
+          produtoFavorito: topProdutos.length > 0 ? topProdutos.join(", ") : "Diversos",
+          ultimaCompra: ultima?.data ? new Date(ultima.data).toISOString() : new Date().toISOString(),
+          valorUltimaCompra: ultima?.valor ?? 0,
+          ticketMedio,
+          frequenciaMensal: pedidos.length >= 3 && diasSemComprar <= 30,
+          repId: c.repId,
+        };
+      });
+      send("chunk", batch);
+    }
 
-    res.json(clientes);
+    send("done", { total: allEntries.length });
   } catch (err: any) {
     console.error("[sales-compass] /clientes:", err.message);
-    res.status(500).json({ error: err.message || "Erro ao buscar clientes." });
+    send("error", { message: err.message || "Erro ao buscar clientes." });
+  } finally {
+    clearInterval(pingInterval);
+    res.end();
   }
 });
 

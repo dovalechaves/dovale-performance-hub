@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
@@ -124,6 +124,79 @@ function isPotencialHoje(c: Cliente): boolean {
 
 function moeda(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+// ── Hook SSE: carrega clientes via streaming (evita Cloudflare 524) ──────────
+const _clientesCache: Map<string, { data: Cliente[]; ts: number }> = new Map();
+const CACHE_TTL = 5 * 60 * 1000;
+
+function useSseClientes(loja: string, repCodigo: number) {
+  const cacheKey = `${loja}:${repCodigo}`;
+
+  const getCached = () => {
+    const c = _clientesCache.get(cacheKey);
+    return c && Date.now() - c.ts < CACHE_TTL ? c.data : null;
+  };
+
+  const [clientes, setClientes] = useState<Cliente[]>(() => getCached() ?? []);
+  const [isLoading, setIsLoading] = useState(() => !getCached() && !!loja);
+  const [progress, setProgress] = useState<string | null>(null);
+  const esRef = useRef<EventSource | null>(null);
+
+  useEffect(() => {
+    if (!loja) return;
+    const cached = getCached();
+    if (cached) {
+      setClientes(cached);
+      setIsLoading(false);
+      return;
+    }
+
+    setClientes([]);
+    setIsLoading(true);
+    setProgress("Conectando...");
+
+    const url = `${API_BASE}/sales-compass/clientes?loja=${encodeURIComponent(loja)}&rep_codigo=${repCodigo}`;
+    const es = new EventSource(url);
+    esRef.current = es;
+    const accumulated: Cliente[] = [];
+
+    es.addEventListener("progress", (e: MessageEvent) => {
+      const d = JSON.parse(e.data);
+      setProgress(d.message ?? "Carregando...");
+    });
+
+    es.addEventListener("chunk", (e: MessageEvent) => {
+      const chunk: Cliente[] = JSON.parse(e.data);
+      accumulated.push(...chunk);
+      setClientes([...accumulated]);
+    });
+
+    es.addEventListener("done", () => {
+      _clientesCache.set(cacheKey, { data: accumulated, ts: Date.now() });
+      setIsLoading(false);
+      setProgress(null);
+      es.close();
+    });
+
+    es.addEventListener("error", (e: MessageEvent) => {
+      try { console.error("[SSE clientes] error:", JSON.parse(e.data).message); } catch {}
+      setIsLoading(false);
+      setProgress(null);
+      es.close();
+    });
+
+    es.onerror = () => {
+      setIsLoading(false);
+      setProgress(null);
+      es.close();
+    };
+
+    return () => { es.close(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cacheKey]);
+
+  return { clientes, isLoading, progress };
 }
 
 // ── Componente: número animado ────────────────────────────────────────────────
@@ -432,11 +505,7 @@ function RepView({ loja, repCodigo, repLogin, dark, onSetView, onSetCategoria }:
     staleTime: 1000 * 60 * 5,
   });
 
-  const { data: clientes = [], isLoading: cLoading } = useQuery<Cliente[]>({
-    queryKey: ["sc-clientes", loja, repCodigo],
-    queryFn: () => fetch(`${API_BASE}/sales-compass/clientes?loja=${loja}&rep_codigo=${repCodigo}`).then(r => r.json()),
-    staleTime: 1000 * 60 * 5,
-  });
+  const { clientes, isLoading: cLoading, progress: clientesProgress } = useSseClientes(loja, repCodigo);
 
   const { data: crmLogs = [] } = useQuery<CrmLog[]>({
     queryKey: ["sc-crm-logs", loja],
@@ -479,7 +548,10 @@ function RepView({ loja, repCodigo, repLogin, dark, onSetView, onSetCategoria }:
   if (isLoading) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-4 text-muted-foreground">
       <Loader2 className="w-8 h-8 animate-spin text-primary" />
-      <p className="text-sm">Carregando carteira...</p>
+      <p className="text-sm">{clientesProgress ?? "Carregando carteira..."}</p>
+      {clientes.length > 0 && (
+        <p className="text-xs text-primary">{clientes.length} clientes carregados...</p>
+      )}
     </div>
   );
 
@@ -630,11 +702,7 @@ function CategoriaView({ loja, repCodigo, repLogin, categoria, onBack }:
   const [crmModal, setCrmModal] = useState<Cliente | null>(null);
   const [glowMap, setGlowMap] = useState<Record<string, "success" | "error" | "info">>({});
 
-  const { data: clientes = [], isLoading } = useQuery<Cliente[]>({
-    queryKey: ["sc-clientes", loja, repCodigo],
-    queryFn: () => fetch(`${API_BASE}/sales-compass/clientes?loja=${loja}&rep_codigo=${repCodigo}`).then(r => r.json()),
-    staleTime: 1000 * 60 * 5,
-  });
+  const { clientes, isLoading, progress: clientesProgress } = useSseClientes(loja, repCodigo);
 
   const { data: crmLogs = [] } = useQuery<CrmLog[]>({
     queryKey: ["sc-crm-logs", loja],
@@ -682,7 +750,11 @@ function CategoriaView({ loja, repCodigo, repLogin, categoria, onBack }:
       </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+        <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
+          <Loader2 className="w-6 h-6 animate-spin text-primary" />
+          <p className="text-sm">{clientesProgress ?? "Carregando..."}</p>
+          {clientes.length > 0 && <p className="text-xs text-primary">{clientes.length} carregados...</p>}
+        </div>
       ) : (
         <ClienteLista clientes={clientesCategoria} glowMap={glowMap} statusMap={statusMap}
           onCrm={(c) => setCrmModal(c)} />
@@ -723,12 +795,7 @@ function GerenteView({ loja: initialLoja, repLogin, isAdmin, onSetView }:
     staleTime: 1000 * 60 * 5,
   });
 
-  const { data: clientes = [], isLoading: cLoading } = useQuery<Cliente[]>({
-    queryKey: ["sc-clientes", loja, repCodigo],
-    queryFn: () => fetch(`${API_BASE}/sales-compass/clientes?loja=${loja}&rep_codigo=${repCodigo}`).then(r => r.json()),
-    enabled: !!loja,
-    staleTime: 1000 * 60 * 5,
-  });
+  const { clientes, isLoading: cLoading, progress: clientesProgress } = useSseClientes(loja, repCodigo);
 
   const { data: crmLogs = [] } = useQuery<CrmLog[]>({
     queryKey: ["sc-crm-logs", loja],
@@ -835,7 +902,11 @@ function GerenteView({ loja: initialLoja, repLogin, isAdmin, onSetView }:
 
       {/* Lista de clientes */}
       {cLoading || repsLoading ? (
-        <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+        <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
+          <Loader2 className="w-6 h-6 animate-spin text-primary" />
+          <p className="text-sm">{clientesProgress ?? "Carregando..."}</p>
+          {clientes.length > 0 && <p className="text-xs text-primary">{clientes.length} clientes carregados...</p>}
+        </div>
       ) : (
         <ClienteLista clientes={clientesOrdenados} glowMap={glowMap} statusMap={statusMap}
           onCrm={(c) => setCrmModal(c)}

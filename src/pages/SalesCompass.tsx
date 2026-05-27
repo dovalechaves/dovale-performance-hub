@@ -7,7 +7,7 @@ import {
   Send, ChevronRight, Phone, BarChart3, ClipboardList, ChevronDown,
   TrendingUp, Download, Loader2, CheckCircle2, Circle, History,
   Search, Briefcase, PieChart, Filter, ShieldCheck, ChevronLeft, Target,
-  ShoppingBag,
+  ShoppingBag, Store, FileText,
 } from "lucide-react";
 import logoBlue from "@/assets/logo-blue.png";
 import logoWhite from "@/assets/logo-white.png";
@@ -756,12 +756,20 @@ function GerenteView({ loja: initialLoja, repLogin, isAdmin, onSetView }:
     staleTime: 300_000,
   });
 
-  const vendedoresComTodos = useMemo<Rep[]>(() => [{ rep_codigo: 0, rep_nome: `Todos da loja` }, ...reps], [reps]);
+  const lojaLabel = SC_LOJAS.find(l => l.value === loja)?.label || loja.toUpperCase();
+  const vendedoresComTodos = useMemo<Rep[]>(() => [{ rep_codigo: 0, rep_nome: `Toda a Loja (${lojaLabel})` }, ...reps], [reps, lojaLabel]);
 
   const { data: vendedor } = useQuery<VendedorInfo>({
     queryKey: ["sc-vendedor", loja, repCodigo],
     queryFn: () => fetch(`${API_BASE}/sales-compass/vendedor?loja=${loja}&rep_codigo=${repCodigo}`).then(r=>r.json()),
     enabled: !!loja && selectedRep !== null, staleTime: 300_000,
+  });
+
+  // Performance da loja inteira (rep_codigo=0) — usada no 4º card
+  const { data: performanceLoja } = useQuery<VendedorInfo>({
+    queryKey: ["sc-vendedor-loja", loja],
+    queryFn: () => fetch(`${API_BASE}/sales-compass/vendedor?loja=${loja}&rep_codigo=0`).then(r=>r.json()),
+    enabled: !!loja, staleTime: 300_000,
   });
 
   const { clientes, isLoading: cLoading, progress } = useSseClientes(loja, repCodigo);
@@ -819,7 +827,6 @@ function GerenteView({ loja: initialLoja, repLogin, isAdmin, onSetView }:
     setCrmModal(null);
   };
 
-  const lojaLabel = SC_LOJAS.find(l => l.value === loja)?.label || loja.toUpperCase();
   const motiEmoji = (m: string) => m.includes("comprou") && !m.includes("nao") ? "😊" : m.includes("nao") || m.includes("cancelado") ? "😢" : m.includes("retornar") ? "⏰" : "💬";
 
   const selectRep = (v: string) => {
@@ -844,35 +851,42 @@ function GerenteView({ loja: initialLoja, repLogin, isAdmin, onSetView }:
               <p className="text-muted-foreground text-sm">Selecione uma unidade para visualizar</p>
             </div>
           </div>
-          {/* Desktop: botões de loja */}
-          <div className="hidden md:flex flex-wrap gap-2">
-            {SC_LOJAS.map(l => (
-              <button key={l.value} onClick={() => setLoja(l.value)}
-                className={`px-4 py-2 rounded-xl text-sm font-bold border whitespace-nowrap transition-all ${loja === l.value ? "bg-primary text-primary-foreground border-primary shadow-md" : "bg-card border-border hover:bg-muted"}`}>
-                {l.label}
-              </button>
-            ))}
-          </div>
-          {/* Mobile: select */}
-          <div className="md:hidden w-full">
-            <div className="relative">
-              <select value={loja} onChange={e => setLoja(e.target.value)}
-                className="appearance-none w-full bg-card border border-border rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-primary/20 shadow-sm">
-                {SC_LOJAS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
-              </select>
-              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+          <div className="flex flex-col sm:flex-row gap-3 items-center w-full lg:w-auto">
+            {/* Botão Relatório */}
+            <button onClick={() => onSetView("relatorios")}
+              className="w-full sm:w-auto flex items-center justify-center gap-2 bg-primary text-primary-foreground px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-primary/90 shadow-md active:scale-95">
+              <FileText className="h-4 w-4" /> Relatório
+            </button>
+            {/* Desktop: botões de loja */}
+            <div className="hidden md:flex flex-wrap gap-2">
+              {SC_LOJAS.map(l => (
+                <button key={l.value} onClick={() => setLoja(l.value)}
+                  className={`px-4 py-2 rounded-xl text-sm font-bold border whitespace-nowrap transition-all ${loja === l.value ? "bg-primary text-primary-foreground border-primary shadow-md" : "bg-card border-border hover:bg-muted"}`}>
+                  {l.label}
+                </button>
+              ))}
+            </div>
+            {/* Mobile: select */}
+            <div className="md:hidden w-full">
+              <div className="relative">
+                <select value={loja} onChange={e => setLoja(e.target.value)}
+                  className="appearance-none w-full bg-card border border-border rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-primary/20 shadow-sm">
+                  {SC_LOJAS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+              </div>
             </div>
           </div>
         </div>
       ) : (
-        <div className="flex items-center justify-between gap-4 mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div>
-            <h1 className="text-2xl font-bold">Painel do Gerente</h1>
-            <p className="text-muted-foreground text-sm">Monitorando: <span className="font-bold text-primary">{lojaLabel}</span></p>
+            <h1 className="text-2xl sm:text-3xl font-bold">Painel do Gerente</h1>
+            <p className="text-muted-foreground text-sm">Monitorando unidade: <span className="font-bold text-primary">{lojaLabel}</span></p>
           </div>
           <button onClick={() => onSetView("relatorios")}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-border bg-muted text-sm text-muted-foreground hover:text-foreground hover:bg-primary/10">
-            <ClipboardList className="h-4 w-4" /> Relatórios
+            className="inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-primary/90 shadow-md active:scale-95">
+            <FileText className="h-4 w-4" /> Relatório
           </button>
         </div>
       )}
@@ -914,9 +928,9 @@ function GerenteView({ loja: initialLoja, repLogin, isAdmin, onSetView }:
         {/* ── Conteúdo principal ──────────────────────────── */}
         <div className="lg:col-span-9 space-y-6 relative min-h-[400px]">
           {selectedRep === null ? (
-            <div className="h-64 flex flex-col items-center justify-center border-2 border-dashed border-border rounded-3xl text-muted-foreground">
-              <Users className="h-12 w-12 mb-4 opacity-20" />
-              <p>Selecione um vendedor para ver a carteira</p>
+            <div className="h-96 flex flex-col items-center justify-center border-2 border-dashed border-border rounded-3xl text-muted-foreground">
+              <Store className="h-16 w-16 mb-4 opacity-10" />
+              <p>Selecione um colaborador da loja <strong className="text-foreground">{lojaLabel}</strong></p>
             </div>
           ) : (
             <>
@@ -931,31 +945,67 @@ function GerenteView({ loja: initialLoja, repLogin, isAdmin, onSetView }:
 
               {/* Cards resumo */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-                {[
-                  { label: "Clientes em carteira", val: stats.totalEmCarteira, icon: <Users className="h-5 w-5" />, color: "text-blue-500 bg-blue-500/10",
-                    onClick: () => { setMostrarTodaCarteira(true); setFiltroMotivo("TODOS"); setFiltroContatados(false); }, active: mostrarTodaCarteira },
-                  { label: "Potenciais hoje", val: stats.totalPotenciais, icon: <TrendingUp className="h-5 w-5" />, color: "text-orange-500 bg-orange-500/10",
-                    onClick: () => { setMostrarTodaCarteira(false); setFiltroMotivo("TODOS"); setFiltroContatados(false); }, active: !mostrarTodaCarteira && !filtroContatados && filtroMotivo === "TODOS" },
-                  { label: "Contatados hoje", val: stats.totalContatados, icon: <CheckCircle2 className="h-5 w-5" />, color: "text-green-500 bg-green-500/10",
-                    onClick: () => { setMostrarTodaCarteira(false); setFiltroMotivo("TODOS"); setFiltroContatados(true); }, active: filtroContatados },
-                  { label: "Meta % loja", val: vendedor?.meta ? Math.round((vendedor.realizado / vendedor.meta) * 100) : 0, icon: <Target className="h-5 w-5" />, color: "text-primary bg-primary/10",
-                    onClick: undefined, active: false, suffix: "%" },
-                ].map((card, i) => (
-                  <div key={i} onClick={card.onClick}
-                    className={`bg-card border p-4 sm:p-5 rounded-2xl shadow-sm flex flex-col gap-1.5 transition-all ${card.onClick ? "cursor-pointer hover:-translate-y-1 hover:shadow-md" : ""} ${card.active ? "border-primary ring-2 ring-primary/20 bg-primary/5" : "border-border"}`}>
-                    <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${card.color}`}>{card.icon}</div>
-                    <p className="text-xs text-muted-foreground font-medium">{card.label}</p>
-                    <p className="text-xl sm:text-2xl font-bold"><AnimatedNumber value={card.val} />{(card as any).suffix}</p>
-                    {card.active && i < 3 && <p className="text-[10px] text-primary font-bold animate-pulse uppercase">Vendo agora</p>}
+                {/* Card 1 – Clientes em carteira */}
+                <div onClick={() => { setMostrarTodaCarteira(true); setFiltroMotivo("TODOS"); setFiltroContatados(false); }}
+                  className={`bg-card border p-4 sm:p-5 rounded-2xl shadow-sm flex items-center gap-3 sm:gap-4 hover:-translate-y-1 hover:shadow-md transition-all cursor-pointer ${mostrarTodaCarteira ? "border-primary ring-2 ring-primary/20 bg-primary/5" : "border-border"}`}>
+                  <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-500 shrink-0"><Users className="h-5 w-5 sm:h-6 sm:w-6" /></div>
+                  <div>
+                    <p className="text-xs text-muted-foreground font-medium">Clientes em Carteira</p>
+                    <p className="text-xl sm:text-2xl font-bold"><AnimatedNumber value={stats.totalEmCarteira} /></p>
+                    {mostrarTodaCarteira && <p className="text-[10px] text-primary font-bold animate-pulse uppercase">Lista Completa</p>}
                   </div>
-                ))}
+                </div>
+                {/* Card 2 – Potenciais hoje */}
+                <div onClick={() => { setMostrarTodaCarteira(false); setFiltroMotivo("TODOS"); setFiltroContatados(false); }}
+                  className={`bg-card border p-4 sm:p-5 rounded-2xl shadow-sm flex items-center gap-3 sm:gap-4 hover:-translate-y-1 hover:shadow-md transition-all cursor-pointer ${!mostrarTodaCarteira && !filtroContatados && filtroMotivo === "TODOS" ? "border-orange-500/20 bg-orange-50/30 ring-2 ring-orange-500/20" : "border-border"}`}>
+                  <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-xl bg-orange-500/10 flex items-center justify-center text-orange-500 shrink-0"><TrendingUp className="h-5 w-5 sm:h-6 sm:w-6" /></div>
+                  <div>
+                    <p className="text-xs text-muted-foreground font-medium">Potenciais Hoje</p>
+                    <p className="text-xl sm:text-2xl font-bold"><AnimatedNumber value={stats.totalPotenciais} /></p>
+                    {!mostrarTodaCarteira && !filtroContatados && filtroMotivo === "TODOS" && <p className="text-[10px] text-orange-500 font-bold animate-pulse uppercase">Vendo Hoje</p>}
+                  </div>
+                </div>
+                {/* Card 3 – Contatados hoje */}
+                <div onClick={() => { setMostrarTodaCarteira(false); setFiltroMotivo("TODOS"); setFiltroContatados(true); }}
+                  className={`bg-card border p-4 sm:p-5 rounded-2xl shadow-sm flex items-center gap-3 sm:gap-4 hover:-translate-y-1 hover:shadow-md transition-all cursor-pointer ${filtroContatados ? "border-green-500/20 bg-green-50/30 ring-2 ring-green-500/20" : "border-border"}`}>
+                  <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-xl bg-green-500/10 flex items-center justify-center text-green-500 shrink-0"><CheckCircle2 className="h-5 w-5 sm:h-6 sm:w-6" /></div>
+                  <div>
+                    <p className="text-xs text-muted-foreground font-medium">Contatados Hoje</p>
+                    <p className="text-xl sm:text-2xl font-bold"><AnimatedNumber value={stats.totalContatados} /></p>
+                    {filtroContatados && <p className="text-[10px] text-green-500 font-bold animate-pulse uppercase">Vendo Contatados</p>}
+                  </div>
+                </div>
+                {/* Card 4 – Meta x Realizado (loja inteira) */}
+                <div className="bg-card border border-border p-4 sm:p-5 rounded-2xl shadow-sm flex items-center gap-3 sm:gap-4 hover:-translate-y-1 hover:shadow-md transition-all">
+                  <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-xl bg-primary/10 flex items-center justify-center text-primary shrink-0"><Target className="h-5 w-5 sm:h-6 sm:w-6" /></div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] sm:text-xs text-muted-foreground font-medium uppercase tracking-wider">Meta x Realizado</p>
+                    <p className="text-xl sm:text-2xl font-bold text-primary">
+                      <AnimatedNumber value={performanceLoja?.meta && performanceLoja.meta > 0 ? Math.round((performanceLoja.realizado / performanceLoja.meta) * 100) : 0} />%
+                    </p>
+                    {performanceLoja?.meta && performanceLoja.meta > 0 && (
+                      <>
+                        <div className="w-full h-1.5 bg-muted rounded-full mt-1 overflow-hidden">
+                          <div className={`h-full rounded-full transition-all duration-1000 ${
+                            (performanceLoja.realizado / performanceLoja.meta) >= 1 ? "bg-yellow-400 shadow-[0_0_6px_rgba(250,204,21,.6)]" :
+                            (performanceLoja.realizado / performanceLoja.meta) >= 0.71 ? "bg-green-500" :
+                            (performanceLoja.realizado / performanceLoja.meta) >= 0.50 ? "bg-yellow-500" : "bg-red-500"
+                          }`} style={{ width: `${Math.min((performanceLoja.realizado / performanceLoja.meta) * 100, 100)}%` }} />
+                        </div>
+                        <p className="text-[9px] text-muted-foreground mt-1 truncate">
+                          Loja: <span className="font-semibold text-foreground">{moeda(performanceLoja.realizado)}</span>
+                        </p>
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
 
-              {/* Meta barra */}
-              {vendedor && vendedor.meta > 0 && (
+              {/* Meta barra do vendedor selecionado */}
+              {vendedor && vendedor.meta > 0 && selectedRep && selectedRep.rep_codigo !== 0 && (
                 <div className="bg-card border border-border p-4 rounded-2xl">
                   <div className="flex justify-between text-sm mb-2">
-                    <span className="text-muted-foreground font-medium">{selectedRep.rep_codigo === 0 ? "Loja" : selectedRep.rep_nome}</span>
+                    <span className="text-muted-foreground font-medium">{selectedRep.rep_nome}</span>
                     <span className="font-bold">{moeda(vendedor.realizado)} / {moeda(vendedor.meta)}</span>
                   </div>
                   <MetaProgress meta={vendedor.meta} realizado={vendedor.realizado} />
@@ -1220,7 +1270,8 @@ export default function SalesCompass() {
   const appConfig = (user as any)?.apps?.salescompass;
   const role      = appConfig?.role ?? "viewer";
   const loja      = appConfig?.loja ?? "l3";
-  const repCodigo: number = role === "viewer" ? (Number(appConfig?.usu_codigo_sistema) || 0) : 0;
+  // Managers with their own rep code can use RepView for their own carteira
+  const repCodigo: number = Number(appConfig?.usu_codigo_sistema) || 0;
   const repLogin  = user?.usuario ?? "";
 
   const isAdmin   = role === "admin" || user?.hubRole === "admin";

@@ -5,7 +5,9 @@ import { useAuth } from "@/context/AuthContext";
 import {
   ArrowLeft, Sun, Moon, LogOut, Users, Sparkles, AlertCircle, X,
   Send, ChevronRight, Phone, BarChart3, ClipboardList, ChevronDown,
-  TrendingUp, Download, Loader2,
+  TrendingUp, Download, Loader2, CheckCircle2, Circle, History,
+  Search, Briefcase, PieChart, Filter, ShieldCheck, ChevronLeft, Target,
+  ShoppingBag,
 } from "lucide-react";
 import logoBlue from "@/assets/logo-blue.png";
 import logoWhite from "@/assets/logo-white.png";
@@ -13,49 +15,23 @@ import { toast } from "sonner";
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? "http://localhost:3001/api").replace(/\/$/, "");
 
-// ── Tipos ───────────────────────────────────────────────────────────────────
+// ── Tipos ────────────────────────────────────────────────────────────────────
 type Categoria = "A" | "B" | "C" | "D";
 type ViewType = "rep" | "categoria" | "gerente" | "admin" | "relatorios";
 
 interface Cliente {
-  id: string;
-  nome: string;
-  telefone: string;
-  cidade: string;
-  categoria: Categoria;
-  ultimaCompra: string;
-  valorUltimaCompra: number;
-  ticketMedio: number;
-  frequenciaMensal: boolean;
-  produtoFavorito: string;
-  repId?: number;
+  id: string; nome: string; telefone: string; cidade: string;
+  categoria: Categoria; ultimaCompra: string; valorUltimaCompra: number;
+  ticketMedio: number; frequenciaMensal: boolean; produtoFavorito: string; repId?: number;
 }
-
-interface VendedorInfo {
-  nome: string;
-  loja: string;
-  meta: number;
-  realizado: number;
-}
-
+interface VendedorInfo { nome: string; loja: string; meta: number; realizado: number; }
 interface CrmLog {
-  dataFull: string;
-  loja: string;
-  clienteId: number;
-  nomeCliente: string;
-  telefone: string;
-  status: string;
-  obs: string;
-  rep_codigo: number;
-  repLogin: string;
+  dataFull: string; loja: string; clienteId: number; nomeCliente: string;
+  telefone: string; status: string; obs: string; rep_codigo: number; repLogin: string;
 }
+interface Rep { rep_codigo: number; rep_nome: string; }
 
-interface Rep {
-  rep_codigo: number;
-  rep_nome: string;
-}
-
-// ── Constantes de categoria ──────────────────────────────────────────────────
+// ── Constantes ────────────────────────────────────────────────────────────────
 const categoriaInfo: Record<Categoria, { titulo: string; descricao: string; ticket: string }> = {
   A: { titulo: "Categoria A", descricao: "Clientes premium, alta frequência", ticket: "Acima de R$ 801" },
   B: { titulo: "Categoria B", descricao: "Clientes recorrentes de médio porte", ticket: "R$ 501 a R$ 800" },
@@ -63,20 +39,20 @@ const categoriaInfo: Record<Categoria, { titulo: string; descricao: string; tick
   D: { titulo: "Categoria D", descricao: "Clientes esporádicos a reativar", ticket: "Até R$ 300" },
 };
 
-const catClasses: Record<Categoria, { text: string; bg: string; ring: string; border: string }> = {
-  A: { text: "text-indigo-400", bg: "bg-indigo-500/10", ring: "ring-indigo-500/30 hover:ring-indigo-500/70", border: "border-indigo-500/40" },
-  B: { text: "text-amber-400",  bg: "bg-amber-500/10",  ring: "ring-amber-500/30 hover:ring-amber-500/70",   border: "border-amber-500/40"  },
-  C: { text: "text-pink-400",   bg: "bg-pink-500/10",   ring: "ring-pink-500/30 hover:ring-pink-500/70",     border: "border-pink-500/40"   },
-  D: { text: "text-red-400",    bg: "bg-red-500/10",    ring: "ring-red-500/30 hover:ring-red-500/70",       border: "border-red-500/40"    },
+const catClasses: Record<Categoria, { text: string; bg: string; ring: string }> = {
+  A: { text: "text-indigo-400", bg: "bg-indigo-500/10", ring: "ring-indigo-500/30 hover:ring-indigo-500/70" },
+  B: { text: "text-amber-400",  bg: "bg-amber-500/10",  ring: "ring-amber-500/30 hover:ring-amber-500/70"   },
+  C: { text: "text-pink-400",   bg: "bg-pink-500/10",   ring: "ring-pink-500/30 hover:ring-pink-500/70"     },
+  D: { text: "text-red-400",    bg: "bg-red-500/10",    ring: "ring-red-500/30 hover:ring-red-500/70"       },
 };
 
 const SC_LOJAS = [
-  { value: "l3",       label: "Rio de Janeiro" },
-  { value: "l2",       label: "Santana" },
-  { value: "bh",       label: "Belo Horizonte" },
-  { value: "campinas", label: "Campinas" },
-  { value: "riopreto", label: "Rio Preto" },
-  { value: "fortaleza",label: "Fortaleza" },
+  { value: "l3",        label: "Rio de Janeiro" },
+  { value: "l2",        label: "Santana"        },
+  { value: "bh",        label: "Belo Horizonte" },
+  { value: "campinas",  label: "Campinas"       },
+  { value: "riopreto",  label: "Rio Preto"      },
+  { value: "fortaleza", label: "Fortaleza"      },
 ];
 
 const STATUS_LABELS: Record<string, string> = {
@@ -86,7 +62,22 @@ const STATUS_LABELS: Record<string, string> = {
   cancelado_agendamento: "Cancelado",
 };
 
-// ── Utilidades ───────────────────────────────────────────────────────────────
+const GLOW_CSS = `
+  @keyframes glow-pulse {
+    0%, 100% { box-shadow: 0 0 0px transparent; }
+    50% { box-shadow: 0 0 15px var(--glow-color); }
+  }
+  .glow-success { border-color: #22c55e !important; border-width: 2px;
+    --glow-color: rgba(34,197,94,.6); animation: glow-pulse 1.2s ease-in-out 3; }
+  .glow-error   { border-color: #ef4444 !important; border-width: 2px;
+    --glow-color: rgba(239,68,68,.6); animation: glow-pulse 1.2s ease-in-out 3; }
+  .glow-info    { border-color: #3b82f6 !important; border-width: 2px;
+    --glow-color: rgba(59,130,246,.6); animation: glow-pulse 1.2s ease-in-out 3; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+`;
+
+// ── Utilitários ───────────────────────────────────────────────────────────────
 function diasDesde(iso: string): number {
   return Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
 }
@@ -103,10 +94,10 @@ const { totalDiasUteis, diaUtilDeHoje } = (() => {
   const hoje = new Date();
   let total = 0, utilHoje = 0;
   const ano = hoje.getFullYear(), mes = hoje.getMonth();
-  const ultimoDia = new Date(ano, mes+1, 0).getDate();
-  for (let dia = 1; dia <= ultimoDia; dia++) {
-    const d = new Date(ano, mes, dia);
-    if (isDiaUtil(d)) { total++; if (dia <= hoje.getDate()) utilHoje = total; }
+  const ultimo = new Date(ano, mes + 1, 0).getDate();
+  for (let d = 1; d <= ultimo; d++) {
+    const dt = new Date(ano, mes, d);
+    if (isDiaUtil(dt)) { total++; if (d <= hoje.getDate()) utilHoje = total; }
   }
   return { totalDiasUteis: total, diaUtilDeHoje: utilHoje === 0 ? 1 : utilHoje };
 })();
@@ -126,118 +117,73 @@ function moeda(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
-// ── Hook SSE: carrega clientes via streaming (evita Cloudflare 524) ──────────
-const _clientesCache: Map<string, { data: Cliente[]; ts: number }> = new Map();
+function glowClass(id: string, gm: Record<string, any>, sm: Record<string, string>) {
+  const s = gm[id] || sm[id];
+  if (s === "success" || s === "comprou") return "glow-success";
+  if (s === "error" || s === "nao_comprou" || s === "cancelado_agendamento") return "glow-error";
+  if (s === "info" || s === "retornar_contato") return "glow-info";
+  return "";
+}
+
+// ── Hook SSE: clientes com streaming ─────────────────────────────────────────
+const _cache: Map<string, { data: Cliente[]; ts: number }> = new Map();
 const CACHE_TTL = 5 * 60 * 1000;
 
 function useSseClientes(loja: string, repCodigo: number) {
-  const cacheKey = `${loja}:${repCodigo}`;
-
-  const getCached = () => {
-    const c = _clientesCache.get(cacheKey);
-    return c && Date.now() - c.ts < CACHE_TTL ? c.data : null;
-  };
-
-  const [clientes, setClientes] = useState<Cliente[]>(() => getCached() ?? []);
-  const [isLoading, setIsLoading] = useState(() => !getCached() && !!loja);
+  const key = `${loja}:${repCodigo}`;
+  const fresh = () => { const c = _cache.get(key); return c && Date.now() - c.ts < CACHE_TTL ? c.data : null; };
+  const [clientes, setClientes] = useState<Cliente[]>(() => fresh() ?? []);
+  const [isLoading, setIsLoading] = useState(() => !fresh() && !!loja);
   const [progress, setProgress] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
     if (!loja) return;
-    const cached = getCached();
-    if (cached) {
-      setClientes(cached);
-      setIsLoading(false);
-      return;
-    }
-
-    setClientes([]);
-    setIsLoading(true);
-    setProgress("Conectando...");
-
+    const f = fresh();
+    if (f) { setClientes(f); setIsLoading(false); return; }
+    setClientes([]); setIsLoading(true); setProgress("Conectando...");
     const url = `${API_BASE}/sales-compass/clientes?loja=${encodeURIComponent(loja)}&rep_codigo=${repCodigo}`;
     const es = new EventSource(url);
     esRef.current = es;
-    const accumulated: Cliente[] = [];
-
-    es.addEventListener("progress", (e: MessageEvent) => {
-      const d = JSON.parse(e.data);
-      setProgress(d.message ?? "Carregando...");
-    });
-
-    es.addEventListener("chunk", (e: MessageEvent) => {
-      const chunk: Cliente[] = JSON.parse(e.data);
-      accumulated.push(...chunk);
-      setClientes([...accumulated]);
-    });
-
-    es.addEventListener("done", () => {
-      _clientesCache.set(cacheKey, { data: accumulated, ts: Date.now() });
-      setIsLoading(false);
-      setProgress(null);
-      es.close();
-    });
-
-    es.addEventListener("error", (e: MessageEvent) => {
-      try { console.error("[SSE clientes] error:", JSON.parse(e.data).message); } catch {}
-      setIsLoading(false);
-      setProgress(null);
-      es.close();
-    });
-
-    es.onerror = () => {
-      setIsLoading(false);
-      setProgress(null);
-      es.close();
-    };
-
-    return () => { es.close(); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cacheKey]);
+    const acc: Cliente[] = [];
+    es.addEventListener("progress", (e: MessageEvent) => setProgress(JSON.parse(e.data).message ?? "Carregando..."));
+    es.addEventListener("chunk",    (e: MessageEvent) => { acc.push(...JSON.parse(e.data)); setClientes([...acc]); });
+    es.addEventListener("done",     () => { _cache.set(key, { data: acc, ts: Date.now() }); setIsLoading(false); setProgress(null); es.close(); });
+    es.addEventListener("error",    () => { setIsLoading(false); setProgress(null); es.close(); });
+    es.onerror = () => { setIsLoading(false); setProgress(null); es.close(); };
+    return () => es.close();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
 
   return { clientes, isLoading, progress };
 }
 
-// ── Componente: número animado ────────────────────────────────────────────────
+// ── AnimatedNumber ────────────────────────────────────────────────────────────
 function AnimatedNumber({ value }: { value: number }) {
-  const [display, setDisplay] = useState(0);
+  const [d, setD] = useState(0);
   useEffect(() => {
-    let start = 0;
-    if (value === 0) { setDisplay(0); return; }
-    const inc = value / (1000 / 16);
-    const t = setInterval(() => {
-      start += inc;
-      if (start >= value) { setDisplay(value); clearInterval(t); }
-      else setDisplay(Math.floor(start));
-    }, 16);
+    if (value === 0) { setD(0); return; }
+    let s = 0; const inc = value / (1000 / 16);
+    const t = setInterval(() => { s += inc; if (s >= value) { setD(value); clearInterval(t); } else setD(Math.floor(s)); }, 16);
     return () => clearInterval(t);
   }, [value]);
-  return <>{display.toLocaleString("pt-BR")}</>;
+  return <>{d.toLocaleString("pt-BR")}</>;
 }
 
-// ── Componente: badges de status do cliente ──────────────────────────────────
-function StatusBadges({ cliente }: { cliente: Cliente }) {
-  const dias = diasDesde(cliente.ultimaCompra);
+// ── StatusBadges ──────────────────────────────────────────────────────────────
+function StatusBadges({ c }: { c: Cliente }) {
+  const dias = diasDesde(c.ultimaCompra);
   return (
     <span className="flex flex-wrap gap-1">
-      {cliente.frequenciaMensal && (
-        <span className="text-[10px] bg-yellow-500/10 text-yellow-500 border border-yellow-500/30 rounded-full px-1.5 py-0.5">👑 Fiel</span>
-      )}
-      {dias <= 30 && (
-        <span className="text-[10px] bg-green-500/10 text-green-500 border border-green-500/30 rounded-full px-1.5 py-0.5">🔥 Quente</span>
-      )}
-      {dias > 30 && dias < 90 && (
-        <span className="text-[10px] bg-amber-500/10 text-amber-500 border border-amber-500/30 rounded-full px-1.5 py-0.5">⏰ Atenção</span>
-      )}
-      {dias >= 90 && (
-        <span className="text-[10px] bg-red-500/10 text-red-400 border border-red-500/30 rounded-full px-1.5 py-0.5">😞 Resgatar</span>
-      )}
+      {c.frequenciaMensal && <span className="text-[10px] bg-yellow-500/10 text-yellow-500 border border-yellow-500/30 rounded-full px-1.5 py-0.5">👑 Fiel</span>}
+      {dias <= 30 && <span className="text-[10px] bg-green-500/10 text-green-500 border border-green-500/30 rounded-full px-1.5 py-0.5">🔥 Quente</span>}
+      {dias > 30 && dias < 90 && <span className="text-[10px] bg-amber-500/10 text-amber-500 border border-amber-500/30 rounded-full px-1.5 py-0.5">⏰ Atenção</span>}
+      {dias >= 90 && <span className="text-[10px] bg-red-500/10 text-red-400 border border-red-500/30 rounded-full px-1.5 py-0.5">😞 Resgatar</span>}
     </span>
   );
 }
 
-// ── Componente: barra de progresso da meta ────────────────────────────────────
+// ── MetaProgress ──────────────────────────────────────────────────────────────
 function MetaProgress({ meta, realizado }: { meta: number; realizado: number }) {
   const pct = meta > 0 ? Math.min(100, (realizado / meta) * 100) : 0;
   const color = pct >= 100 ? "bg-green-500" : pct >= 70 ? "bg-primary" : pct >= 40 ? "bg-amber-500" : "bg-red-500";
@@ -246,98 +192,71 @@ function MetaProgress({ meta, realizado }: { meta: number; realizado: number }) 
       <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
         <div className={`h-full rounded-full transition-all duration-700 ${color}`} style={{ width: `${pct}%` }} />
       </div>
-      <span className="text-xs font-bold text-foreground tabular-nums">{pct.toFixed(0)}%</span>
+      <span className="text-xs font-bold tabular-nums">{pct.toFixed(0)}%</span>
     </div>
   );
 }
 
-// ── Componente: Modal CRM ─────────────────────────────────────────────────────
-interface CrmModalProps {
-  cliente: Cliente;
-  loja: string;
-  repCodigo: number;
-  repLogin: string;
-  onClose: () => void;
-  onSaved: (status: string) => void;
-  forcado?: boolean;
-}
-
-function CrmModal({ cliente, loja, repCodigo, repLogin, onClose, onSaved, forcado }: CrmModalProps) {
+// ── CrmModal ──────────────────────────────────────────────────────────────────
+function CrmModal({ cliente, loja, repCodigo, repLogin, onClose, onSaved, forcado }: {
+  cliente: Cliente; loja: string; repCodigo: number; repLogin: string;
+  onClose: () => void; onSaved: (s: string) => void; forcado?: boolean;
+}) {
   const [status, setStatus] = useState("");
   const [dataHora, setDataHora] = useState("");
   const [obs, setObs] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const handleSave = async () => {
-    if (!status || obs.length < 30) return;
-    if (status === "retornar_contato" && !dataHora) return;
+  const save = async () => {
+    if (!status || obs.length < 30 || (status === "retornar_contato" && !dataHora)) return;
     setSaving(true);
     try {
       const r = await fetch(`${API_BASE}/sales-compass/crm`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ loja, clienteId: cliente.id, nome: cliente.nome, telefone: cliente.telefone, status, dataHora, obs, repCodigo, repLogin }),
       });
-      if (!r.ok) throw new Error("Erro ao salvar CRM.");
+      if (!r.ok) throw new Error("Erro ao salvar.");
       onSaved(status);
-    } catch (e: any) {
-      toast.error(e.message || "Erro ao salvar CRM.");
-    } finally {
-      setSaving(false);
-    }
+    } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
   };
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
       <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-md shadow-2xl">
         <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-bold text-foreground">Registro de CRM</h3>
-          <p className="text-sm text-muted-foreground">{cliente.nome}</p>
+          <h3 className="text-lg font-bold">Registro de CRM</h3>
+          <p className="text-sm text-muted-foreground truncate max-w-[180px]">{cliente.nome}</p>
         </div>
-
         <div className="mb-4">
-          <label className="block text-sm font-medium text-foreground mb-2">Resultado do contato</label>
+          <label className="block text-sm font-medium mb-2">Resultado do contato</label>
           <div className="flex flex-col gap-2">
-            {["comprou", "nao_comprou", "retornar_contato"].map((s) => (
-              <label key={s} className="flex items-center gap-2 text-sm text-foreground cursor-pointer">
-                <input type="radio" name="sc_status" value={s} checked={status === s}
-                  onChange={(e) => setStatus(e.target.value)} className="accent-primary" />
+            {["comprou","nao_comprou","retornar_contato"].map(s => (
+              <label key={s} className="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="radio" name="sc_crm" value={s} checked={status === s} onChange={e => setStatus(e.target.value)} className="accent-primary" />
                 {STATUS_LABELS[s]}
               </label>
             ))}
           </div>
         </div>
-
         {status === "retornar_contato" && (
           <div className="mb-4 animate-in fade-in">
-            <label className="block text-sm font-medium text-foreground mb-1">Data e Hora do Retorno</label>
-            <input type="datetime-local" value={dataHora} onChange={(e) => setDataHora(e.target.value)}
+            <label className="block text-sm font-medium mb-1">Data e Hora do Retorno</label>
+            <input type="datetime-local" value={dataHora} onChange={e => setDataHora(e.target.value)}
               className="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none" />
           </div>
         )}
-
         <div className="mb-5">
-          <label className="block text-sm font-medium text-foreground mb-1">
-            Observação <span className="text-destructive font-bold">*</span>
-            <span className="text-xs text-muted-foreground ml-1">(mín. 30 caracteres)</span>
+          <label className="block text-sm font-medium mb-1">
+            Observação <span className="text-destructive">*</span> <span className="text-xs text-muted-foreground">(mín. 30 chars)</span>
           </label>
-          <textarea rows={3} value={obs} onChange={(e) => setObs(e.target.value)}
+          <textarea rows={3} value={obs} onChange={e => setObs(e.target.value)}
             className={`w-full bg-background border rounded-lg px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-primary outline-none ${obs.length < 30 ? "border-destructive" : "border-input"}`} />
-          <p className={`text-xs mt-1 ${obs.length >= 30 ? "text-green-500" : "text-destructive"}`}>
-            {obs.length}/30 caracteres
-          </p>
+          <p className={`text-xs mt-1 ${obs.length >= 30 ? "text-green-500" : "text-destructive"}`}>{obs.length}/30</p>
         </div>
-
         <div className="flex justify-end gap-3 pt-4 border-t border-border">
-          {!forcado && (
-            <button onClick={onClose}
-              className="px-4 py-2 text-sm rounded-lg text-muted-foreground hover:bg-muted/50 transition">
-              Fechar
-            </button>
-          )}
-          <button onClick={handleSave}
-            disabled={saving || obs.length < 30 || !status || (status === "retornar_contato" && !dataHora)}
-            className="px-4 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition disabled:opacity-50 font-medium">
+          {!forcado && <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg text-muted-foreground hover:bg-muted/50">Fechar</button>}
+          <button onClick={save} disabled={saving || obs.length < 30 || !status || (status === "retornar_contato" && !dataHora)}
+            className="px-4 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 font-medium">
             {saving ? "Salvando..." : "Salvar CRM"}
           </button>
         </div>
@@ -346,84 +265,61 @@ function CrmModal({ cliente, loja, repCodigo, repLogin, onClose, onSaved, forcad
   );
 }
 
-// ── Componente: Card de cliente ───────────────────────────────────────────────
-interface ClienteCardProps {
-  cliente: Cliente;
-  potencial: boolean;
-  glowClass: string;
-  onContactar: (c: Cliente) => void;
-}
-
-function ClienteCard({ cliente, potencial, glowClass, onContactar }: ClienteCardProps) {
-  const dias = diasDesde(cliente.ultimaCompra);
-  const cc = catClasses[cliente.categoria];
+// ── HistoricoModal ────────────────────────────────────────────────────────────
+function HistoricoModal({ logs, onClose }: { logs: CrmLog[]; onClose: () => void }) {
+  const sorted = [...logs].sort((a, b) => new Date(b.dataFull).getTime() - new Date(a.dataFull).getTime());
   return (
-    <div className={`bg-card border rounded-2xl p-4 flex items-center justify-between hover:shadow-md transition-all group ${glowClass || "border-border"}`}>
-      <div className="flex items-center gap-3 min-w-0">
-        <div className={`h-10 w-10 rounded-xl flex items-center justify-center font-bold shrink-0 text-sm ${cc.bg} ${cc.text}`}>
-          {cliente.categoria}
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
+      <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-2xl shadow-2xl max-h-[80vh] flex flex-col">
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="text-lg font-bold flex items-center gap-2"><History className="h-5 w-5 text-primary" /> Histórico de Contatos</h3>
+          <button onClick={onClose} className="text-sm text-muted-foreground hover:text-foreground">Fechar</button>
         </div>
-        <div className="min-w-0">
-          <p className="font-semibold text-foreground text-sm truncate">{cliente.nome}</p>
-          <div className="mt-1 flex flex-wrap items-center gap-1.5">
-            <StatusBadges cliente={cliente} />
-            {potencial && <span className="text-[10px] bg-primary/10 text-primary border border-primary/30 rounded-full px-1.5 py-0.5">✨ Hoje</span>}
-          </div>
+        <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+          {sorted.length === 0 ? (
+            <p className="py-10 text-center text-muted-foreground italic">Nenhum registro para este cliente.</p>
+          ) : sorted.map((log, i) => (
+            <div key={i} className={`p-4 rounded-xl border ${
+              log.status === "comprou" ? "border-green-500/40 bg-green-500/5" :
+              log.status === "nao_comprou" || log.status === "cancelado_agendamento" ? "border-red-500/40 bg-red-500/5" :
+              "border-border bg-muted/30"}`}>
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <span className="text-[10px] font-mono bg-primary/10 text-primary px-2 py-0.5 rounded uppercase">{log.status?.replace(/_/g," ")}</span>
+                <span className="text-xs text-muted-foreground shrink-0">{new Date(log.dataFull).toLocaleString("pt-BR")}</span>
+              </div>
+              <p className="text-sm italic leading-relaxed break-words">"{log.obs}"</p>
+              <p className="text-[10px] text-muted-foreground mt-2 uppercase tracking-wider">Vendedor: {log.repLogin || "Sistema"}</p>
+            </div>
+          ))}
         </div>
-      </div>
-      <div className="flex items-center gap-3 shrink-0 ml-2">
-        <div className="text-right hidden sm:block">
-          <p className="text-[10px] text-muted-foreground uppercase font-bold">Há {dias}d</p>
-          <p className="text-xs font-bold text-foreground">{moeda(cliente.valorUltimaCompra)}</p>
-        </div>
-        <button onClick={() => onContactar(cliente)}
-          className="flex items-center gap-1 px-3 py-1.5 bg-primary text-primary-foreground rounded-lg text-xs font-bold hover:bg-primary/90 transition active:scale-95">
-          <Send className="h-3 w-3" /> CRM
-        </button>
       </div>
     </div>
   );
 }
 
-// ── Componente: Modal de detalhes de contato ──────────────────────────────────
-interface ContatoModalProps {
-  cliente: Cliente;
-  onClose: () => void;
-  onCrm: (c: Cliente) => void;
-}
-
-function ContatoModal({ cliente, onClose, onCrm }: ContatoModalProps) {
+// ── ContatoModal ──────────────────────────────────────────────────────────────
+function ContatoModal({ cliente, onClose, onCrm }: { cliente: Cliente; onClose: () => void; onCrm: (c: Cliente) => void }) {
   const dias = diasDesde(cliente.ultimaCompra);
   const cc = catClasses[cliente.categoria];
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
       <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-md shadow-2xl">
         <div className="flex items-center gap-3 mb-5">
-          <div className={`h-12 w-12 rounded-xl flex items-center justify-center font-bold text-lg ${cc.bg} ${cc.text}`}>
-            {cliente.categoria}
-          </div>
-          <div>
-            <h3 className="font-bold text-foreground">{cliente.nome}</h3>
-            <StatusBadges cliente={cliente} />
-          </div>
+          <div className={`h-12 w-12 rounded-xl flex items-center justify-center font-bold text-lg ${cc.bg} ${cc.text}`}>{cliente.categoria}</div>
+          <div><h3 className="font-bold">{cliente.nome}</h3><StatusBadges c={cliente} /></div>
         </div>
         <div className="space-y-2 text-sm text-muted-foreground mb-6">
-          <p><Phone className="inline h-3 w-3 mr-1" /><strong className="text-foreground">Telefone:</strong> {cliente.telefone}</p>
+          <p><Phone className="inline h-3 w-3 mr-1" /><strong className="text-foreground">Tel:</strong> {cliente.telefone}</p>
           <p><strong className="text-foreground">Ticket médio:</strong> {moeda(cliente.ticketMedio)}</p>
           <p><strong className="text-foreground">Última compra:</strong> {moeda(cliente.valorUltimaCompra)} (há {dias} dias)</p>
-          <p><strong className="text-foreground">Produtos frequentes:</strong> {cliente.produtoFavorito}</p>
+          <p><strong className="text-foreground">Produtos:</strong> {cliente.produtoFavorito}</p>
         </div>
         <div className="flex flex-wrap gap-2 pt-4 border-t border-border">
-          <button onClick={onClose} className="px-3 py-2 text-sm rounded-lg text-muted-foreground hover:bg-muted/50 transition">
-            Fechar
-          </button>
-          <button onClick={() => onCrm(cliente)}
-            className="px-3 py-2 text-sm rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition font-medium">
-            Gerar CRM
-          </button>
-          <a href={`https://wa.me/55${cliente.telefone.replace(/\D/g, "")}`} target="_blank" rel="noreferrer"
+          <button onClick={onClose} className="px-3 py-2 text-sm rounded-lg text-muted-foreground hover:bg-muted/50">Fechar</button>
+          <button onClick={() => onCrm(cliente)} className="px-3 py-2 text-sm rounded-lg bg-primary/10 text-primary hover:bg-primary/20 font-medium">Gerar CRM</button>
+          <a href={`https://wa.me/55${cliente.telefone.replace(/\D/g,"")}`} target="_blank" rel="noreferrer"
             onClick={() => onCrm(cliente)}
-            className="px-3 py-2 text-sm rounded-lg bg-green-600 text-white hover:bg-green-700 transition inline-flex items-center gap-1.5 font-medium">
+            className="px-3 py-2 text-sm rounded-lg bg-green-600 text-white hover:bg-green-700 inline-flex items-center gap-1.5 font-medium">
             <Send className="h-3.5 w-3.5" /> WhatsApp
           </a>
         </div>
@@ -432,53 +328,54 @@ function ContatoModal({ cliente, onClose, onCrm }: ContatoModalProps) {
   );
 }
 
-// ── Componente: lista de clientes paginada ────────────────────────────────────
-const PAGE_SIZE = 50;
-
-interface ClienteListaProps {
-  clientes: Cliente[];
-  glowMap: Record<string, "success" | "error" | "info">;
-  statusMap: Record<string, string>;
-  onCrm: (c: Cliente) => void;
-  titulo?: string;
+// ── ClienteCard (modal global RepView) ────────────────────────────────────────
+function ClienteCard({ cliente, potencial, gc, onCrm }: { cliente: Cliente; potencial: boolean; gc: string; onCrm: (c: Cliente) => void }) {
+  const dias = diasDesde(cliente.ultimaCompra);
+  const cc = catClasses[cliente.categoria];
+  return (
+    <div className={`bg-card border rounded-2xl p-4 flex items-center justify-between hover:shadow-md transition-all ${gc || "border-border"}`}>
+      <div className="flex items-center gap-3 min-w-0">
+        <div className={`h-10 w-10 rounded-xl flex items-center justify-center font-bold shrink-0 text-sm ${cc.bg} ${cc.text}`}>{cliente.categoria}</div>
+        <div className="min-w-0">
+          <p className="font-semibold text-sm truncate">{cliente.nome}</p>
+          <div className="mt-0.5 flex flex-wrap gap-1">
+            <StatusBadges c={cliente} />
+            {potencial && <span className="text-[10px] bg-primary/10 text-primary border border-primary/30 rounded-full px-1.5 py-0.5">✨ Hoje</span>}
+          </div>
+        </div>
+      </div>
+      <div className="flex items-center gap-2 shrink-0 ml-2">
+        <div className="text-right hidden sm:block">
+          <p className="text-[10px] text-muted-foreground">Há {dias}d</p>
+          <p className="text-xs font-bold">{moeda(cliente.valorUltimaCompra)}</p>
+        </div>
+        <button onClick={() => onCrm(cliente)} className="flex items-center gap-1 px-3 py-1.5 bg-primary text-primary-foreground rounded-lg text-xs font-bold hover:bg-primary/90 active:scale-95">
+          <Send className="h-3 w-3" /> CRM
+        </button>
+      </div>
+    </div>
+  );
 }
 
-function ClienteLista({ clientes, glowMap, statusMap, onCrm, titulo }: ClienteListaProps) {
+function ClienteLista({ clientes, gm, sm, onCrm }: { clientes: Cliente[]; gm: Record<string, any>; sm: Record<string, string>; onCrm: (c: Cliente) => void }) {
   const [page, setPage] = useState(1);
   const total = clientes.length;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const safePage = Math.min(page, totalPages);
-  const start = (safePage - 1) * PAGE_SIZE;
-  const paged = clientes.slice(start, start + PAGE_SIZE);
-
-  function getGlowClass(id: string) {
-    const s = glowMap[id] || statusMap[id];
-    if (s === "success" || s === "comprou") return "border-green-500/60 shadow-[0_0_12px_rgba(34,197,94,0.3)]";
-    if (s === "error" || s === "nao_comprou" || s === "cancelado_agendamento") return "border-red-500/60 shadow-[0_0_12px_rgba(239,68,68,0.3)]";
-    if (s === "info" || s === "retornar_contato") return "border-blue-500/60 shadow-[0_0_12px_rgba(59,130,246,0.3)]";
-    return "";
-  }
-
+  const totalPages = Math.max(1, Math.ceil(total / 50));
+  const sp = Math.min(page, totalPages);
+  const start = (sp - 1) * 50;
+  const paged = clientes.slice(start, start + 50);
   return (
     <div>
-      {titulo && <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-widest mb-3">{titulo} ({total})</h3>}
       <div className="space-y-2">
-        {paged.map((c) => (
-          <ClienteCard key={c.id} cliente={c} potencial={isPotencialHoje(c)}
-            glowClass={getGlowClass(c.id)} onContactar={onCrm} />
-        ))}
-        {paged.length === 0 && (
-          <p className="py-8 text-center text-muted-foreground text-sm italic">Nenhum cliente encontrado.</p>
-        )}
+        {paged.map(c => <ClienteCard key={c.id} cliente={c} potencial={isPotencialHoje(c)} gc={glowClass(c.id, gm, sm)} onCrm={onCrm} />)}
+        {paged.length === 0 && <p className="py-8 text-center text-muted-foreground text-sm italic">Nenhum cliente encontrado.</p>}
       </div>
       {totalPages > 1 && (
         <div className="mt-4 flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">{start+1}–{Math.min(start+PAGE_SIZE, total)} de {total}</span>
+          <span className="text-xs text-muted-foreground">{start+1}–{Math.min(start+50,total)} de {total}</span>
           <div className="flex gap-2">
-            <button disabled={safePage === 1} onClick={() => setPage(p => p-1)}
-              className="px-3 py-1.5 rounded-lg text-xs bg-secondary disabled:opacity-40">Anterior</button>
-            <button disabled={safePage === totalPages} onClick={() => setPage(p => p+1)}
-              className="px-3 py-1.5 rounded-lg text-xs bg-secondary disabled:opacity-40">Próxima</button>
+            <button disabled={sp===1} onClick={()=>setPage(p=>p-1)} className="px-3 py-1.5 rounded-lg text-xs bg-secondary disabled:opacity-40">Anterior</button>
+            <button disabled={sp===totalPages} onClick={()=>setPage(p=>p+1)} className="px-3 py-1.5 rounded-lg text-xs bg-secondary disabled:opacity-40">Próxima</button>
           </div>
         </div>
       )}
@@ -487,436 +384,697 @@ function ClienteLista({ clientes, glowMap, statusMap, onCrm, titulo }: ClienteLi
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ── VIEW: Vendedor (rep)
+// ── VIEW: Rep (Vendedor)
 // ══════════════════════════════════════════════════════════════════════════════
-function RepView({ loja, repCodigo, repLogin, dark, onSetView, onSetCategoria }:
+function RepView({ loja, repCodigo, repLogin, onSetView, onSetCategoria }:
   { loja: string; repCodigo: number; repLogin: string; dark: boolean;
     onSetView: (v: ViewType) => void; onSetCategoria: (c: Categoria) => void }) {
 
   const queryClient = useQueryClient();
-  const [filtroGlobal, setFiltroGlobal] = useState<"carteira" | "potenciais" | "resgatar" | null>(null);
-  const [contatoSelecionado, setContatoSelecionado] = useState<Cliente | null>(null);
+  const [filtroGlobal, setFiltroGlobal] = useState<"carteira"|"potenciais"|"resgatar"|null>(null);
+  const [contatoSel, setContatoSel] = useState<Cliente | null>(null);
   const [crmModal, setCrmModal] = useState<{ cliente: Cliente; forcado?: boolean } | null>(null);
-  const [glowMap, setGlowMap] = useState<Record<string, "success" | "error" | "info">>({});
+  const [gm, setGm] = useState<Record<string, "success"|"error"|"info">>({});
 
   const { data: vendedor, isLoading: vLoading } = useQuery<VendedorInfo>({
     queryKey: ["sc-vendedor", loja, repCodigo],
-    queryFn: () => fetch(`${API_BASE}/sales-compass/vendedor?loja=${loja}&rep_codigo=${repCodigo}`).then(r => r.json()),
-    staleTime: 1000 * 60 * 5,
+    queryFn: () => fetch(`${API_BASE}/sales-compass/vendedor?loja=${loja}&rep_codigo=${repCodigo}`).then(r=>r.json()),
+    staleTime: 300_000,
   });
 
-  const { clientes, isLoading: cLoading, progress: clientesProgress } = useSseClientes(loja, repCodigo);
+  const { clientes, isLoading: cLoading, progress } = useSseClientes(loja, repCodigo);
 
   const { data: crmLogs = [] } = useQuery<CrmLog[]>({
     queryKey: ["sc-crm-logs", loja],
-    queryFn: () => fetch(`${API_BASE}/sales-compass/crm-logs?loja=${loja}`).then(r => r.json()),
-    refetchInterval: 30_000,
-    staleTime: 15_000,
+    queryFn: () => fetch(`${API_BASE}/sales-compass/crm-logs?loja=${loja}`).then(r=>r.json()),
+    refetchInterval: 30_000, staleTime: 15_000,
   });
 
-  const statusMap = useMemo(() => {
-    const m: Record<string, string> = {};
-    [...crmLogs].sort((a, b) => new Date(a.dataFull).getTime() - new Date(b.dataFull).getTime())
-      .forEach(l => { m[String(l.clienteId)] = l.status; });
+  const sm = useMemo(() => {
+    const m: Record<string,string> = {};
+    [...crmLogs].sort((a,b)=>new Date(a.dataFull).getTime()-new Date(b.dataFull).getTime()).forEach(l=>{m[String(l.clienteId)]=l.status;});
     return m;
   }, [crmLogs]);
 
   const potenciaisHoje = clientes.filter(isPotencialHoje).length;
   const inativos = clientes.filter(c => diasDesde(c.ultimaCompra) >= 90).length;
 
-  const clientesFiltradosGlobal = useMemo(() => {
+  const filtrados = useMemo(() => {
     if (!filtroGlobal || !clientes.length) return [];
     let f = [...clientes];
     if (filtroGlobal === "potenciais") f = f.filter(isPotencialHoje);
-    if (filtroGlobal === "resgatar") f = f.filter(c => diasDesde(c.ultimaCompra) >= 90);
-    return f.sort((a, b) => a.categoria.localeCompare(b.categoria) || a.nome.localeCompare(b.nome));
+    if (filtroGlobal === "resgatar")   f = f.filter(c => diasDesde(c.ultimaCompra) >= 90);
+    return f.sort((a,b) => a.categoria.localeCompare(b.categoria) || a.nome.localeCompare(b.nome));
   }, [clientes, filtroGlobal]);
 
-  const handleCrmSaved = (status: string) => {
+  const onSaved = (status: string) => {
     if (!crmModal) return;
-    const id = crmModal.cliente.id;
     const g = status === "comprou" ? "success" : (status === "nao_comprou" || status === "cancelado_agendamento") ? "error" : "info";
-    setGlowMap(prev => ({ ...prev, [id]: g }));
+    setGm(prev => ({ ...prev, [crmModal.cliente.id]: g as any }));
     queryClient.invalidateQueries({ queryKey: ["sc-crm-logs", loja] });
     if (status === "comprou") toast.success(`✅ Venda registrada! ${crmModal.cliente.nome}`);
-    if (status === "retornar_contato") toast.info(`⏰ Retorno agendado para ${crmModal.cliente.nome}`);
+    if (status === "retornar_contato") toast.info(`⏰ Retorno agendado`);
     setCrmModal(null);
   };
 
-  const isLoading = vLoading || cLoading;
-
-  if (isLoading) return (
+  if (vLoading || cLoading) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-4 text-muted-foreground">
       <Loader2 className="w-8 h-8 animate-spin text-primary" />
-      <p className="text-sm">{clientesProgress ?? "Carregando carteira..."}</p>
-      {clientes.length > 0 && (
-        <p className="text-xs text-primary">{clientes.length} clientes carregados...</p>
-      )}
+      <p className="text-sm">{progress ?? "Carregando carteira..."}</p>
+      {clientes.length > 0 && <p className="text-xs text-primary">{clientes.length} clientes carregados...</p>}
     </div>
   );
 
-  const categorias: Categoria[] = ["A", "B", "C", "D"];
-
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-      {/* Saudação + meta */}
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground">
-          Olá, {vendedor?.nome?.split(" ")[0] || "Vendedor"} 👋
-        </h1>
-        <p className="text-muted-foreground text-sm mt-1">Gerencie sua carteira e registre contatos do dia.</p>
+        <h1 className="text-2xl font-bold">Bom dia, {vendedor?.nome?.split(" ")[0] || "Vendedor"} 👋</h1>
+        <p className="text-muted-foreground text-sm mt-1">Selecione uma categoria para acessar sua carteira e as oportunidades do dia.</p>
         {vendedor && vendedor.meta > 0 && (
           <div className="mt-4 bg-card border border-border rounded-2xl p-4 max-w-md">
             <div className="flex justify-between text-sm mb-2">
               <span className="text-muted-foreground">Meta vs Realizado</span>
-              <span className="font-bold text-foreground">{moeda(vendedor.realizado)} / {moeda(vendedor.meta)}</span>
+              <span className="font-bold">{moeda(vendedor.realizado)} / {moeda(vendedor.meta)}</span>
             </div>
             <MetaProgress meta={vendedor.meta} realizado={vendedor.realizado} />
           </div>
         )}
       </div>
 
-      {/* Cards de resumo */}
-      <div className="grid grid-cols-3 gap-3 mb-8">
-        <div onClick={() => setFiltroGlobal("carteira")}
-          className={`col-span-3 sm:col-span-1 rounded-2xl bg-card border p-4 cursor-pointer hover:shadow-md transition-all hover:-translate-y-1 ${filtroGlobal === "carteira" ? "border-primary ring-2 ring-primary/20" : "border-border"}`}>
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
-              <Users className="h-5 w-5 text-primary" />
+      <section className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-8">
+        {[
+          { key: "carteira",   icon: <Users className="h-5 w-5 text-primary" />,         bg: "bg-primary/10",   val: clientes.length, label: "Clientes na carteira", hint: "CLIQUE PARA VER TODOS",    hintColor: "text-primary" },
+          { key: "potenciais", icon: <Sparkles className="h-5 w-5 text-amber-500" />,    bg: "bg-amber-500/10", val: potenciaisHoje,   label: "Potenciais hoje",      hint: "CLIQUE PARA CONTATAR A-D", hintColor: "text-amber-500" },
+          { key: "resgatar",   icon: <AlertCircle className="h-5 w-5 text-red-400" />,   bg: "bg-red-500/10",   val: inativos,         label: "A resgatar (90+ dias)", hint: "CLIQUE PARA RECUPERAR",   hintColor: "text-red-400" },
+        ].map(({ key, icon, bg, val, label, hint, hintColor }) => (
+          <div key={key}
+            onClick={() => setFiltroGlobal(key as any)}
+            className={`${key === "carteira" ? "col-span-2 sm:col-span-1" : ""} rounded-2xl bg-card border p-5 shadow-sm cursor-pointer transition-all hover:shadow-md hover:-translate-y-1 group ${filtroGlobal === key ? "border-primary ring-2 ring-primary/20 bg-primary/5" : "border-border"}`}>
+            <div className="flex items-center gap-3">
+              <div className={`h-10 w-10 rounded-xl ${bg} flex items-center justify-center`}>{icon}</div>
+              <div>
+                <p className="text-xs text-muted-foreground">{label}</p>
+                <p className="text-2xl font-bold"><AnimatedNumber value={val} /></p>
+              </div>
             </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Carteira total</p>
-              <p className="text-2xl font-bold text-foreground"><AnimatedNumber value={clientes.length} /></p>
-            </div>
+            <div className={`mt-3 text-[10px] font-bold opacity-0 group-hover:opacity-100 transition-opacity ${hintColor}`}>{hint}</div>
           </div>
-        </div>
-        <div onClick={() => setFiltroGlobal("potenciais")}
-          className="rounded-2xl bg-card border border-border p-4 cursor-pointer hover:shadow-md transition-all hover:-translate-y-1 group">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-amber-500/10 flex items-center justify-center">
-              <Sparkles className="h-5 w-5 text-amber-500" />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Potenciais hoje</p>
-              <p className="text-2xl font-bold text-foreground"><AnimatedNumber value={potenciaisHoje} /></p>
-            </div>
-          </div>
-        </div>
-        <div onClick={() => setFiltroGlobal("resgatar")}
-          className="rounded-2xl bg-card border border-border p-4 cursor-pointer hover:shadow-md transition-all hover:-translate-y-1 group">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-red-500/10 flex items-center justify-center">
-              <AlertCircle className="h-5 w-5 text-red-400" />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">A resgatar (90d+)</p>
-              <p className="text-2xl font-bold text-foreground"><AnimatedNumber value={inativos} /></p>
-            </div>
-          </div>
-        </div>
-      </div>
+        ))}
+      </section>
 
-      {/* Grade de categorias */}
-      <h2 className="text-lg font-semibold text-foreground mb-4">Carteira por categoria</h2>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        {categorias.map(cat => {
+      <h2 className="text-lg font-semibold mb-4">Carteira por categoria</h2>
+      <section className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {(["A","B","C","D"] as Categoria[]).map(cat => {
           const total = clientes.filter(c => c.categoria === cat).length;
-          const potenciais = clientes.filter(c => c.categoria === cat && isPotencialHoje(c)).length;
-          const cls = catClasses[cat];
-          const info = categoriaInfo[cat];
+          const pot   = clientes.filter(c => c.categoria === cat && isPotencialHoje(c)).length;
+          const cc = catClasses[cat]; const info = categoriaInfo[cat];
           return (
             <button key={cat} onClick={() => { onSetCategoria(cat); onSetView("categoria"); }}
-              className={`text-left rounded-2xl bg-card border p-5 ring-2 ring-transparent transition-all hover:-translate-y-1 hover:shadow-xl ${cls.ring}`}>
+              className={`text-left rounded-2xl bg-card border p-5 ring-2 ring-transparent transition-all hover:-translate-y-1 hover:shadow-xl ${cc.ring}`}>
               <div className="flex items-start justify-between mb-4">
-                <div className={`h-12 w-12 rounded-xl ${cls.bg} flex items-center justify-center font-bold text-xl ${cls.text}`}>{cat}</div>
-                <ChevronRight className={`h-4 w-4 text-muted-foreground ${cls.text}`} />
+                <div className={`h-12 w-12 rounded-xl ${cc.bg} flex items-center justify-center font-bold text-xl ${cc.text}`}>{cat}</div>
+                <ChevronRight className={`h-4 w-4 ${cc.text}`} />
               </div>
-              <h3 className="font-semibold text-foreground text-sm">{info.titulo}</h3>
+              <h3 className="font-semibold text-sm">{info.titulo}</h3>
               <p className="text-xs text-muted-foreground mt-0.5">{info.ticket}</p>
               <div className="mt-4 pt-3 border-t border-border flex justify-between">
-                <div>
-                  <p className="text-xs text-muted-foreground">Clientes</p>
-                  <p className={`font-bold text-lg ${cls.text}`}><AnimatedNumber value={total} /></p>
-                </div>
-                <div className="text-right">
-                  <p className="text-xs text-muted-foreground">Hoje</p>
-                  <p className={`font-bold text-lg ${cls.text}`}><AnimatedNumber value={potenciais} /></p>
-                </div>
+                <div><p className="text-xs text-muted-foreground">Clientes</p><p className={`font-bold text-lg ${cc.text}`}><AnimatedNumber value={total} /></p></div>
+                <div className="text-right"><p className="text-xs text-muted-foreground">Hoje</p><p className={`font-bold text-lg ${cc.text}`}><AnimatedNumber value={pot} /></p></div>
               </div>
             </button>
           );
         })}
-      </div>
+      </section>
 
-      {/* Botão relatórios */}
-      <button onClick={() => onSetView("relatorios")}
-        className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition">
+      <button onClick={() => onSetView("relatorios")} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
         <ClipboardList className="h-4 w-4" /> Ver relatórios de CRM
       </button>
 
-      {/* Modal global (carteira/potenciais/resgatar) */}
       {filtroGlobal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
           <div className="bg-card border border-border rounded-[2rem] w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl">
             <div className="p-5 border-b border-border flex items-center justify-between bg-primary/5">
               <div>
-                <h3 className="font-bold text-foreground text-lg">
+                <h3 className="font-bold text-lg">
                   {filtroGlobal === "carteira" ? "Minha Carteira Total" : filtroGlobal === "potenciais" ? "Potenciais de Hoje" : "Recuperação de Clientes"}
                 </h3>
-                <p className="text-xs text-muted-foreground mt-0.5">{clientesFiltradosGlobal.length} clientes</p>
+                <p className="text-xs text-muted-foreground">{filtrados.length} clientes • A a D</p>
               </div>
-              <button onClick={() => setFiltroGlobal(null)} className="h-8 w-8 flex items-center justify-center rounded-xl hover:bg-muted transition">
-                <X className="h-5 w-5" />
-              </button>
+              <button onClick={() => setFiltroGlobal(null)} className="h-8 w-8 flex items-center justify-center rounded-xl hover:bg-muted"><X className="h-5 w-5" /></button>
             </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-2">
-              <ClienteLista clientes={clientesFiltradosGlobal} glowMap={glowMap} statusMap={statusMap}
-                onCrm={(c) => { setCrmModal({ cliente: c }); setFiltroGlobal(null); }} />
+            <div className="flex-1 overflow-y-auto p-4">
+              <ClienteLista clientes={filtrados} gm={gm} sm={sm} onCrm={c => { setCrmModal({ cliente: c }); setFiltroGlobal(null); }} />
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal detalhes contato */}
-      {contatoSelecionado && (
-        <ContatoModal cliente={contatoSelecionado} onClose={() => setContatoSelecionado(null)}
-          onCrm={(c) => { setCrmModal({ cliente: c }); setContatoSelecionado(null); }} />
-      )}
-
-      {/* Modal CRM */}
-      {crmModal && (
-        <CrmModal cliente={crmModal.cliente} loja={loja} repCodigo={repCodigo} repLogin={repLogin}
-          onClose={() => setCrmModal(null)} onSaved={handleCrmSaved} forcado={crmModal.forcado} />
-      )}
+      {contatoSel && <ContatoModal cliente={contatoSel} onClose={() => setContatoSel(null)} onCrm={c => { setCrmModal({ cliente: c }); setContatoSel(null); }} />}
+      {crmModal && <CrmModal cliente={crmModal.cliente} loja={loja} repCodigo={repCodigo} repLogin={repLogin} onClose={() => setCrmModal(null)} onSaved={onSaved} forcado={crmModal.forcado} />}
+      <style dangerouslySetInnerHTML={{ __html: GLOW_CSS }} />
     </div>
   );
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ── VIEW: Categoria (detalhe)
+// ── VIEW: Categoria
 // ══════════════════════════════════════════════════════════════════════════════
 function CategoriaView({ loja, repCodigo, repLogin, categoria, onBack }:
   { loja: string; repCodigo: number; repLogin: string; categoria: Categoria; onBack: () => void }) {
 
   const queryClient = useQueryClient();
+  const PGSIZE = 50;
   const [crmModal, setCrmModal] = useState<Cliente | null>(null);
-  const [glowMap, setGlowMap] = useState<Record<string, "success" | "error" | "info">>({});
+  const [historicoLogs, setHistoricoLogs] = useState<CrmLog[] | null>(null);
+  const [gm, setGm] = useState<Record<string,"success"|"error"|"info">>({});
+  const [filtroNome, setFiltroNome] = useState("");
+  const [page, setPage] = useState(1);
+  const [contatoSel, setContatoSel] = useState<Cliente | null>(null);
 
-  const { clientes, isLoading, progress: clientesProgress } = useSseClientes(loja, repCodigo);
+  const { clientes, isLoading, progress } = useSseClientes(loja, repCodigo);
 
   const { data: crmLogs = [] } = useQuery<CrmLog[]>({
     queryKey: ["sc-crm-logs", loja],
-    queryFn: () => fetch(`${API_BASE}/sales-compass/crm-logs?loja=${loja}`).then(r => r.json()),
+    queryFn: () => fetch(`${API_BASE}/sales-compass/crm-logs?loja=${loja}`).then(r=>r.json()),
     refetchInterval: 30_000,
   });
 
-  const statusMap = useMemo(() => {
-    const m: Record<string, string> = {};
-    [...crmLogs].sort((a, b) => new Date(a.dataFull).getTime() - new Date(b.dataFull).getTime())
-      .forEach(l => { m[String(l.clienteId)] = l.status; });
+  const sm = useMemo(() => {
+    const m: Record<string,string> = {};
+    [...crmLogs].sort((a,b)=>new Date(a.dataFull).getTime()-new Date(b.dataFull).getTime()).forEach(l=>{m[String(l.clienteId)]=l.status;});
     return m;
   }, [crmLogs]);
 
-  const clientesCategoria = useMemo(() => {
-    const cats = clientes.filter(c => c.categoria === categoria);
-    const potenciais = cats.filter(isPotencialHoje);
-    const resto = cats.filter(c => !isPotencialHoje(c)).sort((a, b) => a.nome.localeCompare(b.nome));
-    return [...potenciais, ...resto];
-  }, [clientes, categoria]);
+  const lista = useMemo(() => clientes.filter(c=>c.categoria===categoria).sort((a,b)=>new Date(b.ultimaCompra).getTime()-new Date(a.ultimaCompra).getTime()), [clientes, categoria]);
+  const potenciais = useMemo(() => lista.filter(isPotencialHoje), [lista]);
+  const listaFiltrada = useMemo(() => filtroNome.trim() ? lista.filter(c=>c.nome.toLowerCase().includes(filtroNome.toLowerCase())) : lista, [lista, filtroNome]);
+  const totalPages = Math.ceil(listaFiltrada.length / PGSIZE);
+  const paginada = useMemo(() => listaFiltrada.slice((page-1)*PGSIZE, page*PGSIZE), [listaFiltrada, page]);
 
-  const handleCrmSaved = (status: string) => {
+  useEffect(() => { setPage(1); }, [filtroNome, categoria]);
+
+  const onSaved = (status: string) => {
     if (!crmModal) return;
-    const g = status === "comprou" ? "success" : status === "nao_comprou" || status === "cancelado_agendamento" ? "error" : "info";
-    setGlowMap(prev => ({ ...prev, [crmModal.id]: g }));
+    const g = status === "comprou" ? "success" : (status === "nao_comprou" || status === "cancelado_agendamento") ? "error" : "info";
+    setGm(prev => ({ ...prev, [crmModal.id]: g as any }));
     queryClient.invalidateQueries({ queryKey: ["sc-crm-logs", loja] });
     if (status === "comprou") toast.success(`✅ Venda registrada! ${crmModal.nome}`);
     setCrmModal(null);
   };
 
-  const cls = catClasses[categoria];
+  const cc = catClasses[categoria];
   const info = categoriaInfo[categoria];
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
+      {/* Header */}
       <div className="flex items-center gap-3 mb-6">
-        <button onClick={onBack} className="p-2 rounded-xl hover:bg-muted transition">
-          <ArrowLeft className="h-4 w-4" />
-        </button>
-        <div className={`h-10 w-10 rounded-xl ${cls.bg} flex items-center justify-center font-bold ${cls.text}`}>{categoria}</div>
-        <div>
-          <h2 className="font-bold text-foreground">{info.titulo}</h2>
-          <p className="text-xs text-muted-foreground">{info.ticket} • {clientesCategoria.length} clientes</p>
+        <button onClick={onBack} className="p-2 rounded-xl hover:bg-muted"><ArrowLeft className="h-4 w-4" /></button>
+        <div className={`h-10 w-10 rounded-xl ${cc.bg} flex items-center justify-center font-bold ${cc.text}`}>{categoria}</div>
+        <div className="flex-1">
+          <h2 className="font-bold">{info.titulo}</h2>
+          <p className="text-xs text-muted-foreground">{info.ticket}</p>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-xs text-muted-foreground">Clientes</p>
+          <p className={`text-xl font-bold ${cc.text}`}><AnimatedNumber value={lista.length} /></p>
         </div>
       </div>
 
       {isLoading ? (
         <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
-          <Loader2 className="w-6 h-6 animate-spin text-primary" />
-          <p className="text-sm">{clientesProgress ?? "Carregando..."}</p>
-          {clientes.length > 0 && <p className="text-xs text-primary">{clientes.length} carregados...</p>}
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          <p className="text-sm">{progress ?? "Carregando..."}</p>
+          {clientes.length > 0 && <p className="text-xs text-primary">{clientes.length} clientes carregados...</p>}
         </div>
       ) : (
-        <ClienteLista clientes={clientesCategoria} glowMap={glowMap} statusMap={statusMap}
-          onCrm={(c) => setCrmModal(c)} />
+        <>
+          {/* Seção potenciais de hoje */}
+          {potenciais.length > 0 && (
+            <section className="mb-8 rounded-2xl border border-amber-500/30 bg-amber-500/5 p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <Sparkles className="h-5 w-5 text-amber-500" />
+                <h3 className="font-semibold">Potenciais para contato hoje ({potenciais.length})</h3>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {potenciais.map(c => {
+                  const dias = diasDesde(c.ultimaCompra);
+                  return (
+                    <div key={c.id} className={`rounded-2xl bg-card border p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:shadow-md hover:-translate-y-0.5 transition-all ${glowClass(c.id, gm, sm) || "border-border"}`}>
+                      <div className="min-w-0">
+                        <p className="font-semibold truncate">{c.nome}</p>
+                        <div className="mt-1 mb-1"><StatusBadges c={c} /></div>
+                        <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+                          <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{c.telefone}</span>
+                          <span>Há {dias} dias</span>
+                          <span className="flex items-center gap-1"><ShoppingBag className="h-3 w-3" /> TM: {moeda(c.ticketMedio)}</span>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        <button onClick={() => setHistoricoLogs(crmLogs.filter(l=>String(l.clienteId)===String(c.id)))}
+                          className="p-2 rounded-lg hover:bg-muted border border-border text-muted-foreground hover:text-foreground" title="Histórico CRM">
+                          <ClipboardList className="h-4 w-4" />
+                        </button>
+                        <button onClick={() => setContatoSel(c)}
+                          className="flex items-center gap-1.5 px-3 py-2 bg-primary text-primary-foreground rounded-lg text-xs font-bold hover:bg-primary/90 active:scale-95">
+                          <Send className="h-3.5 w-3.5" /> Contatar
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {/* Busca */}
+          <div className="relative mb-4">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input placeholder="Pesquisar por nome..." value={filtroNome} onChange={e=>setFiltroNome(e.target.value)}
+              className="w-full bg-card border border-border rounded-xl pl-10 pr-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary/20" />
+          </div>
+
+          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Todos os clientes ({listaFiltrada.length})</h3>
+          <div className="space-y-3">
+            {paginada.map((c, idx) => {
+              const dias = diasDesde(c.ultimaCompra);
+              return (
+                <div key={c.id} className={`bg-card border rounded-2xl p-4 flex flex-col md:flex-row md:items-center gap-3 hover:bg-muted/20 hover:shadow-md transition-all animate-in fade-in slide-in-from-bottom-1 ${glowClass(c.id, gm, sm) || "border-border"}`}
+                  style={{ animationDelay: `${Math.min(idx*30,800)}ms`, animationFillMode: "both" }}>
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div className={`h-11 w-11 rounded-full ${cc.bg} ${cc.text} flex items-center justify-center font-semibold text-sm shrink-0`}>
+                      {c.nome.split(" ").slice(0,2).map(s=>s[0]).join("")}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-semibold truncate">{c.nome}</p>
+                      <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5"><Phone className="h-3 w-3" />{c.telefone}</p>
+                      <div className="mt-1"><StatusBadges c={c} /></div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4 shrink-0 flex-wrap">
+                    <div>
+                      <p className="text-xs text-muted-foreground flex items-center gap-1"><ShoppingBag className="h-3 w-3" /> Última compra</p>
+                      <p className="font-semibold text-sm">{moeda(c.valorUltimaCompra)}</p>
+                      <p className="text-xs text-muted-foreground">Há {dias} dias</p>
+                    </div>
+                    <div className="hidden md:block">
+                      <p className="text-xs text-muted-foreground">Ticket médio</p>
+                      <p className="font-semibold text-sm">{moeda(c.ticketMedio)}</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => setHistoricoLogs(crmLogs.filter(l=>String(l.clienteId)===String(c.id)))}
+                        className="p-2 rounded-lg hover:bg-primary/10 text-primary border border-border" title="Histórico CRM">
+                        <ClipboardList className="h-4 w-4" />
+                      </button>
+                      <button onClick={() => setContatoSel(c)}
+                        className="flex items-center gap-1 px-3 py-2 bg-primary text-primary-foreground rounded-lg text-xs font-bold hover:bg-primary/90 active:scale-95">
+                        <Send className="h-3.5 w-3.5" /> Contatar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {paginada.length === 0 && <p className="py-10 text-center text-muted-foreground italic">Nenhum cliente encontrado.</p>}
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-4 mt-8 py-6 border-t border-border">
+              <button onClick={() => setPage(p=>Math.max(1,p-1))} disabled={page===1}
+                className="flex items-center gap-1 px-4 py-2 rounded-xl border hover:bg-muted disabled:opacity-50 text-sm">
+                <ChevronLeft className="h-4 w-4" /> Anterior
+              </button>
+              <span className="text-sm bg-muted/50 px-4 py-2 rounded-xl border">
+                Pág <span className="text-primary font-bold">{page}</span> / {totalPages}
+                <span className="text-xs text-muted-foreground ml-2">({listaFiltrada.length})</span>
+              </span>
+              <button onClick={() => setPage(p=>Math.min(totalPages,p+1))} disabled={page===totalPages}
+                className="flex items-center gap-1 px-4 py-2 rounded-xl border hover:bg-muted disabled:opacity-50 text-sm">
+                Próxima <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+        </>
       )}
 
-      {crmModal && (
-        <CrmModal cliente={crmModal} loja={loja} repCodigo={repCodigo} repLogin={repLogin}
-          onClose={() => setCrmModal(null)} onSaved={handleCrmSaved} />
-      )}
+      {contatoSel && <ContatoModal cliente={contatoSel} onClose={() => setContatoSel(null)} onCrm={c=>{setCrmModal(c);setContatoSel(null);}} />}
+      {crmModal && <CrmModal cliente={crmModal} loja={loja} repCodigo={repCodigo} repLogin={repLogin} onClose={() => setCrmModal(null)} onSaved={onSaved} />}
+      {historicoLogs !== null && <HistoricoModal logs={historicoLogs} onClose={() => setHistoricoLogs(null)} />}
+      <style dangerouslySetInnerHTML={{ __html: GLOW_CSS }} />
     </div>
   );
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ── VIEW: Gerente/Admin
+// ── VIEW: Gerente / Admin  (layout sidebar igual ao original)
 // ══════════════════════════════════════════════════════════════════════════════
 function GerenteView({ loja: initialLoja, repLogin, isAdmin, onSetView }:
   { loja: string; repLogin: string; isAdmin: boolean; onSetView: (v: ViewType) => void }) {
 
   const queryClient = useQueryClient();
+  const PGSIZE = 50;
   const [loja, setLoja] = useState(initialLoja || "l3");
   const [selectedRep, setSelectedRep] = useState<Rep | null>(null);
-  const [glowMap, setGlowMap] = useState<Record<string, "success" | "error" | "info">>({});
+  const [filtroCategoria, setFiltroCategoria] = useState("TODAS");
+  const [filtroMotivo, setFiltroMotivo] = useState("TODOS");
+  const [filtroNome, setFiltroNome] = useState("");
+  const [filtroContatados, setFiltroContatados] = useState(false);
+  const [mostrarTodaCarteira, setMostrarTodaCarteira] = useState(false);
   const [crmModal, setCrmModal] = useState<Cliente | null>(null);
+  const [historicoLogs, setHistoricoLogs] = useState<CrmLog[] | null>(null);
+  const [page, setPage] = useState(1);
 
-  const { data: reps = [], isLoading: repsLoading } = useQuery<Rep[]>({
-    queryKey: ["sc-vendedores", loja],
-    queryFn: () => fetch(`${API_BASE}/sales-compass/vendedores?loja=${loja}`).then(r => r.json()),
-    staleTime: 1000 * 60 * 5,
-  });
+  useEffect(() => { setSelectedRep(null); setMostrarTodaCarteira(false); setFiltroMotivo("TODOS"); setFiltroContatados(false); }, [loja]);
+  useEffect(() => { setMostrarTodaCarteira(false); setFiltroMotivo("TODOS"); setFiltroContatados(false); setFiltroNome(""); }, [selectedRep]);
+  useEffect(() => { setPage(1); }, [selectedRep, loja, filtroCategoria, filtroMotivo, filtroNome, filtroContatados, mostrarTodaCarteira]);
 
   const repCodigo = selectedRep?.rep_codigo ?? 0;
 
-  const { data: vendedor } = useQuery<VendedorInfo>({
-    queryKey: ["sc-vendedor", loja, repCodigo],
-    queryFn: () => fetch(`${API_BASE}/sales-compass/vendedor?loja=${loja}&rep_codigo=${repCodigo}`).then(r => r.json()),
-    enabled: !!loja,
-    staleTime: 1000 * 60 * 5,
+  const { data: reps = [], isLoading: repsLoading } = useQuery<Rep[]>({
+    queryKey: ["sc-vendedores", loja],
+    queryFn: () => fetch(`${API_BASE}/sales-compass/vendedores?loja=${loja}`).then(r=>r.json()),
+    staleTime: 300_000,
   });
 
-  const { clientes, isLoading: cLoading, progress: clientesProgress } = useSseClientes(loja, repCodigo);
+  const vendedoresComTodos = useMemo<Rep[]>(() => [{ rep_codigo: 0, rep_nome: `Todos da loja` }, ...reps], [reps]);
+
+  const { data: vendedor } = useQuery<VendedorInfo>({
+    queryKey: ["sc-vendedor", loja, repCodigo],
+    queryFn: () => fetch(`${API_BASE}/sales-compass/vendedor?loja=${loja}&rep_codigo=${repCodigo}`).then(r=>r.json()),
+    enabled: !!loja && selectedRep !== null, staleTime: 300_000,
+  });
+
+  const { clientes, isLoading: cLoading, progress } = useSseClientes(loja, repCodigo);
 
   const { data: crmLogs = [] } = useQuery<CrmLog[]>({
     queryKey: ["sc-crm-logs", loja],
-    queryFn: () => fetch(`${API_BASE}/sales-compass/crm-logs?loja=${loja}`).then(r => r.json()),
+    queryFn: () => fetch(`${API_BASE}/sales-compass/crm-logs?loja=${loja}`).then(r=>r.json()),
     refetchInterval: 30_000,
   });
 
-  const statusMap = useMemo(() => {
-    const m: Record<string, string> = {};
-    [...crmLogs].sort((a, b) => new Date(a.dataFull).getTime() - new Date(b.dataFull).getTime())
-      .forEach(l => { m[String(l.clienteId)] = l.status; });
-    return m;
-  }, [crmLogs]);
+  const stats = useMemo(() => {
+    const hoje = new Date().toLocaleDateString("pt-BR");
+    const ids = new Set(clientes.map(c => String(c.id)));
+    const logsGerais = crmLogs.filter(l => ids.has(String(l.clienteId)));
 
-  // Log de hoje por vendedor
-  const logsHoje = crmLogs.filter(l => {
-    const d = new Date(l.dataFull);
-    const hoje = new Date();
-    return d.toDateString() === hoje.toDateString();
-  });
+    const contatadosHojeIds = Array.from(new Set(
+      logsGerais.filter(l => new Date(l.dataFull).toLocaleDateString("pt-BR") === hoje).map(l => String(l.clienteId))
+    ));
 
-  const handleCrmSaved = (status: string) => {
+    const statusPorCliente: Record<string,string> = {};
+    [...logsGerais].sort((a,b)=>new Date(a.dataFull).getTime()-new Date(b.dataFull).getTime())
+      .forEach(l => { statusPorCliente[String(l.clienteId)] = l.status; });
+
+    const motivos: Record<string,number> = {};
+    Object.values(statusPorCliente).forEach(s => { motivos[s] = (motivos[s] || 0) + 1; });
+
+    const listaFiltrada = clientes.filter(c => {
+      const matchCat   = filtroCategoria === "TODAS" || c.categoria === filtroCategoria;
+      const matchNome  = c.nome.toLowerCase().includes(filtroNome.toLowerCase());
+      const matchMot   = filtroMotivo === "TODOS" || statusPorCliente[String(c.id)] === filtroMotivo;
+      const isHoje     = contatadosHojeIds.includes(String(c.id));
+      let vis = false;
+      if (mostrarTodaCarteira) vis = true;
+      else if (filtroContatados) vis = isHoje;
+      else if (filtroMotivo !== "TODOS") vis = matchMot;
+      else vis = isPotencialHoje(c) || isHoje;
+      return matchCat && matchNome && matchMot && vis;
+    });
+
+    const vendedorMap: Record<string,string> = {};
+    reps.forEach(r => { vendedorMap[String(r.rep_codigo)] = r.rep_nome; });
+
+    return { listaFiltrada, contatadosHojeIds, totalEmCarteira: clientes.length,
+      totalPotenciais: clientes.filter(isPotencialHoje).length, totalContatados: contatadosHojeIds.length,
+      motivos, statusPorCliente, vendedorMap };
+  }, [clientes, crmLogs, filtroCategoria, filtroNome, filtroMotivo, mostrarTodaCarteira, filtroContatados, reps]);
+
+  const totalPages = Math.ceil(stats.listaFiltrada.length / PGSIZE);
+  const paginada = useMemo(() => stats.listaFiltrada.slice((page-1)*PGSIZE, page*PGSIZE), [stats.listaFiltrada, page]);
+
+  const onSaved = (status: string) => {
     if (!crmModal) return;
-    const g = status === "comprou" ? "success" : status === "nao_comprou" || status === "cancelado_agendamento" ? "error" : "info";
-    setGlowMap(prev => ({ ...prev, [crmModal.id]: g }));
     queryClient.invalidateQueries({ queryKey: ["sc-crm-logs", loja] });
     if (status === "comprou") toast.success(`✅ Venda registrada! ${crmModal.nome}`);
     setCrmModal(null);
   };
 
-  const clientesOrdenados = useMemo(() => {
-    const potenciais = clientes.filter(isPotencialHoje);
-    const resto = clientes.filter(c => !isPotencialHoje(c)).sort((a, b) => a.nome.localeCompare(b.nome));
-    return [...potenciais, ...resto];
-  }, [clientes]);
-
   const lojaLabel = SC_LOJAS.find(l => l.value === loja)?.label || loja.toUpperCase();
+  const motiEmoji = (m: string) => m.includes("comprou") && !m.includes("nao") ? "😊" : m.includes("nao") || m.includes("cancelado") ? "😢" : m.includes("retornar") ? "⏰" : "💬";
+
+  const selectRep = (v: string) => {
+    if (v === "") { setSelectedRep(null); return; }
+    const n = Number(v);
+    if (n === 0) { setSelectedRep({ rep_codigo: 0, rep_nome: "Todos da loja" }); return; }
+    const f = reps.find(r => r.rep_codigo === n);
+    if (f) setSelectedRep(f);
+  };
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-      <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-8">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <BarChart3 className="h-6 w-6 text-primary" />
-            {isAdmin ? "Painel Administrativo" : "Painel do Gerente"}
-          </h1>
-          <p className="text-muted-foreground text-sm mt-1">{lojaLabel}</p>
-        </div>
-        <div className="sm:ml-auto flex flex-wrap gap-2">
-          {isAdmin && (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+      {/* Cabeçalho admin */}
+      {isAdmin ? (
+        <div className="bg-primary/5 border border-primary/20 p-5 sm:p-6 rounded-3xl mb-8 flex flex-col lg:flex-row items-center justify-between gap-6">
+          <div className="flex items-center gap-4 w-full lg:w-auto">
+            <div className="h-12 w-12 rounded-2xl bg-primary flex items-center justify-center text-primary-foreground shadow-lg shrink-0">
+              <ShieldCheck className="h-6 w-6" />
+            </div>
+            <div>
+              <h1 className="text-xl sm:text-2xl font-bold">Administração Global</h1>
+              <p className="text-muted-foreground text-sm">Selecione uma unidade para visualizar</p>
+            </div>
+          </div>
+          {/* Desktop: botões de loja */}
+          <div className="hidden md:flex flex-wrap gap-2">
+            {SC_LOJAS.map(l => (
+              <button key={l.value} onClick={() => setLoja(l.value)}
+                className={`px-4 py-2 rounded-xl text-sm font-bold border whitespace-nowrap transition-all ${loja === l.value ? "bg-primary text-primary-foreground border-primary shadow-md" : "bg-card border-border hover:bg-muted"}`}>
+                {l.label}
+              </button>
+            ))}
+          </div>
+          {/* Mobile: select */}
+          <div className="md:hidden w-full">
             <div className="relative">
-              <select value={loja} onChange={e => { setLoja(e.target.value); setSelectedRep(null); }}
-                className="appearance-none rounded-lg border border-border bg-muted px-3 py-2 pr-7 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50">
+              <select value={loja} onChange={e => setLoja(e.target.value)}
+                className="appearance-none w-full bg-card border border-border rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-primary/20 shadow-sm">
                 {SC_LOJAS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
               </select>
-              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
             </div>
-          )}
-          <div className="relative">
-            <select value={selectedRep?.rep_codigo ?? ""}
-              onChange={e => {
-                const v = e.target.value;
-                setSelectedRep(v ? reps.find(r => String(r.rep_codigo) === v) || null : null);
-              }}
-              className="appearance-none rounded-lg border border-border bg-muted px-3 py-2 pr-7 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50">
-              <option value="">Todos os vendedores</option>
-              {reps.map(r => <option key={r.rep_codigo} value={r.rep_codigo}>{r.rep_nome}</option>)}
-            </select>
-            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-4 mb-8">
+          <div>
+            <h1 className="text-2xl font-bold">Painel do Gerente</h1>
+            <p className="text-muted-foreground text-sm">Monitorando: <span className="font-bold text-primary">{lojaLabel}</span></p>
           </div>
           <button onClick={() => onSetView("relatorios")}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border bg-muted text-sm text-muted-foreground hover:text-foreground hover:bg-primary/10 transition">
+            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-border bg-muted text-sm text-muted-foreground hover:text-foreground hover:bg-primary/10">
             <ClipboardList className="h-4 w-4" /> Relatórios
           </button>
         </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        {/* ── Sidebar: vendedores ─────────────────────────── */}
+        <div className="lg:col-span-3 space-y-4">
+          <h3 className="font-bold text-base flex items-center gap-2 px-1"><Briefcase className="h-5 w-5 text-primary" /> Colaboradores</h3>
+          {/* Desktop */}
+          <div className="hidden lg:flex flex-col gap-2 overflow-y-auto max-h-[600px] pr-1 no-scrollbar">
+            {repsLoading ? <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>
+              : vendedoresComTodos.map(v => (
+              <button key={v.rep_codigo}
+                onClick={() => setSelectedRep(v.rep_codigo === 0 ? { rep_codigo: 0, rep_nome: "Todos da loja" } : reps.find(r => r.rep_codigo === v.rep_codigo) ?? null as any)}
+                className={`w-full text-left p-4 rounded-2xl border transition-all shadow-sm hover:-translate-y-0.5 ${
+                  (selectedRep?.rep_codigo ?? -1) === v.rep_codigo
+                    ? "bg-primary border-primary text-primary-foreground shadow-lg"
+                    : "bg-card border-border hover:border-primary/50 hover:bg-muted/50"}`}>
+                <p className="font-bold text-sm truncate uppercase">{v.rep_nome}</p>
+                <p className={`text-[10px] ${(selectedRep?.rep_codigo ?? -1) === v.rep_codigo ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                  {v.rep_codigo === 0 ? "Toda a loja" : `ID: ${v.rep_codigo}`}
+                </p>
+              </button>
+            ))}
+          </div>
+          {/* Mobile */}
+          <div className="lg:hidden">
+            <div className="relative">
+              <select value={selectedRep?.rep_codigo ?? ""} onChange={e => selectRep(e.target.value)}
+                className="appearance-none w-full bg-card border border-border rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-primary/20 shadow-sm">
+                <option value="">Selecione o vendedor...</option>
+                {vendedoresComTodos.map(v => <option key={v.rep_codigo} value={v.rep_codigo}>{v.rep_nome}</option>)}
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            </div>
+          </div>
+        </div>
+
+        {/* ── Conteúdo principal ──────────────────────────── */}
+        <div className="lg:col-span-9 space-y-6 relative min-h-[400px]">
+          {selectedRep === null ? (
+            <div className="h-64 flex flex-col items-center justify-center border-2 border-dashed border-border rounded-3xl text-muted-foreground">
+              <Users className="h-12 w-12 mb-4 opacity-20" />
+              <p>Selecione um vendedor para ver a carteira</p>
+            </div>
+          ) : (
+            <>
+              {/* Overlay loading */}
+              {cLoading && (
+                <div className="absolute inset-0 bg-background/75 backdrop-blur-[2px] flex flex-col items-center justify-center z-20 rounded-3xl gap-3">
+                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                  <p className="text-sm font-medium">{progress ?? "Carregando..."}</p>
+                  {clientes.length > 0 && <p className="text-xs text-primary">{clientes.length} clientes...</p>}
+                </div>
+              )}
+
+              {/* Cards resumo */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                {[
+                  { label: "Clientes em carteira", val: stats.totalEmCarteira, icon: <Users className="h-5 w-5" />, color: "text-blue-500 bg-blue-500/10",
+                    onClick: () => { setMostrarTodaCarteira(true); setFiltroMotivo("TODOS"); setFiltroContatados(false); }, active: mostrarTodaCarteira },
+                  { label: "Potenciais hoje", val: stats.totalPotenciais, icon: <TrendingUp className="h-5 w-5" />, color: "text-orange-500 bg-orange-500/10",
+                    onClick: () => { setMostrarTodaCarteira(false); setFiltroMotivo("TODOS"); setFiltroContatados(false); }, active: !mostrarTodaCarteira && !filtroContatados && filtroMotivo === "TODOS" },
+                  { label: "Contatados hoje", val: stats.totalContatados, icon: <CheckCircle2 className="h-5 w-5" />, color: "text-green-500 bg-green-500/10",
+                    onClick: () => { setMostrarTodaCarteira(false); setFiltroMotivo("TODOS"); setFiltroContatados(true); }, active: filtroContatados },
+                  { label: "Meta % loja", val: vendedor?.meta ? Math.round((vendedor.realizado / vendedor.meta) * 100) : 0, icon: <Target className="h-5 w-5" />, color: "text-primary bg-primary/10",
+                    onClick: undefined, active: false, suffix: "%" },
+                ].map((card, i) => (
+                  <div key={i} onClick={card.onClick}
+                    className={`bg-card border p-4 sm:p-5 rounded-2xl shadow-sm flex flex-col gap-1.5 transition-all ${card.onClick ? "cursor-pointer hover:-translate-y-1 hover:shadow-md" : ""} ${card.active ? "border-primary ring-2 ring-primary/20 bg-primary/5" : "border-border"}`}>
+                    <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${card.color}`}>{card.icon}</div>
+                    <p className="text-xs text-muted-foreground font-medium">{card.label}</p>
+                    <p className="text-xl sm:text-2xl font-bold"><AnimatedNumber value={card.val} />{(card as any).suffix}</p>
+                    {card.active && i < 3 && <p className="text-[10px] text-primary font-bold animate-pulse uppercase">Vendo agora</p>}
+                  </div>
+                ))}
+              </div>
+
+              {/* Meta barra */}
+              {vendedor && vendedor.meta > 0 && (
+                <div className="bg-card border border-border p-4 rounded-2xl">
+                  <div className="flex justify-between text-sm mb-2">
+                    <span className="text-muted-foreground font-medium">{selectedRep.rep_codigo === 0 ? "Loja" : selectedRep.rep_nome}</span>
+                    <span className="font-bold">{moeda(vendedor.realizado)} / {moeda(vendedor.meta)}</span>
+                  </div>
+                  <MetaProgress meta={vendedor.meta} realizado={vendedor.realizado} />
+                </div>
+              )}
+
+              {/* CRM motivos + filtro categoria */}
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+                <div className="md:col-span-8 bg-card border border-border p-6 rounded-3xl shadow-sm">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="font-bold flex items-center gap-2"><PieChart className="h-4 w-4" /> Histórico CRM</h4>
+                    {filtroMotivo !== "TODOS" && <button onClick={() => setFiltroMotivo("TODOS")} className="text-xs text-primary hover:underline">Limpar</button>}
+                  </div>
+                  {Object.keys(stats.motivos).length === 0
+                    ? <p className="text-sm text-muted-foreground italic">Nenhum contato registrado.</p>
+                    : (
+                    <div className="flex flex-wrap gap-3">
+                      {Object.entries(stats.motivos).map(([motivo, qtd]) => (
+                        <button key={motivo}
+                          onClick={() => { setFiltroMotivo(motivo); setMostrarTodaCarteira(false); setFiltroContatados(false); }}
+                          className={`flex flex-col p-3 rounded-xl min-w-[110px] text-left border transition-all relative group overflow-hidden ${filtroMotivo === motivo ? "bg-primary/10 border-primary" : "bg-muted/40 border-transparent hover:border-border"}`}>
+                          <span className="text-[10px] uppercase font-bold text-muted-foreground">{STATUS_LABELS[motivo] || motivo}</span>
+                          <span className="text-lg font-bold text-primary"><AnimatedNumber value={qtd as number} /></span>
+                          <span className="absolute -right-1 -bottom-1 text-2xl opacity-0 group-hover:opacity-20 transition-all">{motiEmoji(motivo)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="md:col-span-4 bg-card border border-border p-6 rounded-3xl shadow-sm">
+                  <h4 className="font-bold mb-4 flex items-center gap-2"><Filter className="h-4 w-4" /> Categoria</h4>
+                  <div className="grid grid-cols-3 md:grid-cols-2 gap-2">
+                    {["TODAS","A","B","C","D"].map(cat => {
+                      const cc = cat !== "TODAS" ? catClasses[cat as Categoria] : null;
+                      return (
+                        <button key={cat} onClick={() => setFiltroCategoria(cat)}
+                          className={`px-2 py-2 rounded-xl text-xs font-bold border ring-2 transition-all ${
+                            filtroCategoria === cat
+                              ? cat === "TODAS" ? "bg-primary text-primary-foreground border-primary ring-primary/20 shadow-lg"
+                                : `${cc!.bg} ${cc!.text} border-transparent ring-transparent shadow-lg`
+                              : "ring-transparent bg-background text-muted-foreground border-border hover:border-primary/30"}`}>
+                          {cat === "TODAS" ? "Todas" : cat}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Busca */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <input placeholder={mostrarTodaCarteira ? "Pesquisar em toda a carteira..." : "Pesquisar nas oportunidades..."}
+                  value={filtroNome} onChange={e => setFiltroNome(e.target.value)}
+                  className="w-full bg-card border border-border rounded-2xl pl-10 pr-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/20" />
+              </div>
+
+              {/* Lista */}
+              <div className="space-y-3">
+                {paginada.map((c, idx) => {
+                  const statusColor = stats.statusPorCliente[String(c.id)] === "comprou" ? "border-green-500/40" :
+                    stats.statusPorCliente[String(c.id)] === "nao_comprou" ? "border-red-500/40" :
+                    stats.statusPorCliente[String(c.id)] === "retornar_contato" ? "border-blue-500/40" : "border-border";
+                  return (
+                    <div key={c.id}
+                      className={`bg-card border rounded-2xl p-4 flex items-center justify-between hover:shadow-md hover:bg-muted/20 transition-all animate-in fade-in slide-in-from-bottom-1 ${statusColor}`}
+                      style={{ animationDelay: `${Math.min(idx*30,800)}ms`, animationFillMode: "both" }}>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold truncate">{c.nome}</p>
+                        <p className="text-[10px] text-muted-foreground mt-0.5">
+                          {c.telefone}
+                          {stats.vendedorMap[String(c.repId)] && <> • <span className="text-primary font-medium">{stats.vendedorMap[String(c.repId)]}</span></>}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3 sm:gap-4 shrink-0">
+                        <span className={`h-6 w-6 rounded-md text-[10px] font-bold flex items-center justify-center ${catClasses[c.categoria].bg} ${catClasses[c.categoria].text}`}>
+                          {c.categoria}
+                        </span>
+                        {stats.contatadosHojeIds.includes(String(c.id)) ? (
+                          <span className="hidden sm:inline-flex items-center gap-1 text-green-500 text-xs font-medium"><CheckCircle2 className="h-4 w-4" /> Contatado</span>
+                        ) : (
+                          <span className="hidden sm:inline-flex items-center gap-1 text-amber-500 text-xs"><Circle className="h-4 w-4" /> Pendente</span>
+                        )}
+                        <button onClick={() => setHistoricoLogs(crmLogs.filter(l => String(l.clienteId) === String(c.id)))}
+                          className="p-2 hover:bg-primary/10 rounded-xl text-primary" title="Histórico CRM">
+                          <History className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+                {paginada.length === 0 && !cLoading && <p className="py-10 text-center text-muted-foreground italic">Nenhum cliente encontrado.</p>}
+              </div>
+
+              {/* Paginação */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-center gap-4 mt-6 py-6 border-t border-border">
+                  <button onClick={() => setPage(p=>Math.max(1,p-1))} disabled={page===1}
+                    className="flex items-center gap-1 px-4 py-2 rounded-xl border hover:bg-muted disabled:opacity-50 text-sm">
+                    <ChevronLeft className="h-4 w-4" /> Anterior
+                  </button>
+                  <span className="text-sm bg-muted/50 px-4 py-2 rounded-xl border">
+                    Pág <span className="text-primary font-bold">{page}</span> / {totalPages}
+                    <span className="text-xs text-muted-foreground ml-2">({stats.listaFiltrada.length})</span>
+                  </span>
+                  <button onClick={() => setPage(p=>Math.min(totalPages,p+1))} disabled={page===totalPages}
+                    className="flex items-center gap-1 px-4 py-2 rounded-xl border hover:bg-muted disabled:opacity-50 text-sm">
+                    Próxima <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
-      {/* Cards resumo */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
-        {[
-          { label: "Carteira", value: clientes.length, icon: <Users className="h-4 w-4 text-primary" />, bg: "bg-primary/10" },
-          { label: "Potenciais", value: clientes.filter(isPotencialHoje).length, icon: <Sparkles className="h-4 w-4 text-amber-500" />, bg: "bg-amber-500/10" },
-          { label: "Contatos hoje", value: new Set(logsHoje.filter(l => !selectedRep || l.rep_codigo === selectedRep.rep_codigo).map(l => l.clienteId)).size, icon: <TrendingUp className="h-4 w-4 text-green-500" />, bg: "bg-green-500/10" },
-          { label: "A resgatar", value: clientes.filter(c => diasDesde(c.ultimaCompra) >= 90).length, icon: <AlertCircle className="h-4 w-4 text-red-400" />, bg: "bg-red-500/10" },
-        ].map(card => (
-          <div key={card.label} className="bg-card border border-border rounded-2xl p-4">
-            <div className={`h-8 w-8 rounded-lg ${card.bg} flex items-center justify-center mb-2`}>{card.icon}</div>
-            <p className="text-xs text-muted-foreground">{card.label}</p>
-            <p className="text-2xl font-bold text-foreground"><AnimatedNumber value={card.value} /></p>
-          </div>
-        ))}
-      </div>
-
-      {/* Meta do vendedor selecionado */}
-      {selectedRep && vendedor && vendedor.meta > 0 && (
-        <div className="bg-card border border-border rounded-2xl p-4 mb-6 max-w-md">
-          <div className="flex justify-between text-sm mb-2">
-            <span className="font-medium text-foreground">{vendedor.nome}</span>
-            <span className="text-muted-foreground">{moeda(vendedor.realizado)} / {moeda(vendedor.meta)}</span>
-          </div>
-          <MetaProgress meta={vendedor.meta} realizado={vendedor.realizado} />
-        </div>
-      )}
-
-      {/* Lista de clientes */}
-      {cLoading || repsLoading ? (
-        <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
-          <Loader2 className="w-6 h-6 animate-spin text-primary" />
-          <p className="text-sm">{clientesProgress ?? "Carregando..."}</p>
-          {clientes.length > 0 && <p className="text-xs text-primary">{clientes.length} clientes carregados...</p>}
-        </div>
-      ) : (
-        <ClienteLista clientes={clientesOrdenados} glowMap={glowMap} statusMap={statusMap}
-          onCrm={(c) => setCrmModal(c)}
-          titulo={selectedRep ? `Carteira de ${selectedRep.rep_nome}` : "Carteira Total da Loja"} />
-      )}
-
-      {crmModal && (
-        <CrmModal cliente={crmModal} loja={loja} repCodigo={selectedRep?.rep_codigo ?? 0} repLogin={repLogin}
-          onClose={() => setCrmModal(null)} onSaved={handleCrmSaved} />
-      )}
+      {crmModal && <CrmModal cliente={crmModal} loja={loja} repCodigo={selectedRep?.rep_codigo ?? 0} repLogin={repLogin} onClose={() => setCrmModal(null)} onSaved={onSaved} />}
+      {historicoLogs !== null && <HistoricoModal logs={historicoLogs} onClose={() => setHistoricoLogs(null)} />}
+      <style dangerouslySetInnerHTML={{ __html: GLOW_CSS }} />
     </div>
   );
 }
@@ -935,84 +1093,73 @@ function RelatoriosView({ loja: initialLoja, isAdmin, onBack }:
 
   const { data: logs = [], isLoading } = useQuery<CrmLog[]>({
     queryKey: ["sc-crm-logs", loja],
-    queryFn: () => fetch(`${API_BASE}/sales-compass/crm-logs?loja=${loja}`).then(r => r.json()),
+    queryFn: () => fetch(`${API_BASE}/sales-compass/crm-logs?loja=${loja}`).then(r=>r.json()),
     staleTime: 30_000,
   });
 
-  const filtrados = useMemo(() => {
-    return logs.filter(l => {
-      if (filtroStatus !== "todos" && l.status !== filtroStatus) return false;
-      if (filtroInicio && new Date(l.dataFull) < new Date(filtroInicio)) return false;
-      if (filtroFim && new Date(l.dataFull) > new Date(filtroFim + "T23:59:59")) return false;
-      if (filtroCliente && !l.nomeCliente?.toLowerCase().includes(filtroCliente.toLowerCase())) return false;
-      return true;
-    });
-  }, [logs, filtroStatus, filtroInicio, filtroFim, filtroCliente]);
+  const filtrados = useMemo(() => logs.filter(l => {
+    if (filtroStatus !== "todos" && l.status !== filtroStatus) return false;
+    if (filtroInicio && new Date(l.dataFull) < new Date(filtroInicio)) return false;
+    if (filtroFim && new Date(l.dataFull) > new Date(filtroFim + "T23:59:59")) return false;
+    if (filtroCliente && !l.nomeCliente?.toLowerCase().includes(filtroCliente.toLowerCase())) return false;
+    return true;
+  }), [logs, filtroStatus, filtroInicio, filtroFim, filtroCliente]);
 
   const exportarCSV = () => {
-    const bom = "﻿";
     const header = "Data,Loja,Vendedor,ID Cliente,Cliente,Telefone,Status,Observação\n";
     const rows = filtrados.map(l => [
-      new Date(l.dataFull).toLocaleString("pt-BR"),
-      l.loja, l.repLogin, l.clienteId, l.nomeCliente, l.telefone,
-      STATUS_LABELS[l.status] || l.status,
-      `"${(l.obs || "").replace(/"/g, '""')}"`,
+      new Date(l.dataFull).toLocaleString("pt-BR"), l.loja, l.repLogin, l.clienteId,
+      l.nomeCliente, l.telefone, STATUS_LABELS[l.status] || l.status,
+      `"${(l.obs || "").replace(/"/g,'""')}"`,
     ].join(",")).join("\n");
-    const blob = new Blob([bom + header + rows], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
+    const blob = new Blob(["﻿" + header + rows], { type: "text/csv;charset=utf-8;" });
     const a = document.createElement("a");
-    a.href = url;
+    a.href = URL.createObjectURL(blob);
     a.download = `CRM_${loja.toUpperCase()}_${new Date().toISOString().slice(0,10)}.csv`;
     a.click();
-    URL.revokeObjectURL(url);
+    URL.revokeObjectURL(a.href);
   };
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
       <div className="flex items-center gap-3 mb-6">
-        <button onClick={onBack} className="p-2 rounded-xl hover:bg-muted transition">
-          <ArrowLeft className="h-4 w-4" />
-        </button>
+        <button onClick={onBack} className="p-2 rounded-xl hover:bg-muted"><ArrowLeft className="h-4 w-4" /></button>
         <div>
-          <h2 className="font-bold text-foreground text-xl flex items-center gap-2">
-            <ClipboardList className="h-5 w-5 text-primary" /> Relatórios CRM
-          </h2>
+          <h2 className="font-bold text-xl flex items-center gap-2"><ClipboardList className="h-5 w-5 text-primary" /> Relatórios CRM</h2>
           <p className="text-xs text-muted-foreground">{filtrados.length} registros</p>
         </div>
         <button onClick={exportarCSV}
-          className="ml-auto flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition">
+          className="ml-auto flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90">
           <Download className="h-4 w-4" /> Exportar CSV
         </button>
       </div>
 
-      {/* Filtros */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         {isAdmin && (
           <div className="relative">
-            <select value={loja} onChange={e => setLoja(e.target.value)}
-              className="appearance-none w-full rounded-lg border border-border bg-muted px-3 py-2 pr-7 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50">
+            <select value={loja} onChange={e=>setLoja(e.target.value)}
+              className="appearance-none w-full rounded-lg border border-border bg-muted px-3 py-2 pr-7 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50">
               {SC_LOJAS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
             </select>
             <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
           </div>
         )}
         <div className="relative">
-          <select value={filtroStatus} onChange={e => setFiltroStatus(e.target.value)}
-            className="appearance-none w-full rounded-lg border border-border bg-muted px-3 py-2 pr-7 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50">
+          <select value={filtroStatus} onChange={e=>setFiltroStatus(e.target.value)}
+            className="appearance-none w-full rounded-lg border border-border bg-muted px-3 py-2 pr-7 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50">
             <option value="todos">Todos os status</option>
-            {Object.entries(STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            {Object.entries(STATUS_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
           </select>
           <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
         </div>
-        <input type="date" value={filtroInicio} onChange={e => setFiltroInicio(e.target.value)}
-          className="rounded-lg border border-border bg-muted px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50" />
-        <input type="date" value={filtroFim} onChange={e => setFiltroFim(e.target.value)}
-          className="rounded-lg border border-border bg-muted px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50" />
-        <input placeholder="Filtrar por cliente..." value={filtroCliente} onChange={e => setFiltroCliente(e.target.value)}
-          className="col-span-2 rounded-lg border border-border bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50" />
+        <input type="date" value={filtroInicio} onChange={e=>setFiltroInicio(e.target.value)}
+          className="rounded-lg border border-border bg-muted px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+        <input type="date" value={filtroFim} onChange={e=>setFiltroFim(e.target.value)}
+          className="rounded-lg border border-border bg-muted px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+        <input placeholder="Filtrar por cliente..." value={filtroCliente} onChange={e=>setFiltroCliente(e.target.value)}
+          className="col-span-2 rounded-lg border border-border bg-muted px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50" />
       </div>
 
-      {/* Tabela */}
       {isLoading ? (
         <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
       ) : (
@@ -1020,27 +1167,24 @@ function RelatoriosView({ loja: initialLoja, isAdmin, onBack }:
           <table className="w-full text-sm min-w-[700px]">
             <thead>
               <tr className="border-b border-border bg-muted/50">
-                {["Data", "Vendedor", "Cliente", "Telefone", "Status", "Observação"].map(h => (
+                {["Data","Vendedor","Cliente","Telefone","Status","Observação"].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {filtrados.slice(0, 200).map((l, i) => (
-                <tr key={i} className="border-b border-border/50 last:border-0 hover:bg-muted/20 transition-colors">
-                  <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
-                    {new Date(l.dataFull).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}
-                  </td>
-                  <td className="px-4 py-3 text-xs font-mono text-foreground">{l.repLogin || "—"}</td>
-                  <td className="px-4 py-3 font-medium text-foreground">{l.nomeCliente}</td>
+              {filtrados.slice(0,200).map((l,i) => (
+                <tr key={i} className="border-b border-border/50 last:border-0 hover:bg-muted/20">
+                  <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">{new Date(l.dataFull).toLocaleString("pt-BR",{dateStyle:"short",timeStyle:"short"})}</td>
+                  <td className="px-4 py-3 text-xs font-mono">{l.repLogin||"—"}</td>
+                  <td className="px-4 py-3 font-medium">{l.nomeCliente}</td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">{l.telefone}</td>
                   <td className="px-4 py-3">
                     <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
                       l.status === "comprou" ? "bg-green-500/10 text-green-500" :
                       l.status === "nao_comprou" ? "bg-red-500/10 text-red-400" :
                       l.status === "retornar_contato" ? "bg-blue-500/10 text-blue-400" :
-                      "bg-muted text-muted-foreground"
-                    }`}>
+                      "bg-muted text-muted-foreground"}`}>
                       {STATUS_LABELS[l.status] || l.status}
                     </span>
                   </td>
@@ -1048,7 +1192,7 @@ function RelatoriosView({ loja: initialLoja, isAdmin, onBack }:
                 </tr>
               ))}
               {filtrados.length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-10 text-center text-muted-foreground text-sm italic">Nenhum registro encontrado.</td></tr>
+                <tr><td colSpan={6} className="px-4 py-10 text-center text-muted-foreground italic">Nenhum registro encontrado.</td></tr>
               )}
             </tbody>
           </table>
@@ -1059,7 +1203,7 @@ function RelatoriosView({ loja: initialLoja, isAdmin, onBack }:
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ── PÁGINA PRINCIPAL: SalesCompass
+// ── PÁGINA PRINCIPAL
 // ══════════════════════════════════════════════════════════════════════════════
 export default function SalesCompass() {
   const { user, logout } = useAuth();
@@ -1073,102 +1217,88 @@ export default function SalesCompass() {
     localStorage.setItem("dovale_theme", dark ? "dark" : "light");
   }, [dark]);
 
-  // Determina perfil com base no app salescompass
   const appConfig = (user as any)?.apps?.salescompass;
-  const role = appConfig?.role ?? "viewer";
-  const loja = appConfig?.loja ?? "l3";
+  const role      = appConfig?.role ?? "viewer";
+  const loja      = appConfig?.loja ?? "l3";
   const repCodigo: number = role === "viewer" ? (Number(appConfig?.usu_codigo_sistema) || 0) : 0;
-  const repLogin = user?.usuario ?? "";
+  const repLogin  = user?.usuario ?? "";
 
-  const isAdmin = role === "admin" || user?.hubRole === "admin";
+  const isAdmin   = role === "admin" || user?.hubRole === "admin";
   const isGerente = role === "manager" || role === "admin" || user?.hubRole === "admin";
 
-  // Redireciona para view adequada ao perfil
   useEffect(() => {
-    if (isAdmin) { setView("admin"); return; }
+    if (isAdmin)   { setView("admin");   return; }
     if (isGerente) { setView("gerente"); return; }
     setView("rep");
   }, [isAdmin, isGerente]);
 
-  // Título da view no header
-  const viewLabels: Record<ViewType, string> = {
-    rep: "Minha Carteira",
-    categoria: `Categoria ${selectedCategoria}`,
-    gerente: "Painel do Gerente",
-    admin: "Painel Admin",
-    relatorios: "Relatórios CRM",
+  const viewLabels: Record<ViewType,string> = {
+    rep: "Minha Carteira", categoria: `Categoria ${selectedCategoria}`,
+    gerente: "Painel do Gerente", admin: "Painel Admin", relatorios: "Relatórios CRM",
   };
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      {/* Header */}
       <header className="border-b border-border bg-gradient-card">
         <div className="container mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button onClick={() => navigate("/hub")} className="relative h-9 w-36 overflow-hidden" title="Ir para o Hub">
-              <img src={logoBlue} alt="Dovale"
-                className={`absolute inset-0 h-full w-auto object-contain transition-all duration-700 ease-in-out ${dark ? "opacity-0 scale-90 blur-sm" : "opacity-100 scale-100"}`} />
-              <img src={logoWhite} alt="Dovale"
-                className={`absolute inset-0 h-full w-auto object-contain transition-all duration-700 ease-in-out ${dark ? "opacity-100 scale-100" : "opacity-0 scale-90 blur-sm"}`} />
+              <img src={logoBlue} alt="Dovale" className={`absolute inset-0 h-full w-auto object-contain transition-all duration-700 ${dark ? "opacity-0 scale-90 blur-sm" : "opacity-100 scale-100"}`} />
+              <img src={logoWhite} alt="Dovale" className={`absolute inset-0 h-full w-auto object-contain transition-all duration-700 ${dark ? "opacity-100 scale-100" : "opacity-0 scale-90 blur-sm"}`} />
             </button>
             <div className="h-5 w-px bg-border" />
-            <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground font-medium">
-              Sales Compass
-            </span>
+            <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground font-medium">Sales Compass</span>
             <div className="h-5 w-px bg-border hidden sm:block" />
             <span className="text-xs text-muted-foreground hidden sm:block">{viewLabels[view]}</span>
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Navegação interna */}
             {isGerente && (
               <div className="hidden sm:flex items-center gap-1">
                 {!isAdmin && (
                   <button onClick={() => setView("rep")}
-                    className={`px-3 py-1.5 rounded-lg text-xs transition-colors ${view === "rep" ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground hover:text-foreground"}`}>
+                    className={`px-3 py-1.5 rounded-lg text-xs transition-colors ${view==="rep" ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground hover:text-foreground"}`}>
                     Minha Carteira
                   </button>
                 )}
                 <button onClick={() => setView(isAdmin ? "admin" : "gerente")}
-                  className={`px-3 py-1.5 rounded-lg text-xs transition-colors ${view === "gerente" || view === "admin" ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground hover:text-foreground"}`}>
+                  className={`px-3 py-1.5 rounded-lg text-xs transition-colors ${view==="gerente"||view==="admin" ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground hover:text-foreground"}`}>
                   Painel
                 </button>
                 <button onClick={() => setView("relatorios")}
-                  className={`px-3 py-1.5 rounded-lg text-xs transition-colors ${view === "relatorios" ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground hover:text-foreground"}`}>
+                  className={`px-3 py-1.5 rounded-lg text-xs transition-colors ${view==="relatorios" ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground hover:text-foreground"}`}>
                   Relatórios
                 </button>
               </div>
             )}
-            <button onClick={() => setDark(d => !d)}
-              className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors">
+            <button onClick={() => setDark(d=>!d)}
+              className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:bg-primary/10 hover:text-primary">
               {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
             <button onClick={() => { logout(); navigate("/login"); }}
-              className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors">
+              className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
               <LogOut className="w-4 h-4" />
             </button>
           </div>
         </div>
       </header>
 
-      {/* ── Conteúdo ────────────────────────────────────────────────────────── */}
+      {/* Conteúdo */}
       <main className="flex-1 flex flex-col">
         {view === "rep" && (
           <RepView loja={loja} repCodigo={repCodigo} repLogin={repLogin} dark={dark}
-            onSetView={setView}
-            onSetCategoria={(c) => setSelectedCategoria(c)} />
+            onSetView={setView} onSetCategoria={c => setSelectedCategoria(c)} />
         )}
         {view === "categoria" && (
           <CategoriaView loja={loja} repCodigo={repCodigo} repLogin={repLogin}
             categoria={selectedCategoria} onBack={() => setView("rep")} />
         )}
         {view === "gerente" && (
-          <GerenteView loja={loja} repLogin={repLogin} isAdmin={false}
-            onSetView={setView} />
+          <GerenteView loja={loja} repLogin={repLogin} isAdmin={false} onSetView={setView} />
         )}
         {view === "admin" && (
-          <GerenteView loja={loja} repLogin={repLogin} isAdmin={true}
-            onSetView={setView} />
+          <GerenteView loja={loja} repLogin={repLogin} isAdmin={true} onSetView={setView} />
         )}
         {view === "relatorios" && (
           <RelatoriosView loja={loja} isAdmin={isAdmin}

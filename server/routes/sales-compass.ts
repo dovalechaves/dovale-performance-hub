@@ -138,7 +138,6 @@ router.get("/clientes", async (req, res) => {
 
     send("progress", { status: "processing", message: `Processando ${rows.length} registros...` });
 
-    // ── Agrupa por cliente ───────────────────────────────────────────────
     const clientesMap: Record<string, {
       id: string; nome: string; telefone: string; cidade: string; repId: any;
       pedidos: Map<any, { data: any; valor: number }>;

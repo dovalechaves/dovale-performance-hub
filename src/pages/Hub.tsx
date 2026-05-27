@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { BarChart3, Calculator, LogOut, Sun, Moon, Users, RefreshCw, Loader2, ChevronDown, Settings2, Send, Archive, Bot, Database, ClipboardList, UserPlus, ShieldCheck, BellRing, ShoppingCart, Sparkles, Compass } from "lucide-react";
@@ -130,6 +130,105 @@ const APP_BY_ROUTE: Record<string, keyof AuthManagedUser["apps"]> = {
   "/sugestao-compras": "sugestaocompras",
   "/sales-compass": "salescompass",
 };
+
+// ─── Rep Selector (Sales Compass) ────────────────────────────────────────────
+const scVendCache: Record<string, { rep_codigo: number; rep_nome: string }[]> = {};
+
+function RepSelectorCell({
+  lojaKey,
+  value,
+  onChange,
+  disabled,
+}: {
+  lojaKey: string;
+  value: number | null;
+  onChange: (v: number | null) => void;
+  disabled: boolean;
+}) {
+  const [options, setOptions] = useState<{ rep_codigo: number; rep_nome: string }[]>([]);
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Display name for the current value
+  const currentName = options.find((o) => o.rep_codigo === value)?.rep_nome ?? "";
+
+  // Sync query text when value / options change
+  useEffect(() => {
+    setQuery(value && currentName ? currentName : "");
+  }, [value, currentName]);
+
+  // Fetch vendedores when loja changes
+  useEffect(() => {
+    if (!lojaKey) { setOptions([]); return; }
+    if (scVendCache[lojaKey]) { setOptions(scVendCache[lojaKey]); return; }
+    setLoading(true);
+    fetch(`${API_BASE}/sales-compass/vendedores?loja=${encodeURIComponent(lojaKey)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        const list = Array.isArray(data) ? data : [];
+        scVendCache[lojaKey] = list;
+        setOptions(list);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [lojaKey]);
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        // Revert query to current name on blur
+        setQuery(value && currentName ? currentName : "");
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [value, currentName]);
+
+  const filtered = query
+    ? options.filter((o) =>
+        o.rep_nome.toLowerCase().includes(query.toLowerCase()) ||
+        String(o.rep_codigo).includes(query)
+      )
+    : options;
+
+  return (
+    <div ref={containerRef} className="relative w-44">
+      <input
+        type="text"
+        value={query}
+        disabled={disabled || !lojaKey}
+        placeholder={loading ? "Carregando..." : lojaKey ? "Buscar rep..." : "— sem loja —"}
+        onFocus={() => { setOpen(true); setQuery(""); }}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        className="w-full rounded-lg border border-border bg-muted px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40"
+      />
+      {open && filtered.length > 0 && (
+        <ul className="absolute z-50 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-border bg-popover shadow-lg">
+          <li
+            onMouseDown={() => { onChange(null); setQuery(""); setOpen(false); }}
+            className="cursor-pointer px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted"
+          >
+            — Nenhum —
+          </li>
+          {filtered.map((o) => (
+            <li
+              key={o.rep_codigo}
+              onMouseDown={() => { onChange(o.rep_codigo); setQuery(o.rep_nome); setOpen(false); }}
+              className={`cursor-pointer px-3 py-1.5 text-xs hover:bg-muted ${value === o.rep_codigo ? "font-semibold text-primary" : "text-foreground"}`}
+            >
+              {o.rep_nome}
+              <span className="ml-1.5 text-[10px] text-muted-foreground">#{o.rep_codigo}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 export default function Hub() {
   const { user, logout } = useAuth();
@@ -1316,11 +1415,11 @@ export default function Hub() {
                           </div>
                         </td>
                         <td className="px-4 py-3">
-                          <input
-                            type="number"
-                            value={(u.apps as any).salescompass?.usu_codigo_sistema ?? ""}
-                            onChange={async (e) => {
-                              const val = e.target.value ? Number(e.target.value) : null;
+                          <RepSelectorCell
+                            lojaKey={(u.apps as any).salescompass?.loja ?? ""}
+                            value={(u.apps as any).salescompass?.usu_codigo_sistema ?? null}
+                            disabled={savingUser === u.usuario || !u.can_access_hub || !((u.apps as any).salescompass?.can_access)}
+                            onChange={async (val) => {
                               const next: AuthManagedUser = {
                                 ...u,
                                 apps: {
@@ -1334,9 +1433,6 @@ export default function Hub() {
                               updateManagedUser(u.usuario, () => next);
                               await persistUser(next);
                             }}
-                            disabled={savingUser === u.usuario || !u.can_access_hub || !((u.apps as any).salescompass?.can_access)}
-                            placeholder="cod.rep"
-                            className="w-20 rounded-lg border border-border bg-muted px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40"
                           />
                         </td>
                         <td className="px-4 py-3 text-xs">

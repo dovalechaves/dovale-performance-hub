@@ -1280,7 +1280,7 @@ export default function SalesCompass() {
   // admin  → painel completo com seleção de loja
   // manager → painel da loja fixa com seleção de vendedor
   // viewer  → apenas a própria carteira
-  const isAdmin   = role === "admin" || user?.hubRole === "admin";
+  const isAdmin   = role === "admin";
   const isGerente = role === "manager" || isAdmin;
   // Gerente "híbrido" ou vendedor com código próprio → pode ver RepView
   const hasOwnCarteira = !isAdmin && repCodigo > 0;

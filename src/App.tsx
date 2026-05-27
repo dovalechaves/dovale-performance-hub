@@ -20,6 +20,7 @@ import Score from "./pages/Score.tsx";
 import Cobranca from "./pages/Cobranca.tsx";
 import EcommerceDisparo from "./pages/EcommerceDisparo.tsx";
 import SugestaoCompras from "./pages/SugestaoCompras.tsx";
+import SalesCompass from "./pages/SalesCompass.tsx";
 import React from "react";
 
 const queryClient = new QueryClient();
@@ -127,6 +128,14 @@ function SugestaoComprasRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function SalesCompassRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.canAccessHub) return <Navigate to="/login" replace />;
+  if (!(user as any).apps.salescompass?.canAccess) return <Navigate to="/hub" replace />;
+  return <>{children}</>;
+}
+
 function AdminManagerRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
@@ -160,6 +169,7 @@ const App = () => (
             <Route path="/cobranca" element={<CobrancaRoute><Cobranca /></CobrancaRoute>} />
             <Route path="/ecommerce-disparo" element={<EcommerceDisparoRoute><EcommerceDisparo /></EcommerceDisparoRoute>} />
             <Route path="/sugestao-compras" element={<SugestaoComprasRoute><SugestaoCompras /></SugestaoComprasRoute>} />
+            <Route path="/sales-compass" element={<SalesCompassRoute><SalesCompass /></SalesCompassRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

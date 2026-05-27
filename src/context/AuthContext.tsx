@@ -73,6 +73,12 @@ interface AuthUser {
       role: Role;
       loja: string | null;
     };
+    salescompass: {
+      canAccess: boolean;
+      role: Role;
+      loja: string | null;
+      usu_codigo_sistema?: number | null; // rep_codigo do vendedor
+    };
   };
 }
 
@@ -100,6 +106,7 @@ interface AuthContextValue {
       cobranca?: { role?: string; loja?: string | null; can_access?: boolean };
       ecommercedisparo?: { role?: string; loja?: string | null; can_access?: boolean };
       sugestaocompras?: { role?: string; loja?: string | null; can_access?: boolean };
+      salescompass?: { role?: string; loja?: string | null; can_access?: boolean; usu_codigo_sistema?: number | null };
     },
     hubRole?: string
   ) => void;
@@ -134,6 +141,7 @@ function buildUser(
     cobranca?: { role?: string; loja?: string | null; can_access?: boolean };
     ecommercedisparo?: { role?: string; loja?: string | null; can_access?: boolean };
     sugestaocompras?: { role?: string; loja?: string | null; can_access?: boolean };
+    salescompass?: { role?: string; loja?: string | null; can_access?: boolean; usu_codigo_sistema?: number | null };
   },
   apiHubRole?: string
 ): AuthUser {
@@ -165,6 +173,10 @@ function buildUser(
   const ecommerceDisparoAccess = apiApps?.ecommercedisparo?.can_access ?? false;
   const sugestaoComprasRole = resolveRole(usuario, apiApps?.sugestaocompras?.role ?? apiRole);
   const sugestaoComprasAccess = apiApps?.sugestaocompras?.can_access ?? false;
+  const salescompassRole = resolveRole(usuario, apiApps?.salescompass?.role ?? apiRole);
+  const salescompassAccess = apiApps?.salescompass?.can_access ?? false;
+  const salescompassLoja = apiApps?.salescompass?.loja ?? null;
+  const salescompassRepCodigo = apiApps?.salescompass?.usu_codigo_sistema ?? null;
 
   return {
     usuario,
@@ -238,6 +250,12 @@ function buildUser(
         role: sugestaoComprasRole,
         loja: null,
       },
+      salescompass: {
+        canAccess: salescompassAccess,
+        role: salescompassRole,
+        loja: salescompassLoja,
+        usu_codigo_sistema: salescompassRepCodigo,
+      },
     },
   };
 }
@@ -276,6 +294,10 @@ function loadFromStorage(): AuthUser | null {
     const ecommerceDisparoAccess = (parsed.apps as any)?.ecommercedisparo?.canAccess ?? false;
     const sugestaoComprasRole = (parsed.apps as any)?.sugestaocompras?.role ?? parsed.role;
     const sugestaoComprasAccess = (parsed.apps as any)?.sugestaocompras?.canAccess ?? false;
+    const salescompassRole = (parsed.apps as any)?.salescompass?.role ?? parsed.role;
+    const salescompassAccess = (parsed.apps as any)?.salescompass?.canAccess ?? false;
+    const salescompassLoja = (parsed.apps as any)?.salescompass?.loja ?? null;
+    const salescompassRepCodigo = (parsed.apps as any)?.salescompass?.usu_codigo_sistema ?? null;
 
     return {
       usuario: parsed.usuario,
@@ -349,6 +371,12 @@ function loadFromStorage(): AuthUser | null {
           role: sugestaoComprasRole,
           loja: null,
         },
+        salescompass: {
+          canAccess: salescompassAccess,
+          role: salescompassRole,
+          loja: salescompassLoja,
+          usu_codigo_sistema: salescompassRepCodigo,
+        },
       },
     };
   } catch {
@@ -407,6 +435,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       cobranca?: { role?: string; loja?: string | null; can_access?: boolean };
       ecommercedisparo?: { role?: string; loja?: string | null; can_access?: boolean };
       sugestaocompras?: { role?: string; loja?: string | null; can_access?: boolean };
+      salescompass?: { role?: string; loja?: string | null; can_access?: boolean; usu_codigo_sistema?: number | null };
     },
     hubRole?: string
   ) => {

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import { BarChart3, Calculator, LogOut, Sun, Moon, Users, RefreshCw, Loader2, ChevronDown, Settings2, Send, Archive, Bot, Database, ClipboardList, UserPlus, ShieldCheck, BellRing, ShoppingCart, Sparkles } from "lucide-react";
+import { BarChart3, Calculator, LogOut, Sun, Moon, Users, RefreshCw, Loader2, ChevronDown, Settings2, Send, Archive, Bot, Database, ClipboardList, UserPlus, ShieldCheck, BellRing, ShoppingCart, Sparkles, Compass } from "lucide-react";
 import logoBlue from "@/assets/logo-blue.png";
 import logoWhite from "@/assets/logo-white.png";
 import { API_BASE, LOJAS, getAuthUsers, updateAuthUserRole, type AuthManagedUser } from "@/services/api";
@@ -106,6 +106,13 @@ const APPS: AppCard[] = [
     route: "/sugestao-compras",
     color: "from-violet-500/20 to-violet-600/10 border-violet-500/30 hover:border-violet-500/60",
   },
+  {
+    title: "Sales Compass",
+    description: "CRM de carteira de clientes com metas por vendedor, categorias A-D e histórico de contatos.",
+    icon: <Compass className="w-8 h-8" />,
+    route: "/sales-compass",
+    color: "from-fuchsia-500/20 to-pink-600/10 border-fuchsia-500/30 hover:border-fuchsia-500/60",
+  },
 ];
 
 const APP_BY_ROUTE: Record<string, keyof AuthManagedUser["apps"]> = {
@@ -121,6 +128,7 @@ const APP_BY_ROUTE: Record<string, keyof AuthManagedUser["apps"]> = {
   "/cobranca": "cobranca",
   "/ecommerce-disparo": "ecommercedisparo",
   "/sugestao-compras": "sugestaocompras",
+  "/sales-compass": "salescompass",
 };
 
 export default function Hub() {
@@ -377,7 +385,7 @@ export default function Hub() {
             </div>
 
             <div className="rounded-xl border border-border overflow-x-auto">
-              <table className="w-full text-sm min-w-[1900px]">
+              <table className="w-full text-sm min-w-[2200px]">
                 <thead>
                   <tr className="border-b border-border bg-muted/50">
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Usuário</th>
@@ -411,13 +419,17 @@ export default function Hub() {
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role EC</th>
                     <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Sug. Compras</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role SC</th>
+                    <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Sales Compass</th>
+                    <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role SCmp</th>
+                    <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Loja SCmp</th>
+                    <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Rep SCmp</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {usersLoading ? (
                     <tr>
-                      <td colSpan={30} className="px-4 py-8 text-center text-muted-foreground">
+                      <td colSpan={34} className="px-4 py-8 text-center text-muted-foreground">
                         <Loader2 className="w-5 h-5 animate-spin mx-auto" />
                       </td>
                     </tr>
@@ -426,9 +438,7 @@ export default function Hub() {
                       <td colSpan={30} className="px-4 py-8 text-center text-muted-foreground text-xs">
                         {appUserFilter === "all"
                           ? "Nenhum usuário encontrado para a busca informada."
-                          : "Nenhum usuário habilitado no Hub e no app selecionado."}
-                      </td>
-                    </tr>
+                          : "Nenhum usuário habilitado no Hub e no app selecionado."}</td></tr>
                   ) : (
                     pagedUsers.map((u) => (
                       <tr key={u.usuario} className="border-b border-border/50 last:border-0 hover:bg-muted/30 transition-colors">
@@ -493,7 +503,11 @@ export default function Hub() {
                                     ...u.apps.sugestaocompras,
                                     can_access: enabled ? u.apps.sugestaocompras.can_access : false,
                                   },
-                                },
+                                  salescompass: {
+                                    ...(u.apps as any).salescompass,
+                                    can_access: enabled ? ((u.apps as any).salescompass?.can_access ?? false) : false,
+                                  },
+                                } as any,
                                 can_access_dashboard: enabled ? u.apps.dashboard.can_access : false,
                               };
                               updateManagedUser(u.usuario, () => next);
@@ -1219,6 +1233,111 @@ export default function Hub() {
                             </select>
                             <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
                           </div>
+                        </td>
+                        {/* ── Sales Compass ── */}
+                        <td className="px-4 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={(u.apps as any).salescompass?.can_access ?? false}
+                            onChange={async (e) => {
+                              const next: AuthManagedUser = {
+                                ...u,
+                                apps: {
+                                  ...u.apps,
+                                  salescompass: {
+                                    ...(u.apps as any).salescompass,
+                                    can_access: e.target.checked,
+                                  },
+                                } as any,
+                              };
+                              updateManagedUser(u.usuario, () => next);
+                              await persistUser(next);
+                            }}
+                            disabled={savingUser === u.usuario || !u.can_access_hub}
+                            className="h-4 w-4 rounded border-border bg-muted text-primary focus:ring-primary/50 disabled:opacity-40"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="relative inline-block">
+                            <select
+                              value={(u.apps as any).salescompass?.role ?? "viewer"}
+                              onChange={async (e) => {
+                                const nextRole = e.target.value as Role;
+                                const next: AuthManagedUser = {
+                                  ...u,
+                                  apps: {
+                                    ...u.apps,
+                                    salescompass: {
+                                      ...(u.apps as any).salescompass,
+                                      role: nextRole,
+                                    },
+                                  } as any,
+                                };
+                                updateManagedUser(u.usuario, () => next);
+                                await persistUser(next);
+                              }}
+                              disabled={savingUser === u.usuario || !u.can_access_hub}
+                              className="appearance-none rounded-lg border border-border bg-muted px-3 py-1.5 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40"
+                            >
+                              {(Object.keys(ROLE_LABELS) as Role[]).map((r) => (
+                                <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                              ))}
+                            </select>
+                            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="relative inline-block">
+                            <select
+                              value={(u.apps as any).salescompass?.loja ?? ""}
+                              onChange={async (e) => {
+                                const next: AuthManagedUser = {
+                                  ...u,
+                                  apps: {
+                                    ...u.apps,
+                                    salescompass: {
+                                      ...(u.apps as any).salescompass,
+                                      loja: e.target.value || null,
+                                    },
+                                  } as any,
+                                };
+                                updateManagedUser(u.usuario, () => next);
+                                await persistUser(next);
+                              }}
+                              disabled={savingUser === u.usuario || !u.can_access_hub || !((u.apps as any).salescompass?.can_access)}
+                              className="appearance-none rounded-lg border border-border bg-muted px-3 py-1.5 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40"
+                            >
+                              <option value="">—</option>
+                              {[{value:"l3",label:"RJ"},{value:"l2",label:"Santana"},{value:"bh",label:"BH"},{value:"campinas",label:"Campinas"},{value:"riopreto",label:"Rio Preto"},{value:"fortaleza",label:"Fortaleza"}].map((l) => (
+                                <option key={l.value} value={l.value}>{l.label}</option>
+                              ))}
+                            </select>
+                            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <input
+                            type="number"
+                            value={(u.apps as any).salescompass?.usu_codigo_sistema ?? ""}
+                            onChange={async (e) => {
+                              const val = e.target.value ? Number(e.target.value) : null;
+                              const next: AuthManagedUser = {
+                                ...u,
+                                apps: {
+                                  ...u.apps,
+                                  salescompass: {
+                                    ...(u.apps as any).salescompass,
+                                    usu_codigo_sistema: val,
+                                  },
+                                } as any,
+                              };
+                              updateManagedUser(u.usuario, () => next);
+                              await persistUser(next);
+                            }}
+                            disabled={savingUser === u.usuario || !u.can_access_hub || !((u.apps as any).salescompass?.can_access)}
+                            placeholder="cod.rep"
+                            className="w-20 rounded-lg border border-border bg-muted px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40"
+                          />
                         </td>
                         <td className="px-4 py-3 text-xs">
                           {savingUser === u.usuario && <span className="text-muted-foreground">Salvando...</span>}

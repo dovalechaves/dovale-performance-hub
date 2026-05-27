@@ -131,6 +131,13 @@ export interface AuthManagedUser {
       loja: string | null;
       can_access: boolean;
     };
+    salescompass: {
+      app_key: "salescompass";
+      role: "admin" | "manager" | "viewer";
+      loja: string | null;
+      can_access: boolean;
+      usu_codigo_sistema?: number | null;
+    };
   };
 }
 

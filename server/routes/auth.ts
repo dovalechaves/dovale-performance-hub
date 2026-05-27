@@ -5,7 +5,7 @@ import { getPool } from "../db/sqlserver";
 const router = Router();
 const VALID_ROLES = ["admin", "manager", "viewer"] as const;
 const VALID_HUB_ROLES = ["admin", "viewer"] as const;
-const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento", "assistente", "multipreco", "inventario", "onboarding", "score", "cobranca", "ecommercedisparo", "sugestaocompras"] as const;
+const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento", "assistente", "multipreco", "inventario", "onboarding", "score", "cobranca", "ecommercedisparo", "sugestaocompras", "salescompass"] as const;
 const ECOMMERCE_DISPARO_ALLOWED = (process.env.ECOMMERCE_DISPARO_ALLOWED_USERS ?? "henrique.berbert,andreza")
   .split(",")
   .map((u) => u.trim().toLowerCase())
@@ -178,6 +178,12 @@ function buildDefaultApps(usuario: string, localRole: unknown, localLoja: unknow
       loja: null,
       can_access: false,
     },
+    salescompass: {
+      app_key: "salescompass" as AppKey,
+      role: baseRole,
+      loja: null,
+      can_access: false,
+    },
   };
 }
 
@@ -203,6 +209,7 @@ function mergeApps(
     cobranca: { ...defaults.cobranca },
     ecommercedisparo: { ...defaults.ecommercedisparo },
     sugestaocompras: { ...defaults.sugestaocompras },
+    salescompass: { ...defaults.salescompass },
   };
 
   for (const row of appRows) {
@@ -212,11 +219,12 @@ function mergeApps(
     merged[appKey] = {
       app_key: appKey,
       role,
-      loja: (appKey === "dashboard" || appKey === "calculadora" || appKey === "fechamento") && role === "manager" ? (row?.loja ? String(row.loja) : null) : null,
+      loja: (appKey === "dashboard" || appKey === "calculadora" || appKey === "fechamento" || appKey === "salescompass") && role === "manager" ? (row?.loja ? String(row.loja) : null) :
+            appKey === "salescompass" && role !== "admin" ? (row?.loja ? String(row.loja) : null) : null,
       can_access: appKey === "ecommercedisparo"
         ? isEnabledFlag(row?.ativo) && canAccessEcommerceDisparo(usuario, hubRole)
         : isEnabledFlag(row?.ativo),
-      ...(appKey === "inventario" && row?.usu_codigo_sistema != null ? { usu_codigo_sistema: Number(row.usu_codigo_sistema) } : {}),
+      ...((appKey === "inventario" || appKey === "salescompass") && row?.usu_codigo_sistema != null ? { usu_codigo_sistema: Number(row.usu_codigo_sistema) } : {}),
     };
   }
 
@@ -255,6 +263,7 @@ function normalizeAppsPayload(
     cobranca: { ...defaults.cobranca },
     ecommercedisparo: { ...defaults.ecommercedisparo },
     sugestaocompras: { ...defaults.sugestaocompras },
+    salescompass: { ...defaults.salescompass },
   };
 
   if (payload && typeof payload === "object") {
@@ -263,13 +272,17 @@ function normalizeAppsPayload(
       const raw = rawApps[appKey];
       if (!raw || typeof raw !== "object") continue;
       const role = isRole(raw.role) ? raw.role : merged[appKey].role;
+      const lojaValue = (appKey === "dashboard" || appKey === "calculadora" || appKey === "fechamento" || appKey === "salescompass")
+        ? (raw.loja ? String(raw.loja) : null)
+        : null;
       merged[appKey] = {
         app_key: appKey,
         role,
-        loja: (appKey === "dashboard" || appKey === "calculadora" || appKey === "fechamento") && role === "manager" ? (raw.loja ? String(raw.loja) : null) : null,
+        loja: lojaValue,
         can_access: appKey === "ecommercedisparo"
           ? (typeof raw.can_access === "boolean" ? raw.can_access : merged[appKey].can_access) && canAccessEcommerceDisparo(usuario, hubRole)
           : typeof raw.can_access === "boolean" ? raw.can_access : merged[appKey].can_access,
+        ...(appKey === "salescompass" && raw.usu_codigo_sistema != null ? { usu_codigo_sistema: Number(raw.usu_codigo_sistema) } : {}),
       };
     }
   }
@@ -474,7 +487,7 @@ router.get("/users", async (req, res) => {
       pool.request().query(`
         SELECT usuario, app_key, role, loja, ativo, usu_codigo_sistema
         FROM dbo.USUARIOS_APPS
-        WHERE app_key IN ('dashboard', 'calculadora', 'disparo', 'fechamento', 'assistente', 'multipreco', 'inventario', 'onboarding', 'score', 'cobranca', 'ecommercedisparo', 'sugestaocompras')
+        WHERE app_key IN ('dashboard', 'calculadora', 'disparo', 'fechamento', 'assistente', 'multipreco', 'inventario', 'onboarding', 'score', 'cobranca', 'ecommercedisparo', 'sugestaocompras', 'salescompass')
       `),
     ]);
 
@@ -640,9 +653,10 @@ router.put("/role", async (req, res) => {
           INSERT (usuario, senha_hash, role, loja, ativo, hub_role) VALUES (@usuario, '', @role, @loja, @ativo, @hub_role);
       `);
 
-    // Extract usu_codigo_sistema from inventario app payload
+    // Extract usu_codigo_sistema from inventario and salescompass app payloads
     const rawApps = (apps && typeof apps === "object") ? apps as Record<string, any> : {};
     const invUsuCodigoSistema = rawApps?.inventario?.usu_codigo_sistema ?? null;
+    const scRepCodigo = rawApps?.salescompass?.usu_codigo_sistema ?? null;
 
     for (const appKey of MANAGED_APPS) {
       const app = normalizedApps[appKey];
@@ -655,6 +669,18 @@ router.put("/role", async (req, res) => {
 
       if (appKey === "inventario") {
         r.input("usu_codigo_sistema", invUsuCodigoSistema);
+        await r.query(`
+          MERGE dbo.USUARIOS_APPS AS target
+          USING (SELECT @usuario AS usuario, @app_key AS app_key) AS source
+            ON target.usuario = source.usuario AND target.app_key = source.app_key
+          WHEN MATCHED THEN
+            UPDATE SET role = @role, loja = @loja, ativo = @ativo, usu_codigo_sistema = @usu_codigo_sistema
+          WHEN NOT MATCHED THEN
+            INSERT (usuario, app_key, role, loja, ativo, usu_codigo_sistema)
+            VALUES (@usuario, @app_key, @role, @loja, @ativo, @usu_codigo_sistema);
+        `);
+      } else if (appKey === "salescompass") {
+        r.input("usu_codigo_sistema", scRepCodigo);
         await r.query(`
           MERGE dbo.USUARIOS_APPS AS target
           USING (SELECT @usuario AS usuario, @app_key AS app_key) AS source

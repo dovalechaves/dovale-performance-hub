@@ -395,7 +395,7 @@ function ClienteLista({ clientes, gm, sm, onCrm }: { clientes: Cliente[]; gm: Re
 const FRASES = [
   "Venda não começa no produto, começa na confiança.",
   "Quem domina a constância domina o resultado.",
-  "Cada "não" aproxima você do próximo "sim".",
+  "Cada 'não' aproxima você do próximo 'sim'.",
   "Meta alta exige mentalidade ainda maior.",
   "O cliente compra emoção e justifica com lógica.",
   "Disciplina em vendas vale mais que motivação passageira.",
@@ -411,7 +411,7 @@ const FRASES = [
   "Vender é entender pessoas.",
   "Coragem para prospectar muda qualquer resultado.",
   "O fechamento começa na escuta.",
-  "Todo campeão de vendas já ouviu muitos "nãos".",
+  "Todo campeão de vendas já ouviu muitos 'nãos'.",
   "Em vendas, velocidade e atenção fazem diferença.",
   "Relacionamento forte sustenta metas altas.",
   "Quem vende com propósito vende mais.",

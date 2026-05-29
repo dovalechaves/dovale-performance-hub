@@ -28,17 +28,15 @@ import { setupSwagger } from "./swagger";
 const app = express();
 const PORT = Number(process.env.SERVER_PORT) || 3001;
 
-const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS ?? "http://localhost:5173,http://localhost:3000")
-  .split(",").map(o => o.trim()).filter(Boolean);
-
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin || ALLOWED_ORIGINS.some(o => origin === o || origin.startsWith(o))) return cb(null, true);
-    cb(new Error(`CORS: origin ${origin} not allowed`));
-  },
-  credentials: true,
-}));
-app.options("*", cors());
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin) res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization,X-Requested-With");
+  if (req.method === "OPTIONS") return res.status(204).end();
+  next();
+});
 app.use(express.json());
 
 app.use("/api/auth",            authRouter);

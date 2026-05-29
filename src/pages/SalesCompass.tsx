@@ -427,7 +427,7 @@ function AnimatedLoadingScreen({ loja, message, progress }: { loja: string; mess
     const id = setInterval(() => setFrase(FRASES[Math.floor(Math.random() * FRASES.length)]), 5000);
     return () => clearInterval(id);
   }, []);
-  const lojaLabel = LOJA_DISPLAY[loja] ?? loja.toUpperCase();
+  const lojaLabel = SC_LOJAS.find(l => l.value === loja)?.label ?? loja.toUpperCase();
   return (
     <main className="flex-1 flex flex-col items-center justify-center p-6 text-center overflow-hidden">
       <div className="relative mb-10 h-28 w-full max-w-xs flex items-center justify-center border rounded-[2.5rem] overflow-hidden animate-sc-arena">

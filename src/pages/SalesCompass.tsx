@@ -12,6 +12,7 @@ import {
 import logoBlue from "@/assets/logo-blue.png";
 import logoWhite from "@/assets/logo-white.png";
 import { toast } from "sonner";
+import confetti from "canvas-confetti";
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? "http://localhost:3001/api").replace(/\/$/, "");
 
@@ -198,6 +199,29 @@ function MetaProgress({ meta, realizado }: { meta: number; realizado: number }) 
 }
 
 // ── CrmModal ──────────────────────────────────────────────────────────────────
+const CRM_ANIM_CSS = `
+  @keyframes crm-modal-down {
+    0%{transform:scale(1) rotate(0deg) translateY(0);opacity:1}
+    40%{transform:scale(0.1) rotate(360deg) translateY(0);opacity:.5}
+    100%{transform:scale(0) rotate(720deg) translateY(120vh);opacity:0}
+  }
+  .crm-modal-down{animation:crm-modal-down 1.5s cubic-bezier(.4,0,.2,1) forwards}
+  @keyframes crm-modal-explode {
+    0%{transform:scale(1);opacity:1;filter:blur(0)}
+    25%{transform:scale(1.05);opacity:1;filter:brightness(1.2)}
+    100%{transform:scale(1.3);opacity:0;filter:blur(10px)}
+  }
+  .crm-modal-explode{animation:crm-modal-explode .4s ease-out forwards}
+  @keyframes crm-emoji-down {
+    0%{transform:translate(-50%,-50%) scale(0) rotate(0deg);opacity:0}
+    20%{transform:translate(-50%,-50%) scale(0) rotate(0deg);opacity:0}
+    45%{transform:translate(-50%,-50%) scale(1.2) rotate(-15deg);opacity:1}
+    60%{transform:translate(-50%,-50%) scale(1) rotate(0deg);opacity:1}
+    100%{transform:translate(-50%,120vh) scale(.5) rotate(20deg);opacity:0}
+  }
+  .crm-emoji-down{animation:crm-emoji-down 1.5s cubic-bezier(.4,0,.2,1) forwards;position:fixed;top:50%;left:50%;z-index:10000;font-size:5rem;pointer-events:none}
+`;
+
 function CrmModal({ cliente, loja, repCodigo, repLogin, onClose, onSaved, forcado }: {
   cliente: Cliente; loja: string; repCodigo: number; repLogin: string;
   onClose: () => void; onSaved: (s: string) => void; forcado?: boolean;
@@ -206,6 +230,9 @@ function CrmModal({ cliente, loja, repCodigo, repLogin, onClose, onSaved, forcad
   const [dataHora, setDataHora] = useState("");
   const [obs, setObs] = useState("");
   const [saving, setSaving] = useState(false);
+  const [isExploding, setIsExploding] = useState(false);
+  const [isExitingDown, setIsExitingDown] = useState(false);
+  const [showSadEmoji, setShowSadEmoji] = useState(false);
 
   const save = async () => {
     if (!status || obs.length < 30 || (status === "retornar_contato" && !dataHora)) return;
@@ -216,13 +243,35 @@ function CrmModal({ cliente, loja, repCodigo, repLogin, onClose, onSaved, forcad
         body: JSON.stringify({ loja, clienteId: cliente.id, nome: cliente.nome, telefone: cliente.telefone, status, dataHora, obs, repCodigo, repLogin }),
       });
       if (!r.ok) throw new Error("Erro ao salvar.");
-      onSaved(status);
-    } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
+
+      let delay = 1200;
+      if (status === "comprou") {
+        setIsExploding(true);
+        confetti({ particleCount: 150, spread: 70, origin: { x: .5, y: .5 }, colors: ["#ffffff","#f8fafc","#6366f1","#4f46e5"], startVelocity: 45, ticks: 60, zIndex: 10001 });
+        const end = Date.now() + 3000;
+        const iv = setInterval(() => {
+          if (Date.now() > end) { clearInterval(iv); return; }
+          const pc = 50 * ((end - Date.now()) / 3000);
+          confetti({ startVelocity: 30, spread: 360, ticks: 60, zIndex: 9999, particleCount: pc, origin: { x: Math.random() * .3 + .1, y: Math.random() - .2 } });
+          confetti({ startVelocity: 30, spread: 360, ticks: 60, zIndex: 9999, particleCount: pc, origin: { x: Math.random() * .2 + .7, y: Math.random() - .2 } });
+        }, 250);
+        delay = 2500;
+      } else if (status === "nao_comprou" || status === "cancelado_agendamento") {
+        setIsExitingDown(true);
+        setShowSadEmoji(true);
+        delay = 1500;
+      } else if (status === "retornar_contato") {
+        confetti({ particleCount: 40, spread: 60, origin: { y: .8 }, shapes: [confetti.shapeFromText({ text: "⏰" }), confetti.shapeFromText({ text: "📅" })], scalar: 4, gravity: .6, zIndex: 9999 });
+        delay = 1800;
+      }
+
+      setTimeout(() => { onSaved(status); }, delay);
+    } catch (e: any) { toast.error(e.message); setSaving(false); }
   };
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
-      <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-md shadow-2xl">
+      <div className={`bg-card border border-border rounded-2xl p-6 w-full max-w-md shadow-2xl ${isExploding ? "crm-modal-explode" : ""} ${isExitingDown ? "crm-modal-down" : ""}`}>
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-lg font-bold">Registro de CRM</h3>
           <p className="text-sm text-muted-foreground truncate max-w-[180px]">{cliente.nome}</p>
@@ -254,13 +303,15 @@ function CrmModal({ cliente, loja, repCodigo, repLogin, onClose, onSaved, forcad
           <p className={`text-xs mt-1 ${obs.length >= 30 ? "text-green-500" : "text-destructive"}`}>{obs.length}/30</p>
         </div>
         <div className="flex justify-end gap-3 pt-4 border-t border-border">
-          {!forcado && <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg text-muted-foreground hover:bg-muted/50">Fechar</button>}
+          {!forcado && !saving && <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg text-muted-foreground hover:bg-muted/50">Fechar</button>}
           <button onClick={save} disabled={saving || obs.length < 30 || !status || (status === "retornar_contato" && !dataHora)}
             className="px-4 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 font-medium">
             {saving ? "Salvando..." : "Salvar CRM"}
           </button>
         </div>
       </div>
+      {showSadEmoji && <div className="crm-emoji-down">😢</div>}
+      <style dangerouslySetInnerHTML={{ __html: CRM_ANIM_CSS }} />
     </div>
   );
 }

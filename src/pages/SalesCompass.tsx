@@ -391,6 +391,84 @@ function ClienteLista({ clientes, gm, sm, onCrm }: { clientes: Cliente[]; gm: Re
   );
 }
 
+// ── AnimatedLoadingScreen ─────────────────────────────────────────────────────
+const FRASES = [
+  "Venda não começa no produto, começa na confiança.",
+  "Quem domina a constância domina o resultado.",
+  "Cada "não" aproxima você do próximo "sim".",
+  "Meta alta exige mentalidade ainda maior.",
+  "O cliente compra emoção e justifica com lógica.",
+  "Disciplina em vendas vale mais que motivação passageira.",
+  "Resultado é consequência de processo bem executado.",
+  "Grandes vendas começam com grandes perguntas.",
+  "Persistência transforma objeção em fechamento.",
+  "O sucesso em vendas mora nos detalhes.",
+  "Atendimento excepcional nunca sai de moda.",
+  "Quem acompanha, vende. Quem desiste, perde.",
+  "Vendas é sobre relacionamento antes de faturamento.",
+  "Performance alta é construída diariamente.",
+  "O esforço silencioso gera resultados barulhentos.",
+  "Vender é entender pessoas.",
+  "Coragem para prospectar muda qualquer resultado.",
+  "O fechamento começa na escuta.",
+  "Todo campeão de vendas já ouviu muitos "nãos".",
+  "Em vendas, velocidade e atenção fazem diferença.",
+  "Relacionamento forte sustenta metas altas.",
+  "Quem vende com propósito vende mais.",
+  "A consistência supera o talento sem disciplina.",
+  "Bons vendedores convencem. Grandes vendedores conectam.",
+  "O mercado não premia intenção, premia ação.",
+  "Venda é ajudar alguém a tomar uma boa decisão.",
+];
+
+function AnimatedLoadingScreen({ loja, message, progress }: { loja: string; message?: string; progress?: string | null }) {
+  const [frase, setFrase] = useState(() => FRASES[Math.floor(Math.random() * FRASES.length)]);
+  useEffect(() => {
+    const id = setInterval(() => setFrase(FRASES[Math.floor(Math.random() * FRASES.length)]), 5000);
+    return () => clearInterval(id);
+  }, []);
+  const lojaLabel = LOJA_DISPLAY[loja] ?? loja.toUpperCase();
+  return (
+    <main className="flex-1 flex flex-col items-center justify-center p-6 text-center overflow-hidden">
+      <div className="relative mb-10 h-28 w-full max-w-xs flex items-center justify-center border rounded-[2.5rem] overflow-hidden animate-sc-arena">
+        <div className="h-14 w-14 rounded-2xl flex items-center justify-center text-white text-xl font-bold shadow-xl animate-sc-bounce">
+          SC
+        </div>
+      </div>
+      {frase && (
+        <p key={frase} className="mb-5 text-base font-bold italic text-primary animate-in fade-in slide-in-from-top-4 duration-1000 max-w-sm">
+          "{frase}"
+        </p>
+      )}
+      <h2 className="text-lg font-bold text-foreground mb-1">{message ?? "Preparando sua carteira"}</h2>
+      <p className="text-muted-foreground text-sm max-w-xs">
+        {progress ?? <>Buscando clientes da loja <span className="font-semibold text-primary">{lojaLabel}</span>…</>}
+      </p>
+      <div className="mt-7 flex gap-2">
+        <div className="h-1.5 w-8 rounded-full bg-primary animate-pulse" />
+        <div className="h-1.5 w-8 rounded-full bg-primary/40 animate-pulse delay-75" />
+        <div className="h-1.5 w-8 rounded-full bg-primary/20 animate-pulse delay-150" />
+      </div>
+      <style dangerouslySetInnerHTML={{ __html: `
+        @keyframes sc-bounce {
+          0%,100%{transform:translate(-80px,-20px) scale(.9);opacity:.6;background:#6366f1}
+          25%{transform:translate(80px,20px) scale(1.1);opacity:1;background:#ef4444}
+          50%{transform:translate(-80px,20px) scale(.9);opacity:.6;background:#f97316}
+          75%{transform:translate(80px,-20px) scale(1.1);opacity:1;background:#22c55e}
+        }
+        .animate-sc-bounce{animation:sc-bounce 6s linear infinite}
+        @keyframes sc-arena {
+          0%,100%{background:rgba(99,102,241,.05);border-color:rgba(99,102,241,.25);box-shadow:inset 0 0 20px rgba(99,102,241,.1)}
+          25%{background:rgba(239,68,68,.05);border-color:rgba(239,68,68,.25);box-shadow:inset 0 0 20px rgba(239,68,68,.1)}
+          50%{background:rgba(249,115,22,.05);border-color:rgba(249,115,22,.25);box-shadow:inset 0 0 20px rgba(249,115,22,.1)}
+          75%{background:rgba(34,197,94,.05);border-color:rgba(34,197,94,.25);box-shadow:inset 0 0 20px rgba(34,197,94,.1)}
+        }
+        .animate-sc-arena{animation:sc-arena 6s linear infinite}
+      `}} />
+    </main>
+  );
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // ── VIEW: Rep (Vendedor)
 // ══════════════════════════════════════════════════════════════════════════════
@@ -466,11 +544,9 @@ function RepView({ loja, repCodigo, repLogin, onSetView, onSetCategoria }:
   };
 
   if (vLoading || cLoading) return (
-    <div className="flex-1 flex flex-col items-center justify-center gap-4 text-muted-foreground">
-      <Loader2 className="w-8 h-8 animate-spin text-primary" />
-      <p className="text-sm">{progress ?? "Carregando carteira..."}</p>
-      {clientes.length > 0 && <p className="text-xs text-primary">{clientes.length} clientes carregados...</p>}
-    </div>
+    <AnimatedLoadingScreen loja={loja} progress={
+      clientes.length > 0 ? `${clientes.length} clientes carregados...` : (progress ?? null)
+    } />
   );
 
   return (
@@ -698,11 +774,9 @@ function CategoriaView({ loja, repCodigo, repLogin, categoria, onBack }:
       </div>
 
       {isLoading ? (
-        <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
-          <p className="text-sm">{progress ?? "Carregando..."}</p>
-          {clientes.length > 0 && <p className="text-xs text-primary">{clientes.length} clientes carregados...</p>}
-        </div>
+        <AnimatedLoadingScreen loja={loja} progress={
+          clientes.length > 0 ? `${clientes.length} clientes carregados...` : (progress ?? null)
+        } />
       ) : (
         <>
           {/* Seção potenciais de hoje */}

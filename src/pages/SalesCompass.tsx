@@ -297,8 +297,16 @@ function HistoricoModal({ logs, onClose }: { logs: CrmLog[]; onClose: () => void
   );
 }
 
+// ── Pendentes WPP (localStorage) ─────────────────────────────────────────────
+type Pendente = { id: string; nome: string; telefone: string; categoria: Categoria };
+const pKey = (rep: string) => `sc_pendentes_${rep}`;
+const getPendentes = (rep: string): Pendente[] => { try { return JSON.parse(localStorage.getItem(pKey(rep)) || "[]"); } catch { return []; } };
+const savePendentes = (rep: string, list: Pendente[]) => localStorage.setItem(pKey(rep), JSON.stringify(list));
+const addPendente = (rep: string, c: Cliente) => { const l = getPendentes(rep).filter(p => p.id !== c.id); l.unshift({ id: c.id, nome: c.nome, telefone: c.telefone, categoria: c.categoria }); savePendentes(rep, l); };
+const removePendente = (rep: string, id: string) => savePendentes(rep, getPendentes(rep).filter(p => p.id !== id));
+
 // ── ContatoModal ──────────────────────────────────────────────────────────────
-function ContatoModal({ cliente, onClose, onCrm }: { cliente: Cliente; onClose: () => void; onCrm: (c: Cliente) => void }) {
+function ContatoModal({ cliente, onClose, onCrm, onWhatsApp }: { cliente: Cliente; onClose: () => void; onCrm: (c: Cliente) => void; onWhatsApp?: (c: Cliente) => void }) {
   const dias = diasDesde(cliente.ultimaCompra);
   const cc = catClasses[cliente.categoria];
   return (
@@ -318,7 +326,7 @@ function ContatoModal({ cliente, onClose, onCrm }: { cliente: Cliente; onClose: 
           <button onClick={onClose} className="px-3 py-2 text-sm rounded-lg text-muted-foreground hover:bg-muted/50">Fechar</button>
           <button onClick={() => onCrm(cliente)} className="px-3 py-2 text-sm rounded-lg bg-primary/10 text-primary hover:bg-primary/20 font-medium">Gerar CRM</button>
           <a href={`https://wa.me/55${cliente.telefone.replace(/\D/g,"")}`} target="_blank" rel="noreferrer"
-            onClick={() => onCrm(cliente)}
+            onClick={() => { onWhatsApp?.(cliente); onClose(); }}
             className="px-3 py-2 text-sm rounded-lg bg-green-600 text-white hover:bg-green-700 inline-flex items-center gap-1.5 font-medium">
             <Send className="h-3.5 w-3.5" /> WhatsApp
           </a>
@@ -395,6 +403,7 @@ function RepView({ loja, repCodigo, repLogin, onSetView, onSetCategoria }:
   const [contatoSel, setContatoSel] = useState<Cliente | null>(null);
   const [crmModal, setCrmModal] = useState<{ cliente: Cliente; forcado?: boolean } | null>(null);
   const [gm, setGm] = useState<Record<string, "success"|"error"|"info">>({});
+  const [pendentes, setPendentes] = useState<Pendente[]>(() => getPendentes(repLogin));
 
   const { data: vendedor, isLoading: vLoading } = useQuery<VendedorInfo>({
     queryKey: ["sc-vendedor", loja, repCodigo],
@@ -416,6 +425,23 @@ function RepView({ loja, repCodigo, repLogin, onSetView, onSetCategoria }:
     return m;
   }, [crmLogs]);
 
+  // Remove pendentes que já têm CRM registrado hoje
+  useEffect(() => {
+    if (!crmLogs.length) return;
+    const hoje = new Date().toLocaleDateString("pt-BR");
+    const registradosHoje = new Set(
+      crmLogs.filter(l => new Date(l.dataFull).toLocaleDateString("pt-BR") === hoje).map(l => String(l.clienteId))
+    );
+    const atualizados = getPendentes(repLogin).filter(p => !registradosHoje.has(p.id));
+    savePendentes(repLogin, atualizados);
+    setPendentes(atualizados);
+  }, [crmLogs, repLogin]);
+
+  const handleWhatsApp = (c: Cliente) => {
+    addPendente(repLogin, c);
+    setPendentes(getPendentes(repLogin));
+  };
+
   const potenciaisHoje = clientes.filter(isPotencialHoje).length;
   const inativos = clientes.filter(c => diasDesde(c.ultimaCompra) >= 90).length;
 
@@ -431,6 +457,8 @@ function RepView({ loja, repCodigo, repLogin, onSetView, onSetCategoria }:
     if (!crmModal) return;
     const g = status === "comprou" ? "success" : (status === "nao_comprou" || status === "cancelado_agendamento") ? "error" : "info";
     setGm(prev => ({ ...prev, [crmModal.cliente.id]: g as any }));
+    removePendente(repLogin, crmModal.cliente.id);
+    setPendentes(getPendentes(repLogin));
     queryClient.invalidateQueries({ queryKey: ["sc-crm-logs", loja] });
     if (status === "comprou") toast.success(`✅ Venda registrada! ${crmModal.cliente.nome}`);
     if (status === "retornar_contato") toast.info(`⏰ Retorno agendado`);
@@ -460,6 +488,31 @@ function RepView({ loja, repCodigo, repLogin, onSetView, onSetCategoria }:
           </div>
         )}
       </div>
+
+      {pendentes.length > 0 && (
+        <div className="mb-6 rounded-2xl border border-amber-500/40 bg-amber-500/5 p-4">
+          <p className="text-sm font-semibold text-amber-600 dark:text-amber-400 mb-3 flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            {pendentes.length} cliente{pendentes.length > 1 ? "s" : ""} aguardando registro de CRM
+          </p>
+          <div className="flex flex-col gap-2">
+            {pendentes.map(p => (
+              <div key={p.id} className="flex items-center justify-between gap-3 bg-amber-500/10 rounded-xl px-3 py-2">
+                <div className="min-w-0">
+                  <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${catClasses[p.categoria]?.bg} ${catClasses[p.categoria]?.text} mr-2`}>{p.categoria}</span>
+                  <span className="text-sm font-medium truncate">{p.nome}</span>
+                </div>
+                <button
+                  onClick={() => { const c = clientes.find(cl => cl.id === p.id); if (c) setCrmModal({ cliente: c }); }}
+                  className="shrink-0 text-xs px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-medium transition-colors"
+                >
+                  Registrar
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <section className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-8">
         {[
@@ -529,7 +582,7 @@ function RepView({ loja, repCodigo, repLogin, onSetView, onSetCategoria }:
         </div>
       )}
 
-      {contatoSel && <ContatoModal cliente={contatoSel} onClose={() => setContatoSel(null)} onCrm={c => { setCrmModal({ cliente: c }); setContatoSel(null); }} />}
+      {contatoSel && <ContatoModal cliente={contatoSel} onClose={() => setContatoSel(null)} onWhatsApp={handleWhatsApp} onCrm={c => { setCrmModal({ cliente: c }); setContatoSel(null); }} />}
       {crmModal && <CrmModal cliente={crmModal.cliente} loja={loja} repCodigo={repCodigo} repLogin={repLogin} onClose={() => setCrmModal(null)} onSaved={onSaved} forcado={crmModal.forcado} />}
       <style dangerouslySetInnerHTML={{ __html: GLOW_CSS }} />
     </div>
@@ -550,6 +603,7 @@ function CategoriaView({ loja, repCodigo, repLogin, categoria, onBack }:
   const [filtroNome, setFiltroNome] = useState("");
   const [page, setPage] = useState(1);
   const [contatoSel, setContatoSel] = useState<Cliente | null>(null);
+  const [pendentes, setPendentes] = useState<Pendente[]>(() => getPendentes(repLogin));
 
   const { clientes, isLoading, progress } = useSseClientes(loja, repCodigo);
 
@@ -565,6 +619,22 @@ function CategoriaView({ loja, repCodigo, repLogin, categoria, onBack }:
     return m;
   }, [crmLogs]);
 
+  useEffect(() => {
+    if (!crmLogs.length) return;
+    const hoje = new Date().toLocaleDateString("pt-BR");
+    const registradosHoje = new Set(
+      crmLogs.filter(l => new Date(l.dataFull).toLocaleDateString("pt-BR") === hoje).map(l => String(l.clienteId))
+    );
+    const atualizados = getPendentes(repLogin).filter(p => !registradosHoje.has(p.id));
+    savePendentes(repLogin, atualizados);
+    setPendentes(atualizados);
+  }, [crmLogs, repLogin]);
+
+  const handleWhatsApp = (c: Cliente) => {
+    addPendente(repLogin, c);
+    setPendentes(getPendentes(repLogin));
+  };
+
   const lista = useMemo(() => clientes.filter(c=>c.categoria===categoria).sort((a,b)=>new Date(b.ultimaCompra).getTime()-new Date(a.ultimaCompra).getTime()), [clientes, categoria]);
   const potenciais = useMemo(() => lista.filter(isPotencialHoje), [lista]);
   const listaFiltrada = useMemo(() => filtroNome.trim() ? lista.filter(c=>c.nome.toLowerCase().includes(filtroNome.toLowerCase())) : lista, [lista, filtroNome]);
@@ -577,6 +647,8 @@ function CategoriaView({ loja, repCodigo, repLogin, categoria, onBack }:
     if (!crmModal) return;
     const g = status === "comprou" ? "success" : (status === "nao_comprou" || status === "cancelado_agendamento") ? "error" : "info";
     setGm(prev => ({ ...prev, [crmModal.id]: g as any }));
+    removePendente(repLogin, crmModal.id);
+    setPendentes(getPendentes(repLogin));
     queryClient.invalidateQueries({ queryKey: ["sc-crm-logs", loja] });
     if (status === "comprou") toast.success(`✅ Venda registrada! ${crmModal.nome}`);
     setCrmModal(null);
@@ -587,6 +659,30 @@ function CategoriaView({ loja, repCodigo, repLogin, categoria, onBack }:
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
+      {pendentes.length > 0 && (
+        <div className="mb-5 rounded-2xl border border-amber-500/40 bg-amber-500/5 p-4">
+          <p className="text-sm font-semibold text-amber-600 dark:text-amber-400 mb-3 flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            {pendentes.length} cliente{pendentes.length > 1 ? "s" : ""} aguardando registro de CRM
+          </p>
+          <div className="flex flex-col gap-2">
+            {pendentes.map(p => (
+              <div key={p.id} className="flex items-center justify-between gap-3 bg-amber-500/10 rounded-xl px-3 py-2">
+                <div className="min-w-0">
+                  <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${catClasses[p.categoria]?.bg} ${catClasses[p.categoria]?.text} mr-2`}>{p.categoria}</span>
+                  <span className="text-sm font-medium truncate">{p.nome}</span>
+                </div>
+                <button
+                  onClick={() => { const c = clientes.find(cl => cl.id === p.id); if (c) setCrmModal(c); }}
+                  className="shrink-0 text-xs px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-medium transition-colors"
+                >
+                  Registrar
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
         <button onClick={onBack} className="p-2 rounded-xl hover:bg-muted"><ArrowLeft className="h-4 w-4" /></button>
@@ -717,7 +813,7 @@ function CategoriaView({ loja, repCodigo, repLogin, categoria, onBack }:
         </>
       )}
 
-      {contatoSel && <ContatoModal cliente={contatoSel} onClose={() => setContatoSel(null)} onCrm={c=>{setCrmModal(c);setContatoSel(null);}} />}
+      {contatoSel && <ContatoModal cliente={contatoSel} onClose={() => setContatoSel(null)} onWhatsApp={handleWhatsApp} onCrm={c=>{setCrmModal(c);setContatoSel(null);}} />}
       {crmModal && <CrmModal cliente={crmModal} loja={loja} repCodigo={repCodigo} repLogin={repLogin} onClose={() => setCrmModal(null)} onSaved={onSaved} />}
       {historicoLogs !== null && <HistoricoModal logs={historicoLogs} onClose={() => setHistoricoLogs(null)} />}
       <style dangerouslySetInnerHTML={{ __html: GLOW_CSS }} />

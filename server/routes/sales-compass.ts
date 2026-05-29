@@ -17,6 +17,16 @@ const LOJA_TO_FB: Record<string, FbKey> = {
   fortaleza: "fortaleza",
 };
 
+// Chave canônica para salvar/consultar CRM_LOGS — resolve aliases antigos
+const LOJA_CANONICAL: Record<string, string> = {
+  l3: "l3", rj: "l3",
+  l2: "l2", santana: "l2",
+  bh: "bh",
+  campinas: "campinas",
+  riopreto: "riopreto",
+  fortaleza: "fortaleza",
+};
+
 // METAS_VENDEDORES usa códigos internos diferentes
 const LOJA_TO_META: Record<string, string> = {
   l3: "l3",       rj: "l3",
@@ -231,8 +241,9 @@ router.post("/crm", async (req, res) => {
     };
     const safeStr = (v: any) => (v && v !== "undefined" ? String(v) : null);
 
+    const lojaCanonical = LOJA_CANONICAL[String(loja || "").toLowerCase().trim()] || String(loja || "").toLowerCase().trim();
     await pool.request()
-      .input("LOJA",             mssql.VarChar,  loja)
+      .input("LOJA",             mssql.VarChar,  lojaCanonical)
       .input("CLIENTE_ID",       mssql.Int,       safeInt(clienteId))
       .input("CLIENTE_NOME",     mssql.VarChar,   nome)
       .input("CLIENTE_TELEFONE", mssql.VarChar,   telefone)
@@ -261,8 +272,9 @@ router.post("/crm", async (req, res) => {
 // GET /api/sales-compass/crm-logs?loja=l3
 // ────────────────────────────────────────────────────────────────────────────
 router.get("/crm-logs", async (req, res) => {
-  const lojaKey = String(req.query.loja || "").toLowerCase().trim();
-  if (!lojaKey) return res.status(400).json({ error: "loja é obrigatória." });
+  const raw = String(req.query.loja || "").toLowerCase().trim();
+  if (!raw) return res.status(400).json({ error: "loja é obrigatória." });
+  const lojaKey = LOJA_CANONICAL[raw] || raw;
 
   try {
     const pool = await getPool();

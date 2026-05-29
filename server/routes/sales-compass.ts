@@ -145,7 +145,7 @@ router.get("/clientes", async (req, res) => {
     }> = {};
 
     for (const row of rows) {
-      const id = String(row.ID);
+      const id = String(row.ID).trim();
       if (!clientesMap[id]) {
         clientesMap[id] = {
           id,
@@ -167,7 +167,6 @@ router.get("/clientes", async (req, res) => {
       }
     }
 
-    // ── Mapeia para objeto final e envia em batches ──────────────────────
     const allEntries = Object.values(clientesMap);
     const BATCH_SIZE = 150;
 
@@ -286,7 +285,7 @@ router.get("/crm-logs", async (req, res) => {
         WHERE LOWER(LOJA) = LOWER(@loja)
         ORDER BY DATA_REGISTRO DESC
       `);
-
+    console.log(`[sales-compass] /crm-logs loja="${lojaKey}" → ${result.recordset.length} registros`);
     res.json(result.recordset);
   } catch (err: any) {
     console.error("[sales-compass] /crm-logs:", err.message);
@@ -339,7 +338,6 @@ router.get("/vendedor", async (req, res) => {
       console.warn("[sales-compass] METAS_VENDEDORES error:", metaErr.message);
     }
 
-    // Vendas realizadas no Firebird
     let realizado = 0;
     if (fbKey) {
       try {

@@ -406,7 +406,7 @@ function RepView({ loja, repCodigo, repLogin, onSetView, onSetCategoria }:
 
   const { data: crmLogs = [] } = useQuery<CrmLog[]>({
     queryKey: ["sc-crm-logs", loja],
-    queryFn: () => fetch(`${API_BASE}/sales-compass/crm-logs?loja=${loja}`).then(r=>r.json()),
+    queryFn: async () => { const r = await fetch(`${API_BASE}/sales-compass/crm-logs?loja=${loja}`); if (!r.ok) throw new Error(await r.text()); return r.json(); },
     refetchInterval: 30_000, staleTime: 15_000,
   });
 
@@ -555,7 +555,7 @@ function CategoriaView({ loja, repCodigo, repLogin, categoria, onBack }:
 
   const { data: crmLogs = [] } = useQuery<CrmLog[]>({
     queryKey: ["sc-crm-logs", loja],
-    queryFn: () => fetch(`${API_BASE}/sales-compass/crm-logs?loja=${loja}`).then(r=>r.json()),
+    queryFn: async () => { const r = await fetch(`${API_BASE}/sales-compass/crm-logs?loja=${loja}`); if (!r.ok) throw new Error(await r.text()); return r.json(); },
     refetchInterval: 30_000,
   });
 
@@ -776,7 +776,7 @@ function GerenteView({ loja: initialLoja, repLogin, isAdmin, onSetView }:
 
   const { data: crmLogs = [] } = useQuery<CrmLog[]>({
     queryKey: ["sc-crm-logs", loja],
-    queryFn: () => fetch(`${API_BASE}/sales-compass/crm-logs?loja=${loja}`).then(r=>r.json()),
+    queryFn: async () => { const r = await fetch(`${API_BASE}/sales-compass/crm-logs?loja=${loja}`); if (!r.ok) throw new Error(await r.text()); return r.json(); },
     refetchInterval: 30_000,
   });
 
@@ -784,15 +784,12 @@ function GerenteView({ loja: initialLoja, repLogin, isAdmin, onSetView }:
     const hoje = new Date().toLocaleDateString("pt-BR");
     const ids = new Set(clientes.map(c => String(c.id)));
     const logsGerais = crmLogs.filter(l => ids.has(String(l.clienteId)));
-
     const contatadosHojeIds = Array.from(new Set(
       logsGerais.filter(l => new Date(l.dataFull).toLocaleDateString("pt-BR") === hoje).map(l => String(l.clienteId))
     ));
-
     const statusPorCliente: Record<string,string> = {};
     [...logsGerais].sort((a,b)=>new Date(a.dataFull).getTime()-new Date(b.dataFull).getTime())
       .forEach(l => { statusPorCliente[String(l.clienteId)] = l.status; });
-
     const motivos: Record<string,number> = {};
     Object.values(statusPorCliente).forEach(s => { motivos[s] = (motivos[s] || 0) + 1; });
 
@@ -1143,7 +1140,7 @@ function RelatoriosView({ loja: initialLoja, isAdmin, onBack }:
 
   const { data: logs = [], isLoading } = useQuery<CrmLog[]>({
     queryKey: ["sc-crm-logs", loja],
-    queryFn: () => fetch(`${API_BASE}/sales-compass/crm-logs?loja=${loja}`).then(r=>r.json()),
+    queryFn: async () => { const r = await fetch(`${API_BASE}/sales-compass/crm-logs?loja=${loja}`); if (!r.ok) throw new Error(await r.text()); return r.json(); },
     staleTime: 30_000,
   });
 

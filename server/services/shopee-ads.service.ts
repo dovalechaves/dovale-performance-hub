@@ -110,6 +110,46 @@ async function fetchDaily(startDate: Date, endDate: Date): Promise<ShopeeAdsData
   }
 }
 
+export async function refreshShopeeToken(): Promise<{ access_token: string; refresh_token: string } | null> {
+  const { partnerId, partnerKey, shopId } = credentials();
+  const refreshToken = process.env.SHOPEE_REFRESH_TOKEN ?? "";
+  if (!partnerId || !partnerKey || !shopId || !refreshToken) return null;
+
+  const apiPath = "/api/v2/auth/access_token/get";
+  const ts = Math.floor(Date.now() / 1000);
+  const base = `${partnerId}${apiPath}${ts}`;
+  const sig = createHmac("sha256", partnerKey).update(base).digest("hex");
+
+  try {
+    const r = await fetch(`${BASE_URL}${apiPath}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        partner_id: partnerId,
+        shop_id: shopId,
+        refresh_token: refreshToken,
+        timestamp: ts,
+        sign: sig,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const json = await r.json();
+    if (json.access_token && json.refresh_token) {
+      // Atualiza em memória para uso imediato sem reiniciar
+      process.env.SHOPEE_ACCESS_TOKEN = json.access_token;
+      process.env.SHOPEE_REFRESH_TOKEN = json.refresh_token;
+      cache.clear();
+      console.log("[shopee-ads] Token renovado com sucesso.");
+      return { access_token: json.access_token, refresh_token: json.refresh_token };
+    }
+    console.warn("[shopee-ads] Falha ao renovar token:", JSON.stringify(json));
+    return null;
+  } catch (e: any) {
+    console.warn("[shopee-ads] Erro ao renovar token:", e.message);
+    return null;
+  }
+}
+
 export async function getShopeeAdsRaw(): Promise<any> {
   const now = new Date();
   const configured = isConfigured();

@@ -1,6 +1,6 @@
 import { NextFunction, Request, Response, Router } from "express";
 import { getPool } from "../db/sqlserver";
-import { getShopeeAdsData, getShopeeAdsRaw } from "../services/shopee-ads.service";
+import { getShopeeAdsData, getShopeeAdsRaw, refreshShopeeToken } from "../services/shopee-ads.service";
 import { getMlAdsRaw } from "../services/ml-ads.service";
 import { getCanaisDiario, getCanaisMensal, getCanaisRaw, CanalResumo } from "../services/ecommerce-canais.service";
 
@@ -190,6 +190,17 @@ router.get("/teste-ml", async (_req, res) => {
 
 router.get("/teste-shopee", async (_req, res) => {
   res.json(await getShopeeAdsRaw());
+});
+
+router.post("/teste-shopee/refresh", async (_req, res) => {
+  const result = await refreshShopeeToken();
+  if (!result) return res.status(500).json({ erro: "Falha ao renovar token. Verifique SHOPEE_REFRESH_TOKEN no ambiente." });
+  res.json({
+    ok: true,
+    mensagem: "Token renovado. Atualize SHOPEE_ACCESS_TOKEN e SHOPEE_REFRESH_TOKEN no Coolify com os valores abaixo.",
+    access_token: result.access_token,
+    refresh_token: result.refresh_token,
+  });
 });
 
 router.get("/teste-canais", async (_req, res) => {

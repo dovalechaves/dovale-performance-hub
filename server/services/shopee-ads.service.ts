@@ -110,6 +110,27 @@ async function fetchDaily(startDate: Date, endDate: Date): Promise<ShopeeAdsData
   }
 }
 
+export async function getShopeeAdsRaw(): Promise<any> {
+  const now = new Date();
+  const configured = isConfigured();
+  const creds = credentials();
+  try {
+    const hourly = await apiGet("/api/v2/ads/get_all_cpc_ads_hourly_performance", {
+      performance_date: formatDate(now),
+    });
+    return {
+      configured,
+      partner_id: creds.partnerId,
+      shop_id: creds.shopId,
+      has_access_token: !!creds.accessToken,
+      performance_date: formatDate(now),
+      hourly_raw: hourly,
+    };
+  } catch (e: any) {
+    return { configured, erro: e.message };
+  }
+}
+
 export async function getShopeeAdsData(periodo: "diario" | "mensal"): Promise<ShopeeAdsData> {
   const fallback: ShopeeAdsData = {
     expense: 0, gmv: 0, roas: 0, clicks: 0, impressions: 0, orders: 0, fonte: "fallback",

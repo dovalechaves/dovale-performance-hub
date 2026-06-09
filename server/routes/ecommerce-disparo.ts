@@ -1,6 +1,6 @@
 import { NextFunction, Request, Response, Router } from "express";
 import { getPool } from "../db/sqlserver";
-import { getShopeeAdsData } from "../services/shopee-ads.service";
+import { getShopeeAdsData, getShopeeAdsRaw } from "../services/shopee-ads.service";
 import { getMlAdsRaw } from "../services/ml-ads.service";
 import { getCanaisDiario, getCanaisMensal, getCanaisRaw, CanalResumo } from "../services/ecommerce-canais.service";
 
@@ -186,6 +186,10 @@ router.get("/historico", (_req, res) => {
 
 router.get("/teste-ml", async (_req, res) => {
   res.json(await getMlAdsRaw());
+});
+
+router.get("/teste-shopee", async (_req, res) => {
+  res.json(await getShopeeAdsRaw());
 });
 
 router.get("/teste-canais", async (_req, res) => {

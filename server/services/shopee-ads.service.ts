@@ -82,9 +82,13 @@ async function fetchHourly(date: Date): Promise<ShopeeAdsData | null> {
     const res = await apiGet("/api/v2/ads/get_all_cpc_ads_hourly_performance", {
       performance_date: formatDate(date),
     });
-    if (res.error || !Array.isArray(res.response)) return null;
+    if (res.error || !Array.isArray(res.response)) {
+      console.warn("[shopee-ads] fetchHourly falhou:", JSON.stringify(res));
+      return null;
+    }
     return aggregateRows(res.response);
-  } catch {
+  } catch (err) {
+    console.warn("[shopee-ads] fetchHourly exception:", err);
     return null;
   }
 }
@@ -95,9 +99,13 @@ async function fetchDaily(startDate: Date, endDate: Date): Promise<ShopeeAdsData
       start_date: formatDate(startDate),
       end_date: formatDate(endDate),
     });
-    if (res.error || !Array.isArray(res.response)) return null;
+    if (res.error || !Array.isArray(res.response)) {
+      console.warn("[shopee-ads] fetchDaily falhou:", JSON.stringify(res));
+      return null;
+    }
     return aggregateRows(res.response);
-  } catch {
+  } catch (err) {
+    console.warn("[shopee-ads] fetchDaily exception:", err);
     return null;
   }
 }

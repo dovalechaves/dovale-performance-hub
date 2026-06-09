@@ -76,21 +76,21 @@ async function getReport(periodo: Periodo, data?: string) {
 
   const shopeeAds = await getShopeeAdsData(periodo);
 
-  const shopeeInvestimento = shopeeAds.expense > 0 ? shopeeAds.expense : (periodo === "mensal" ? 40000 : 2220);
-  const shopeeReceita     = shopeeAds.gmv > 0     ? shopeeAds.gmv     : (periodo === "mensal" ? 193700 : 10680);
-  const shopeeRoas        = shopeeAds.roas > 0    ? shopeeAds.roas    : 4.84;
+  const shopeeInvestimento = shopeeAds.expense > 0 ? shopeeAds.expense : 0;
+  const shopeeReceita     = shopeeAds.gmv > 0     ? shopeeAds.gmv     : 0;
+  const shopeeRoas        = shopeeAds.roas > 0    ? shopeeAds.roas    : 0;
   const shopeeConversao   = shopeeAds.orders > 0 && shopeeAds.clicks > 0
     ? parseFloat(((shopeeAds.orders / shopeeAds.clicks) * 100).toFixed(2))
-    : 3.1;
+    : 0;
 
-  const investimentoTotal = (periodo === "mensal" ? 78200 + 96100 : 4360 + 5290) + shopeeInvestimento;
-  const receitaTotal      = (periodo === "mensal" ? 354900 + 561200 : 19780 + 31480) + shopeeReceita;
+  const investimentoTotal = shopeeInvestimento;
+  const receitaTotal      = shopeeReceita;
   const roasGeral         = investimentoTotal > 0 ? parseFloat((receitaTotal / investimentoTotal).toFixed(2)) : 0;
 
   return {
     periodo,
     gerado_em: new Date().toISOString(),
-    fonte: shopeeAds.fonte === "api" ? "shopee_api+mock_outros" : "mock_tray_marketplaces",
+    fonte: shopeeAds.fonte === "api" ? "shopee_api" : "sem_dados_trafego",
     integracoes: {
       tray: "mockado",
       whatsapp: "simulado",

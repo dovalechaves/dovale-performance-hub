@@ -12,7 +12,6 @@ export interface CanalResumo {
 
 const TABELA = "DOVALE.dbo.[TI-MARKETING_95-VendaEcommerce]";
 
-// Mapeamento exato de PDV_OBS1 → nome exibido no painel
 const MAPA_CANAIS: Record<string, string> = {
   "ml full":                        "Mercado Livre",
   "mercado livre":                  "Mercado Livre",
@@ -63,7 +62,7 @@ async function queryCanais(filtroAtual: string, filtroAnterior: string): Promise
         COUNT(DISTINCT PVI_NUMERO) AS pedidos
       FROM ${TABELA}
       WHERE ${filtroAtual}
-        AND (STATUS IS NULL OR STATUS NOT IN ('CANCELADO','CANCELED','CANCELD','ESTORNADO'))
+        AND (STATUS IS NULL OR STATUS NOT IN ('CANCELADO','CANCELED','CANCELD','ESTORNADO','PENDENTE','Pending'))
         AND PDV_OBS1 IS NOT NULL
       GROUP BY PDV_OBS1
     ),
@@ -74,7 +73,7 @@ async function queryCanais(filtroAtual: string, filtroAnterior: string): Promise
         COUNT(DISTINCT PVI_NUMERO) AS pedidos
       FROM ${TABELA}
       WHERE ${filtroAnterior}
-        AND (STATUS IS NULL OR STATUS NOT IN ('CANCELADO','CANCELED','CANCELD','ESTORNADO'))
+        AND (STATUS IS NULL OR STATUS NOT IN ('CANCELADO','CANCELED','CANCELD','ESTORNADO','PENDENTE','Pending'))
         AND PDV_OBS1 IS NOT NULL
       GROUP BY PDV_OBS1
     )

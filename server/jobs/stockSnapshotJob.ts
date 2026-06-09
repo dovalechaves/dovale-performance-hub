@@ -52,11 +52,18 @@ async function ensureHistoryReferenceColumns(): Promise<void> {
     FROM DOVALE.INFORMATION_SCHEMA.COLUMNS
     WHERE TABLE_SCHEMA = 'dbo'
       AND TABLE_NAME = 'TI-FINANCEIRO_131-FechamentoLojas_Historico'
-      AND COLUMN_NAME IN ('MESREFERENCIA', 'ANOREFERENCIA')
+      AND COLUMN_NAME IN ('MESREFERENCIA', 'ANOREFERENCIA', 'DATAREFERENCIA')
   `);
   const cols = new Set(result.recordset.map((r: { COLUMN_NAME: string }) => r.COLUMN_NAME.toUpperCase()));
   if (!cols.has("MESREFERENCIA") || !cols.has("ANOREFERENCIA")) {
     throw new Error("Tabela histórica precisa das colunas MESREFERENCIA e ANOREFERENCIA. Execute o script SQL 001_add_reference_columns.sql.");
+  }
+  if (!cols.has("DATAREFERENCIA")) {
+    await pool.request().query(`
+      ALTER TABLE DOVALE.dbo.[TI-FINANCEIRO_131-FechamentoLojas_Historico]
+      ADD DATAREFERENCIA AS DATEFROMPARTS(ANOREFERENCIA, MESREFERENCIA, 1) PERSISTED
+    `);
+    console.log("[stock-snapshot] Coluna DATAREFERENCIA criada na tabela histórica.");
   }
 }
 
@@ -265,6 +272,7 @@ export async function runStockSnapshotManual(force: boolean = true) {
 
 export async function startStockSnapshotJob() {
   await ensureStatusTable();
+  await ensureHistoryReferenceColumns();
   await loadStatus();
   if (cachedStatus.lastRunAt) {
     console.log(`[stock-snapshot] Última execução: ${new Date(cachedStatus.lastRunAt).toLocaleString("pt-BR")}`);

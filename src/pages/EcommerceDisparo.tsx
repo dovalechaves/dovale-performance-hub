@@ -5,7 +5,6 @@ import {
   ArrowLeft,
   BarChart3,
   CalendarClock,
-  CheckCircle2,
   Loader2,
   MessageSquareText,
   Moon,
@@ -117,7 +116,6 @@ export default function EcommerceDisparo() {
       { label: "Faturamento", value: formatCurrency(report.kpis.faturamento), icon: <TrendingUp className="w-4 h-4" />, tone: "text-sky-400" },
       { label: "Pedidos", value: String(report.kpis.pedidos), icon: <ShoppingCart className="w-4 h-4" />, tone: "text-emerald-400" },
       { label: "Ticket", value: formatCurrency(report.kpis.ticket_medio), icon: <BarChart3 className="w-4 h-4" />, tone: "text-violet-400" },
-      { label: "Conversão", value: formatPercent(report.kpis.conversao), icon: <CheckCircle2 className="w-4 h-4" />, tone: "text-amber-400" },
       { label: "ROAS", value: `${report.kpis.roas.toFixed(2)}x`, icon: <RefreshCw className="w-4 h-4" />, tone: "text-green-400" },
       { label: "Margem", value: formatPercent(report.kpis.margem), icon: <BarChart3 className="w-4 h-4" />, tone: "text-cyan-400" },
     ];
@@ -242,7 +240,7 @@ export default function EcommerceDisparo() {
                       <table className="w-full text-xs min-w-[760px]">
                         <thead>
                           <tr className="border-b border-border bg-muted/40">
-                            {["Canal", "Faturamento", "Pedidos", "Ticket", "Conversão", "Margem", "Variação"].map((h) => (
+                            {["Canal", "Faturamento", "Pedidos", "Ticket", "Margem", "Variação"].map((h) => (
                               <th key={h} className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">{h}</th>
                             ))}
                           </tr>
@@ -254,7 +252,6 @@ export default function EcommerceDisparo() {
                               <td className="px-4 py-3 text-foreground">{formatCurrency(canal.faturamento)}</td>
                               <td className="px-4 py-3 text-muted-foreground">{canal.pedidos}</td>
                               <td className="px-4 py-3 text-muted-foreground">{formatCurrency(canal.ticket_medio)}</td>
-                              <td className="px-4 py-3 text-muted-foreground">{formatPercent(canal.conversao)}</td>
                               <td className="px-4 py-3 text-muted-foreground">{formatPercent(canal.margem)}</td>
                               <td className={`px-4 py-3 font-semibold ${canal.variacao >= 0 ? "text-green-400" : "text-red-400"}`}>
                                 {canal.variacao >= 0 ? "+" : ""}{formatPercent(canal.variacao)}

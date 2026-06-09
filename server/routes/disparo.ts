@@ -51,9 +51,12 @@ router.post("/webhook/chatwoot", async (req: Request, res: Response) => {
   res.status(200).end(); // responde imediatamente para o Chatwoot não retentar
 
   try {
-    const { event, message_type, content, content_attributes, conversation } = req.body ?? {};
+    const body = req.body ?? {};
+    console.log("[webhook-chatwoot] payload recebido:", JSON.stringify(body));
 
-    if (event !== "message_created") return;
+    const { event, message_type, content, content_attributes, conversation } = body;
+
+    if (event !== "message_created" && event !== "message_updated") return;
     const isIncoming = message_type === 0 || message_type === "incoming";
     if (!isIncoming) return;
 

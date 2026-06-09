@@ -151,8 +151,6 @@ export async function getCanaisMensal(): Promise<CanalResumo[] | null> {
     return null;
   }
 }
-
-// Endpoint de diagnóstico — mostra canais, status e o que está sendo excluído
 export async function getCanaisRaw(): Promise<any> {
   try {
     const pool = await getPool();

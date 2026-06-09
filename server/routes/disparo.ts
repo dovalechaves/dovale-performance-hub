@@ -43,7 +43,56 @@ const uploadMidia = multer({
   },
 });
 
-const ROTAS_PUBLICAS = new Set(["/auth/login", "/auth/hub-exchange"]);
+const ROTAS_PUBLICAS = new Set(["/auth/login", "/auth/hub-exchange", "/webhook/chatwoot"]);
+
+// ── Webhook Chatwoot ─────────────────────────────────────────────────────────
+
+router.post("/webhook/chatwoot", async (req: Request, res: Response) => {
+  res.status(200).end(); // responde imediatamente para o Chatwoot não retentar
+
+  try {
+    const { event, message_type, content, content_attributes, conversation } = req.body ?? {};
+
+    if (event !== "message_created") return;
+    const isIncoming = message_type === 0 || message_type === "incoming";
+    if (!isIncoming) return;
+
+    const conteudo = String(content ?? "").trim().toUpperCase();
+    const btnPayload = String(
+      ((content_attributes?.submitted_values ?? [])[0] ?? {}).value ?? ""
+    ).trim().toUpperCase();
+    const textoFinal = conteudo || btnPayload;
+
+    const isAutorizado = textoFinal.includes("AUTORIZADO");
+    const isNegado = textoFinal.includes("NEGADO") || textoFinal.includes("NÃO") || textoFinal.includes("NAO");
+    if (!isAutorizado && !isNegado) return;
+
+    const supa = getSupa();
+    const conversaId = conversation?.id ?? null;
+
+    // Busca disparo aguardando aprovação — primeiro pelo conversa_id, depois qualquer pendente
+    let query = supa.from("disparos").select("*").eq("status", "AWAITING_APPROVAL");
+    if (conversaId) query = query.eq("aprovacao_conversa_id", conversaId);
+    const { data: disparos } = await query.order("data_inicio", { ascending: false }).limit(1);
+    const d = disparos?.[0];
+    if (!d) {
+      console.warn("[webhook-chatwoot] Nenhum disparo aguardando aprovação encontrado.");
+      return;
+    }
+
+    if (isAutorizado) {
+      console.log(`[webhook-chatwoot] Disparo #${d.id} AUTORIZADO via webhook.`);
+      const cfg = parseConfiguracao(d.configuracao);
+      await supa.from("disparos").update({ status: "PROCESSING" }).eq("id", d.id);
+      processarDisparo(d.id, cfg.inbox_id ?? 1);
+    } else {
+      console.log(`[webhook-chatwoot] Disparo #${d.id} NEGADO via webhook.`);
+      await supa.from("disparos").update({ status: "REJECTED" }).eq("id", d.id);
+    }
+  } catch (e: any) {
+    console.error("[webhook-chatwoot] Erro:", e.message);
+  }
+});
 
 // ── Auth middleware ──────────────────────────────────────────────────────────
 

@@ -1,12 +1,15 @@
 const BASE_URL = () => (process.env.base_chatwoot ?? "").replace(/\/+$/, "");
 const API_KEY = () => process.env.api_chatwoot ?? "";
 const INBOX_ID = () => Number(process.env.inbox_id_chatwoot) || 1;
+const ACCOUNT_ID = () => Number(process.env.account_id_chatwoot) || 1;
+// Base da conta. Header usa hífen ("api-access-token") porque proxies (nginx/Cloudflare)
+// descartam headers HTTP com underscore por padrão.
+const ACC = () => `${BASE_URL()}/api/v1/accounts/${ACCOUNT_ID()}`;
 
 function headers(): Record<string, string> {
   return {
-    api_access_token: API_KEY(),
+    "api-access-token": API_KEY(),
     "Content-Type": "application/json",
-    "ngrok-skip-browser-warning": "true",
   };
 }
 
@@ -19,7 +22,7 @@ export async function buscarContato(telefone: string): Promise<number | null> {
   try {
     let page = 1;
     while (page <= 3) {
-      const url = `${BASE_URL()}/api/v1/accounts/1/contacts/search?${new URLSearchParams({
+      const url = `${ACC()}/contacts/search?${new URLSearchParams({
         q: termo,
         page: String(page),
         per_page: "50",
@@ -59,7 +62,7 @@ export async function criarContato(
     inbox_id: inboxId ?? INBOX_ID(),
   };
   try {
-    const r = await fetch(`${BASE_URL()}/api/v1/accounts/1/contacts`, {
+    const r = await fetch(`${ACC()}/contacts`, {
       method: "POST",
       headers: headers(),
       body: JSON.stringify(data),
@@ -85,7 +88,7 @@ export async function criarConversa(
 ): Promise<number | null> {
   const data = { contact_id: contatoId, inbox_id: inboxId ?? INBOX_ID(), status: "open" };
   try {
-    const r = await fetch(`${BASE_URL()}/api/v1/accounts/1/conversations`, {
+    const r = await fetch(`${ACC()}/conversations`, {
       method: "POST",
       headers: headers(),
       body: JSON.stringify(data),
@@ -107,7 +110,7 @@ export async function adicionarEtiqueta(
 ): Promise<boolean> {
   try {
     const r = await fetch(
-      `${BASE_URL()}/api/v1/accounts/1/conversations/${conversationId}/labels`,
+      `${ACC()}/conversations/${conversationId}/labels`,
       { method: "POST", headers: headers(), body: JSON.stringify({ labels: [etiqueta] }) },
     );
     if (r.ok) return true;
@@ -127,7 +130,7 @@ export async function atribuirTime(
 ): Promise<boolean> {
   try {
     const r = await fetch(
-      `${BASE_URL()}/api/v1/accounts/1/conversations/${conversationId}/assignments`,
+      `${ACC()}/conversations/${conversationId}/assignments`,
       { method: "POST", headers: headers(), body: JSON.stringify({ team_id: teamId }) },
     );
     if (r.ok) return true;
@@ -147,7 +150,7 @@ export async function enviarMensagemPrivada(
 ): Promise<boolean> {
   try {
     const r = await fetch(
-      `${BASE_URL()}/api/v1/accounts/1/conversations/${conversationId}/messages`,
+      `${ACC()}/conversations/${conversationId}/messages`,
       {
         method: "POST",
         headers: headers(),
@@ -169,7 +172,7 @@ export async function enviarMensagemPublica(
 ): Promise<number | null> {
   try {
     const r = await fetch(
-      `${BASE_URL()}/api/v1/accounts/1/conversations/${conversationId}/messages`,
+      `${ACC()}/conversations/${conversationId}/messages`,
       {
         method: "POST",
         headers: headers(),
@@ -190,7 +193,7 @@ export async function enviarMensagemPublica(
 export async function buscarMensagensRecentes(conversationId: number): Promise<any[]> {
   try {
     const r = await fetch(
-      `${BASE_URL()}/api/v1/accounts/1/conversations/${conversationId}/messages`,
+      `${ACC()}/conversations/${conversationId}/messages`,
       { headers: headers() },
     );
     if (r.ok) return (await r.json()).payload ?? [];
@@ -203,7 +206,7 @@ export async function buscarMensagensRecentes(conversationId: number): Promise<a
 export async function buscarConversasContato(contatoId: number): Promise<any[]> {
   try {
     const r = await fetch(
-      `${BASE_URL()}/api/v1/accounts/1/contacts/${contatoId}/conversations`,
+      `${ACC()}/contacts/${contatoId}/conversations`,
       { headers: headers() },
     );
     if (r.ok) return (await r.json()).payload ?? [];
@@ -215,9 +218,7 @@ export async function buscarConversasContato(contatoId: number): Promise<any[]> 
 
 export async function listarTimes(): Promise<{ id: number; name: string }[]> {
   try {
-    const r = await fetch(`${BASE_URL()}/api/v1/accounts/1/teams`, {
-      headers: { api_access_token: API_KEY() },
-    });
+    const r = await fetch(`${ACC()}/teams`, { headers: headers() });
     if (!r.ok) return [];
     const payload: any[] = (await r.json()) ?? [];
     return payload.map((t) => ({ id: t.id, name: t.name })).filter((t) => t.name);
@@ -228,9 +229,7 @@ export async function listarTimes(): Promise<{ id: number; name: string }[]> {
 
 export async function listarEtiquetasChatwoot(): Promise<string[]> {
   try {
-    const r = await fetch(`${BASE_URL()}/api/v1/accounts/1/labels`, {
-      headers: { api_access_token: API_KEY() },
-    });
+    const r = await fetch(`${ACC()}/labels`, { headers: headers() });
     if (!r.ok) return [];
     const payload: any[] = (await r.json()).payload ?? [];
     return payload.map((e) => e.title).filter(Boolean);

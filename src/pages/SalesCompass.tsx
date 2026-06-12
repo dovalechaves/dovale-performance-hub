@@ -528,6 +528,7 @@ function RepView({ loja, repCodigo, repLogin, onSetView, onSetCategoria }:
     onSetView: (v: ViewType) => void; onSetCategoria: (c: Categoria) => void }) {
 
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const [filtroGlobal, setFiltroGlobal] = useState<"carteira"|"potenciais"|"resgatar"|null>(null);
   const [contatoSel, setContatoSel] = useState<Cliente | null>(null);
   const [crmModal, setCrmModal] = useState<{ cliente: Cliente; forcado?: boolean } | null>(null);
@@ -603,7 +604,7 @@ function RepView({ loja, repCodigo, repLogin, onSetView, onSetCategoria }:
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
       <div className="mb-8">
-        <h1 className="text-2xl font-bold">Bom dia, {vendedor?.nome?.split(" ")[0] || "Vendedor"} 👋</h1>
+        <h1 className="text-2xl font-bold">Bom dia, {user?.displayName || "Vendedor"} 👋</h1>
         <p className="text-muted-foreground text-sm mt-1">Selecione uma categoria para acessar sua carteira e as oportunidades do dia.</p>
         {vendedor && vendedor.meta > 0 && (
           <div className="mt-4 bg-card border border-border rounded-2xl p-4 max-w-md">

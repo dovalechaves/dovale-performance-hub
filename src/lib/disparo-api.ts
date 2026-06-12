@@ -1,4 +1,4 @@
-const API_BASE = (import.meta.env.VITE_API_URL ?? "http://localhost:3001").replace(/\/api\/?$/, "");
+export const API_BASE = (import.meta.env.VITE_API_URL ?? "http://localhost:3001").replace(/\/api\/?$/, "");
 
 function getToken(): string | null {
   return localStorage.getItem("disparo_token");
@@ -27,7 +27,7 @@ async function tryReExchange(): Promise<boolean> {
   }
 }
 
-async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
+export async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const token = getToken();
   const r = await fetch(url, {
     ...options,

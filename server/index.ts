@@ -19,6 +19,7 @@ import cobrancaRouter from "./routes/cobranca";
 import ecommerceDisparoRouter from "./routes/ecommerce-disparo";
 import sugestaoComprasRouter from "./routes/sugestao-compras";
 import salesCompassRouter from "./routes/sales-compass";
+import relatorioCustosRouter from "./routes/relatorio-custos";
 import { startSyncJob } from "./jobs/syncJob";
 import { startStockSnapshotJob, runStockSnapshotManual, getStockSnapshotStatus } from "./jobs/stockSnapshotJob";
 import { startMultiPrecoJob } from "./jobs/multiPrecoJob";
@@ -55,6 +56,7 @@ app.use("/api/cobranca",        cobrancaRouter);
 app.use("/api/ecommerce-disparo", ecommerceDisparoRouter);
 app.use("/api/sugestao-compras",  sugestaoComprasRouter);
 app.use("/api/sales-compass",     salesCompassRouter);
+app.use("/api/relatorio-custos",  relatorioCustosRouter);
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });

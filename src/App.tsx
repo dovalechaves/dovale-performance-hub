@@ -21,6 +21,7 @@ import Cobranca from "./pages/Cobranca.tsx";
 import EcommerceDisparo from "./pages/EcommerceDisparo.tsx";
 import SugestaoCompras from "./pages/SugestaoCompras.tsx";
 import SalesCompass from "./pages/SalesCompass.tsx";
+import RelatorioCustos from "./pages/RelatorioCustos.tsx";
 import React from "react";
 
 const queryClient = new QueryClient();
@@ -136,6 +137,16 @@ function SalesCompassRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+// Relatório de Custos usa os mesmos dados do Disparo (Meta/WhatsApp + etiquetas);
+// reutiliza o acesso do app de Disparo.
+function RelatorioCustosRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.canAccessHub) return <Navigate to="/login" replace />;
+  if (!user.apps.disparo.canAccess) return <Navigate to="/hub" replace />;
+  return <>{children}</>;
+}
+
 function AdminManagerRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
@@ -170,6 +181,7 @@ const App = () => (
             <Route path="/ecommerce-disparo" element={<EcommerceDisparoRoute><EcommerceDisparo /></EcommerceDisparoRoute>} />
             <Route path="/sugestao-compras" element={<SugestaoComprasRoute><SugestaoCompras /></SugestaoComprasRoute>} />
             <Route path="/sales-compass" element={<SalesCompassRoute><SalesCompass /></SalesCompassRoute>} />
+            <Route path="/relatorio-custos" element={<RelatorioCustosRoute><RelatorioCustos /></RelatorioCustosRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

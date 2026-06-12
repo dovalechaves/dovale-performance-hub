@@ -221,6 +221,64 @@ export async function obterTemplates(
   return { data: { data: allItems }, error: "" };
 }
 
+// ── Analytics de custo por template ──────────────────────────────────────────
+
+export interface TemplateCusto {
+  template_id: string;
+  sent: number;
+  delivered: number;
+  cost: number; // amount_spent (USD)
+}
+
+/**
+ * Busca volume e custo (amount_spent, USD) por template num período.
+ * Usa template_analytics (granularidade DAILY — único suporte da Meta) e
+ * agrega por template. Os template_ids são enviados em lotes de 10 (limite da API).
+ */
+export async function obterTemplateAnalytics(
+  templateIds: string[],
+  startUnix: number,
+  endUnix: number,
+): Promise<{ data: Map<string, TemplateCusto>; error: string }> {
+  const resultado = new Map<string, TemplateCusto>();
+  const ids = templateIds.filter(Boolean);
+  if (!ids.length) return { data: resultado, error: "" };
+
+  for (let i = 0; i < ids.length; i += 10) {
+    const lote = ids.slice(i, i + 10);
+    const idsParam = encodeURIComponent(`[${lote.join(",")}]`);
+    const metrics = encodeURIComponent(`["SENT","DELIVERED","COST"]`);
+    const fields =
+      `template_analytics.start(${startUnix}).end(${endUnix}).granularity(DAILY)` +
+      `.template_ids(${idsParam}).metric_types(${metrics})`;
+    const url = `https://graph.facebook.com/${API_VERSION}/${getWabaId()}?fields=${fields}&access_token=${getAccessToken()}`;
+
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+      const json = await r.json();
+      if (!r.ok) {
+        const msg = json?.error?.error_user_msg || json?.error?.message || `Meta API ${r.status}`;
+        return { data: resultado, error: msg };
+      }
+      const blocks: any[] = json?.template_analytics?.data ?? [];
+      for (const block of blocks) {
+        for (const p of block.data_points ?? []) {
+          const id = String(p.template_id);
+          const atual = resultado.get(id) ?? { template_id: id, sent: 0, delivered: 0, cost: 0 };
+          atual.sent += Number(p.sent ?? 0);
+          atual.delivered += Number(p.delivered ?? 0);
+          const amount = (p.cost ?? []).find((c: any) => c.type === "amount_spent");
+          atual.cost += Number(amount?.value ?? 0);
+          resultado.set(id, atual);
+        }
+      }
+    } catch (e: any) {
+      return { data: resultado, error: `Exceção ao buscar analytics: ${e.message}` };
+    }
+  }
+  return { data: resultado, error: "" };
+}
+
 export async function criarTemplate(payload: any): Promise<{ data: any | null; error: string }> {
   try {
     const url = `https://graph.facebook.com/${API_VERSION}/${getWabaId()}/message_templates`;

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import { BarChart3, Calculator, LogOut, Sun, Moon, Users, RefreshCw, Loader2, ChevronDown, Settings2, Send, Archive, Bot, Database, ClipboardList, UserPlus, ShieldCheck, BellRing, ShoppingCart, Sparkles, Compass } from "lucide-react";
+import { BarChart3, Calculator, LogOut, Sun, Moon, Users, RefreshCw, Loader2, ChevronDown, Settings2, Send, Archive, Bot, Database, ClipboardList, UserPlus, ShieldCheck, BellRing, ShoppingCart, Sparkles, Compass, TrendingDown } from "lucide-react";
 import logoBlue from "@/assets/logo-blue.png";
 import logoWhite from "@/assets/logo-white.png";
 import { API_BASE, LOJAS, getAuthUsers, updateAuthUserRole, type AuthManagedUser } from "@/services/api";
@@ -113,6 +113,13 @@ const APPS: AppCard[] = [
     route: "/sales-compass",
     color: "from-fuchsia-500/20 to-pink-600/10 border-fuchsia-500/30 hover:border-fuchsia-500/60",
   },
+  {
+    title: "Relatório de Custos",
+    description: "Custo dos templates de WhatsApp por setor, com filtro por mês (USD e BRL).",
+    icon: <TrendingDown className="w-8 h-8" />,
+    route: "/relatorio-custos",
+    color: "from-red-500/20 to-red-600/10 border-red-500/30 hover:border-red-500/60",
+  },
 ];
 
 const APP_BY_ROUTE: Record<string, keyof AuthManagedUser["apps"]> = {
@@ -129,6 +136,7 @@ const APP_BY_ROUTE: Record<string, keyof AuthManagedUser["apps"]> = {
   "/ecommerce-disparo": "ecommercedisparo",
   "/sugestao-compras": "sugestaocompras",
   "/sales-compass": "salescompass",
+  "/relatorio-custos": "disparo",
 };
 
 // ─── Rep Selector (Sales Compass) ────────────────────────────────────────────

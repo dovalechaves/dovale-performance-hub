@@ -209,6 +209,45 @@ router.get("/shopee/auth", (_req, res) => {
 
 router.use(requireAccess);
 
+router.get("/metas", async (_req, res) => {
+  try {
+    const pool = await getPool();
+    const result = await pool.request().query(
+      "SELECT TOP 1 meta_diario, meta_mensal FROM dbo.ECOMMERCE_METAS WHERE id = 1"
+    );
+    if (!result.recordset[0]) return res.json({ meta_diario: 165000, meta_mensal: 3200000 });
+    res.json(result.recordset[0]);
+  } catch {
+    res.json({ meta_diario: 165000, meta_mensal: 3200000 });
+  }
+});
+
+router.put("/metas", async (req, res) => {
+  const { meta_diario, meta_mensal } = req.body ?? {};
+  if (!meta_diario || !meta_mensal) return res.status(400).json({ erro: "meta_diario e meta_mensal são obrigatórios." });
+  const usuario = String(req.headers["x-dovale-usuario"] ?? "");
+  try {
+    const pool = await getPool();
+    await pool.request()
+      .input("meta_diario",  Number(meta_diario))
+      .input("meta_mensal",  Number(meta_mensal))
+      .input("usuario",      usuario)
+      .query(`
+        IF EXISTS (SELECT 1 FROM dbo.ECOMMERCE_METAS WHERE id = 1)
+          UPDATE dbo.ECOMMERCE_METAS
+             SET meta_diario = @meta_diario, meta_mensal = @meta_mensal,
+                 atualizado_em = GETDATE(), atualizado_por = @usuario
+           WHERE id = 1
+        ELSE
+          INSERT INTO dbo.ECOMMERCE_METAS (id, meta_diario, meta_mensal, atualizado_por)
+          VALUES (1, @meta_diario, @meta_mensal, @usuario)
+      `);
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ erro: e.message });
+  }
+});
+
 router.get("/overview", async (req, res) => {
   const periodo = req.query.periodo === "mensal" ? "mensal" : "diario";
   const data = typeof req.query.data === "string" ? req.query.data : undefined;

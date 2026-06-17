@@ -10,9 +10,11 @@ import {
   Moon,
   RefreshCw,
   Send,
+  Settings,
   ShoppingCart,
   Sun,
   TrendingUp,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
@@ -21,8 +23,10 @@ import logoWhite from "@/assets/logo-white.png";
 import {
   enviarRelatorioEcommerce,
   fetchEcommerceReport,
+  fetchEcommerceMetas,
   fetchHistoricoEcommerce,
   previewRelatorioEcommerce,
+  salvarEcommerceMetas,
   type EcommerceReport,
   type HistoricoEnvio,
   type PeriodoRelatorio,
@@ -62,6 +66,35 @@ export default function EcommerceDisparo() {
   const [loading, setLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [sending, setSending] = useState(false);
+  const [configOpen, setConfigOpen] = useState(false);
+  const [metaDiario, setMetaDiario] = useState(165000);
+  const [metaMensal, setMetaMensal] = useState(3200000);
+  const [metaDiarioInput, setMetaDiarioInput] = useState(165000);
+  const [metaMensalInput, setMetaMensalInput] = useState(3200000);
+  const [metasLoading, setMetasLoading] = useState(false);
+
+  useEffect(() => {
+    if (!usuario) return;
+    fetchEcommerceMetas(usuario)
+      .then((m) => { setMetaDiario(m.meta_diario); setMetaMensal(m.meta_mensal); })
+      .catch(() => {});
+  }, [usuario]);
+
+  async function salvarMetas() {
+    if (!usuario) return;
+    setMetasLoading(true);
+    try {
+      await salvarEcommerceMetas(usuario, { meta_diario: metaDiarioInput, meta_mensal: metaMensalInput });
+      setMetaDiario(metaDiarioInput);
+      setMetaMensal(metaMensalInput);
+      setConfigOpen(false);
+      toast.success("Metas atualizadas");
+    } catch {
+      toast.error("Falha ao salvar metas");
+    } finally {
+      setMetasLoading(false);
+    }
+  }
 
   const usuario = user?.usuario ?? "";
 
@@ -158,6 +191,9 @@ export default function EcommerceDisparo() {
           </div>
           <div className="ml-auto flex items-center gap-2">
             {user && <span className="text-xs text-muted-foreground hidden sm:inline">{user.displayName}</span>}
+            <button onClick={() => { setMetaDiarioInput(metaDiario); setMetaMensalInput(metaMensal); setConfigOpen(true); }} className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-primary/10 transition-colors" title="Configurar metas">
+              <Settings className="w-4 h-4" />
+            </button>
             <button onClick={() => setDark((d) => !d)} className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-primary/10 transition-colors">
               {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
@@ -265,11 +301,19 @@ export default function EcommerceDisparo() {
                     <div className="rounded-xl border border-border bg-card p-5 space-y-4">
                       <div>
                         <p className="text-xs uppercase tracking-widest text-muted-foreground">Meta e projeção</p>
-                        <p className="text-2xl font-bold text-foreground mt-1">{formatPercent(report.kpis.realizado_meta)}</p>
-                        <p className="text-xs text-muted-foreground">Realizado de {formatCurrency(report.kpis.meta)}</p>
-                      </div>
-                      <div className="h-2 rounded-full bg-muted overflow-hidden">
-                        <div className="h-full bg-primary" style={{ width: `${Math.min(100, report.kpis.realizado_meta)}%` }} />
+                        {(() => {
+                          const metaAtual = periodo === "mensal" ? metaMensal : metaDiario;
+                          const realizado = (report.kpis.faturamento / metaAtual) * 100;
+                          return (
+                            <>
+                              <p className="text-2xl font-bold text-foreground mt-1">{formatPercent(realizado)}</p>
+                              <p className="text-xs text-muted-foreground">Realizado de {formatCurrency(metaAtual)}</p>
+                              <div className="h-2 rounded-full bg-muted overflow-hidden mt-3">
+                                <div className="h-full bg-primary" style={{ width: `${Math.min(100, realizado)}%` }} />
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
                       <div className="grid grid-cols-2 gap-3 text-xs">
                         <div>
@@ -407,6 +451,55 @@ export default function EcommerceDisparo() {
           )}
         </div>
       </main>
+
+      {configOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-xl mx-4">
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-2">
+                <Settings className="w-4 h-4 text-primary" />
+                <h2 className="text-sm font-semibold text-foreground">Configurar Metas</h2>
+              </div>
+              <button onClick={() => setConfigOpen(false)} className="w-7 h-7 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-primary/10 transition-colors">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs text-muted-foreground uppercase tracking-widest block mb-1.5">Meta Diária (R$)</label>
+                <input
+                  type="number"
+                  value={metaDiarioInput}
+                  onChange={(e) => setMetaDiarioInput(Number(e.target.value))}
+                  className="w-full rounded-lg border border-border bg-muted px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">Atual: {formatCurrency(metaDiario)}</p>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground uppercase tracking-widest block mb-1.5">Meta Mensal (R$)</label>
+                <input
+                  type="number"
+                  value={metaMensalInput}
+                  onChange={(e) => setMetaMensalInput(Number(e.target.value))}
+                  className="w-full rounded-lg border border-border bg-muted px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">Atual: {formatCurrency(metaMensal)}</p>
+              </div>
+            </div>
+
+            <div className="flex gap-2 mt-6">
+              <button onClick={() => setConfigOpen(false)} className="flex-1 rounded-lg border border-border px-4 py-2 text-xs text-muted-foreground hover:bg-secondary transition-colors">
+                Cancelar
+              </button>
+              <button onClick={salvarMetas} disabled={metasLoading} className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40">
+                {metasLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Salvar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

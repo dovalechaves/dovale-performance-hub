@@ -105,6 +105,25 @@ export async function previewRelatorioEcommerce(
   return handleResponse<{ periodo: PeriodoRelatorio; mensagem: string; modo_simulacao: boolean }>(res);
 }
 
+export interface EcommerceMetas {
+  meta_diario: number;
+  meta_mensal: number;
+}
+
+export async function fetchEcommerceMetas(usuario: string): Promise<EcommerceMetas> {
+  const res = await fetch(`${BASE}/metas`, { headers: headers(usuario) });
+  return handleResponse<EcommerceMetas>(res);
+}
+
+export async function salvarEcommerceMetas(usuario: string, metas: EcommerceMetas): Promise<void> {
+  const res = await fetch(`${BASE}/metas`, {
+    method: "PUT",
+    headers: headers(usuario),
+    body: JSON.stringify(metas),
+  });
+  return handleResponse<void>(res);
+}
+
 export async function enviarRelatorioEcommerce(
   usuario: string,
   periodo: PeriodoRelatorio,

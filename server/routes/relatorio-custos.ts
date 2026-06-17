@@ -59,32 +59,35 @@ router.get("/custos", async (req: Request, res: Response) => {
     // template_analytics da Meta só cobre os últimos 90 dias e não aceita fim no futuro.
     const nowSec = Math.floor(Date.now() / 1000);
     const start = periodoMes.start;
-    const end = Math.min(periodoMes.end, nowSec); // não consultar o futuro
+    const end = Math.min(periodoMes.end, nowSec);
     if (end <= start) {
       return res.status(400).json({ erro: "O mês selecionado ainda não começou." });
     }
-    if (end < nowSec - 90 * 24 * 3600) {
+    // verificar pelo start (não pelo end) — um mês pode ter start fora dos 90 dias mas end dentro
+    if (start < nowSec - 90 * 24 * 3600) {
       return res.status(400).json({
         erro: "A Meta só disponibiliza o custo por template dos últimos 90 dias. Selecione um mês mais recente.",
       });
     }
     const periodo = { start, end };
 
-    // 1) Templates da Meta (id + nome)
-    const tpl = await meta.obterTemplates();
+    // 1) Templates ativos + deletados (em paralelo) para cobrir custos de templates excluídos
+    const [tpl, tplDeletados] = await Promise.all([
+      meta.obterTemplates(),
+      meta.obterTemplates(undefined, undefined, "DELETED"),
+    ]);
     if (!tpl.data) return res.status(502).json({ erro: tpl.error || "Falha ao buscar templates na Meta" });
-    const templates: { id: string; name: string }[] = (tpl.data.data ?? []).map((t: any) => ({
-      id: String(t.id),
-      name: String(t.name),
-    }));
-    const nomePorId = new Map(templates.map((t) => [t.id, t.name]));
 
-    // 2) Custo/volume por template no período
-    const analytics = await meta.obterTemplateAnalytics(
-      templates.map((t) => t.id),
-      periodo.start,
-      periodo.end,
-    );
+    const nomePorId = new Map<string, string>();
+    // Deletados primeiro (menor prioridade) — ativos sobrescrevem
+    for (const t of tplDeletados.data?.data ?? []) nomePorId.set(String(t.id), String(t.name));
+    for (const t of tpl.data.data ?? []) nomePorId.set(String(t.id), String(t.name));
+
+    const todosIds = [...nomePorId.keys()].filter(Boolean);
+    console.log(`[relatorio-custos] templates: ${tpl.data.data?.length ?? 0} ativos, ${tplDeletados.data?.data?.length ?? 0} deletados → ${todosIds.length} IDs para analytics`);
+
+    // 2) Custo/volume por template no período (inclui deletados via IDs salvos)
+    const analytics = await meta.obterTemplateAnalytics(todosIds, periodo.start, periodo.end);
     if (analytics.error) return res.status(400).json({ erro: analytics.error });
 
     // 3) De-para template -> setor
@@ -94,11 +97,20 @@ router.get("/custos", async (req: Request, res: Response) => {
     type LinhaTemplate = { template: string; volume: number; custoUsd: number };
     const setores = new Map<string, { setor: string; volume: number; custoUsd: number; templates: LinhaTemplate[] }>();
 
+    let custoNaoMapeadoUsd = 0;
+    let volumeNaoMapeado = 0;
+    const templatesNaoMapeados: string[] = [];
+
     for (const [id, info] of analytics.data) {
       if (info.sent <= 0 && info.cost <= 0) continue;
       const nome = nomePorId.get(id) ?? id;
       const setor = mapaEtiqueta[nome.toLowerCase()];
-      if (!setor) continue; // não mapeado -> não aparece
+      if (!setor) {
+        custoNaoMapeadoUsd += info.cost;
+        volumeNaoMapeado += info.sent;
+        if (info.cost > 0) templatesNaoMapeados.push(nome);
+        continue;
+      }
       const grupo = setores.get(setor) ?? { setor, volume: 0, custoUsd: 0, templates: [] };
       grupo.volume += info.sent;
       grupo.custoUsd += info.cost;
@@ -129,6 +141,12 @@ router.get("/custos", async (req: Request, res: Response) => {
       totalBrl: totalUsd * rate,
       totalVolume,
       setores: lista,
+      naoMapeado: {
+        custoUsd: custoNaoMapeadoUsd,
+        custoBrl: custoNaoMapeadoUsd * rate,
+        volume: volumeNaoMapeado,
+        templates: templatesNaoMapeados,
+      },
     });
   } catch (e: any) {
     console.error("[relatorio-custos] /custos erro:", e);

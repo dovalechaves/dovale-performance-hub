@@ -40,7 +40,7 @@ function sign(apiPath: string, ts: number): string {
   return createHmac("sha256", partnerKey).update(base).digest("hex");
 }
 
-async function apiGet(apiPath: string, extra: Record<string, string> = {}): Promise<any> {
+async function apiGet(apiPath: string, extra: Record<string, string> = {}, retry = true): Promise<any> {
   const { partnerId, shopId, accessToken } = credentials();
   const ts = Math.floor(Date.now() / 1000);
   const params = new URLSearchParams({
@@ -54,14 +54,37 @@ async function apiGet(apiPath: string, extra: Record<string, string> = {}): Prom
   const r = await fetch(`${BASE_URL}${apiPath}?${params}`, {
     signal: AbortSignal.timeout(10_000),
   });
-  return r.json();
+  const json = await r.json();
+
+  // Mesmo padrão do Python: captura error_auth, invalid_acceess_token ou qualquer
+  // mensagem que mencione "access_token" — cobre todas as variações da Shopee
+  const isTokenError = json.error === "invalid_acceess_token"
+    || json.error === "error_auth"
+    || (typeof json.message === "string" && json.message.toLowerCase().includes("access_token"));
+
+  if (json.error === "error_rate_limit") {
+    console.warn("[shopee-ads] Rate limit atingido. Aguarde e tente novamente.");
+    return json;
+  }
+
+  if (retry && isTokenError) {
+    console.log("[shopee-ads] Token expirado, renovando automaticamente...");
+    const renewed = await refreshShopeeToken();
+    if (renewed) {
+      console.log("[shopee-ads] Token renovado, repetindo chamada.");
+      return apiGet(apiPath, extra, false);
+    }
+    console.warn("[shopee-ads] Falha ao renovar token. SHOPEE_REFRESH_TOKEN pode ter expirado.");
+  }
+
+  return json;
 }
 
 function formatDate(d: Date): string {
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd   = String(d.getDate()).padStart(2, "0");
+  const mm   = String(d.getMonth() + 1).padStart(2, "0");
   const yyyy = d.getFullYear();
-  return `${dd}-${mm}-${yyyy}`;
+  return `${dd}-${mm}-${yyyy}`; // DD-MM-YYYY — formato exigido pela Shopee Ads API
 }
 
 function aggregateRows(rows: any[]): ShopeeAdsData {
@@ -121,15 +144,19 @@ export async function refreshShopeeToken(): Promise<{ access_token: string; refr
   const sig = createHmac("sha256", partnerKey).update(base).digest("hex");
 
   try {
-    const r = await fetch(`${BASE_URL}${apiPath}`, {
+    // partner_id, timestamp e sign vão na query string; shop_id e refresh_token no body
+    const qs = new URLSearchParams({
+      partner_id: String(partnerId),
+      timestamp:  String(ts),
+      sign:       sig,
+    });
+    const r = await fetch(`${BASE_URL}${apiPath}?${qs}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        partner_id: partnerId,
-        shop_id: shopId,
+        partner_id:    partnerId,
+        shop_id:       shopId,
         refresh_token: refreshToken,
-        timestamp: ts,
-        sign: sig,
       }),
       signal: AbortSignal.timeout(10_000),
     });
@@ -146,6 +173,57 @@ export async function refreshShopeeToken(): Promise<{ access_token: string; refr
     return null;
   } catch (e: any) {
     console.warn("[shopee-ads] Erro ao renovar token:", e.message);
+    return null;
+  }
+}
+
+// Gera a URL para o dono da loja autorizar na Shopee (OAuth)
+export function generateShopeeAuthUrl(redirectUrl: string): string {
+  const { partnerId, partnerKey } = credentials();
+  const apiPath = "/api/v2/shop/auth_partner";
+  const ts = Math.floor(Date.now() / 1000);
+  const base = `${partnerId}${apiPath}${ts}`;
+  const sig = createHmac("sha256", partnerKey).update(base).digest("hex");
+  const params = new URLSearchParams({
+    partner_id: String(partnerId),
+    timestamp:  String(ts),
+    sign:       sig,
+    redirect:   redirectUrl,
+  });
+  return `${BASE_URL}${apiPath}?${params}`;
+}
+
+// Troca o code (retornado pela Shopee no callback OAuth) por access_token + refresh_token
+export async function exchangeShopeeCode(code: string): Promise<{ access_token: string; refresh_token: string } | null> {
+  const { partnerId, partnerKey, shopId } = credentials();
+  const apiPath = "/api/v2/auth/token/get";
+  const ts = Math.floor(Date.now() / 1000);
+  const base = `${partnerId}${apiPath}${ts}`;
+  const sig = createHmac("sha256", partnerKey).update(base).digest("hex");
+  const qs = new URLSearchParams({
+    partner_id: String(partnerId),
+    timestamp:  String(ts),
+    sign:       sig,
+  });
+  try {
+    const r = await fetch(`${BASE_URL}${apiPath}?${qs}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, shop_id: shopId, partner_id: partnerId }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const json = await r.json();
+    if (json.access_token && json.refresh_token) {
+      process.env.SHOPEE_ACCESS_TOKEN  = json.access_token;
+      process.env.SHOPEE_REFRESH_TOKEN = json.refresh_token;
+      cache.clear();
+      console.log("[shopee-ads] Tokens OAuth obtidos com sucesso.");
+      return { access_token: json.access_token, refresh_token: json.refresh_token };
+    }
+    console.warn("[shopee-ads] Falha ao trocar code:", JSON.stringify(json));
+    return null;
+  } catch (e: any) {
+    console.warn("[shopee-ads] Erro ao trocar code:", e.message);
     return null;
   }
 }
@@ -171,30 +249,35 @@ export async function getShopeeAdsRaw(): Promise<any> {
   }
 }
 
-export async function getShopeeAdsData(periodo: "diario" | "mensal"): Promise<ShopeeAdsData> {
+export async function getShopeeAdsData(periodo: "diario" | "mensal", date?: string): Promise<ShopeeAdsData> {
   const fallback: ShopeeAdsData = {
     expense: 0, gmv: 0, roas: 0, clicks: 0, impressions: 0, orders: 0, fonte: "fallback",
   };
 
   if (!isConfigured()) return fallback;
 
-  const cacheKey = periodo;
+  const cacheKey = date ? `${periodo}_${date}` : periodo;
   const cached = cache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.data;
 
   const now = new Date();
-  let data: ShopeeAdsData | null = null;
+  // Se uma data específica foi passada (YYYY-MM-DD do input), usa ela; senão usa hoje
+  const targetDate = date ? new Date(`${date}T00:00:00`) : now;
+  const isToday = targetDate.toDateString() === now.toDateString();
+
+  let result: ShopeeAdsData | null = null;
 
   if (periodo === "diario") {
-    data = await fetchHourly(now);
+    // Hoje → dados por hora (intraday); data passada → daily daquele dia específico
+    result = isToday ? await fetchHourly(targetDate) : await fetchDaily(targetDate, targetDate);
   } else {
     const start = new Date(now);
     start.setDate(start.getDate() - 28);
-    data = await fetchDaily(start, now);
+    result = await fetchDaily(start, now);
   }
 
-  if (!data) return fallback;
+  if (!result) return fallback;
 
-  cache.set(cacheKey, { data, expiresAt: Date.now() + CACHE_TTL_MS });
-  return data;
+  cache.set(cacheKey, { data: result, expiresAt: Date.now() + CACHE_TTL_MS });
+  return result;
 }

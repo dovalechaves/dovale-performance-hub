@@ -1,7 +1,7 @@
 import { NextFunction, Request, Response, Router } from "express";
 import { getPool } from "../db/sqlserver";
-import { getShopeeAdsData, getShopeeAdsRaw, refreshShopeeToken } from "../services/shopee-ads.service";
-import { getMlAdsRaw } from "../services/ml-ads.service";
+import { exchangeShopeeCode, generateShopeeAuthUrl, getShopeeAdsData, getShopeeAdsRaw, refreshShopeeToken } from "../services/shopee-ads.service";
+import { getMlAdsData, getMlAdsRaw } from "../services/ml-ads.service";
 import { getCanaisDiario, getCanaisMensal, getCanaisRaw, CanalResumo } from "../services/ecommerce-canais.service";
 
 const router = Router();
@@ -74,7 +74,10 @@ async function getReport(periodo: Periodo, data?: string) {
   const ticketMedio = faturamento / pedidos;
   const meta = periodo === "mensal" ? 3200000 : 165000;
 
-  const shopeeAds = await getShopeeAdsData(periodo);
+  const [shopeeAds, mlAds] = await Promise.all([
+    getShopeeAdsData(periodo, data),
+    getMlAdsData(periodo, data),
+  ]);
 
   const shopeeInvestimento = shopeeAds.expense > 0 ? shopeeAds.expense : 0;
   const shopeeReceita     = shopeeAds.gmv > 0     ? shopeeAds.gmv     : 0;
@@ -83,22 +86,30 @@ async function getReport(periodo: Periodo, data?: string) {
     ? parseFloat(((shopeeAds.orders / shopeeAds.clicks) * 100).toFixed(2))
     : 0;
 
-  const investimentoTotal = shopeeInvestimento;
-  const receitaTotal      = shopeeReceita;
+  const mlInvestimento = mlAds.expense > 0 ? mlAds.expense : 0;
+  const mlReceita      = mlAds.gmv > 0     ? mlAds.gmv     : 0;
+  const mlRoas         = mlAds.roas > 0    ? mlAds.roas    : 0;
+  const mlConversao    = mlAds.orders > 0 && mlAds.clicks > 0
+    ? parseFloat(((mlAds.orders / mlAds.clicks) * 100).toFixed(2))
+    : 0;
+
+  const investimentoTotal = shopeeInvestimento + mlInvestimento;
+  const receitaTotal      = shopeeReceita + mlReceita;
   const roasGeral         = investimentoTotal > 0 ? parseFloat((receitaTotal / investimentoTotal).toFixed(2)) : 0;
 
   return {
     periodo,
     gerado_em: new Date().toISOString(),
-    fonte: shopeeAds.fonte === "api" ? "shopee_api" : "sem_dados_trafego",
+    fonte: shopeeAds.fonte === "api" || mlAds.fonte === "api" ? "ads_api" : "sem_dados_trafego",
     integracoes: {
       tray: "mockado",
       whatsapp: "simulado",
       shopee_ads: shopeeAds.fonte,
+      ml_ads: mlAds.fonte,
     },
     destinatarios: [
-      { nome: "Henrique Berbert", telefone: process.env.ECOMMERCE_DISPARO_HENRIQUE ?? "+55 12 99999-0001" },
-      { nome: "Andreza", telefone: process.env.ECOMMERCE_DISPARO_ANDREZA ?? "+55 12 99999-0002" },
+      { nome: "Henrique Berbert", telefone: process.env.ECOMMERCE_DISPARO_HENRIQUE ?? "+55 12 98152-9989" },
+      { nome: "Andreza Ferreira", telefone: process.env.ECOMMERCE_DISPARO_ANDREZA ?? "+55 12 98189-8755" },
     ],
     agenda: {
       diario: "08:00 em dias úteis",
@@ -125,7 +136,7 @@ async function getReport(periodo: Periodo, data?: string) {
     canais,
     trafego_pago: [
       { origem: "Shopee Ads",      investimento: shopeeInvestimento, receita: shopeeReceita, roas: shopeeRoas, conversao: shopeeConversao, fonte: shopeeAds.fonte },
-      { origem: "Mercado Livre Ads", investimento: null, receita: null, roas: null, conversao: null, fonte: "sem_permissao", status: "Sem permissão API - ML" },
+      { origem: "Mercado Livre Ads", investimento: mlInvestimento, receita: mlReceita, roas: mlRoas, conversao: mlConversao, fonte: mlAds.fonte },
     ],
     pontos_criticos: [
       "Shopee abaixo do ritmo esperado, com queda de margem e ticket menor.",
@@ -171,6 +182,30 @@ async function montarMensagem(periodo: Periodo): Promise<string> {
     ...report.direcionamentos.map((item: string) => `- ${item}`),
   ].join("\n");
 }
+
+// Callback do OAuth da Shopee — fica ANTES do requireAccess porque a Shopee
+// redireciona direto para esta URL sem cabeçalho de autenticação do hub.
+router.get("/shopee/callback", async (req, res) => {
+  const code = typeof req.query.code === "string" ? req.query.code : "";
+  if (!code) return res.status(400).json({ erro: "Parâmetro 'code' não encontrado na URL." });
+
+  const result = await exchangeShopeeCode(code);
+  if (!result) return res.status(500).json({ erro: "Falha ao trocar o code pelos tokens. Verifique os logs." });
+
+  res.json({
+    ok: true,
+    mensagem: "Tokens renovados! Copie os valores abaixo no Coolify (SHOPEE_ACCESS_TOKEN e SHOPEE_REFRESH_TOKEN).",
+    access_token:  result.access_token,
+    refresh_token: result.refresh_token,
+  });
+});
+
+// Redireciona o navegador para a página de autorização da Shopee
+router.get("/shopee/auth", (_req, res) => {
+  const baseUrl = process.env.SHOPEE_REDIRECT_BASE_URL ?? "https://backend.dovale.online";
+  const redirectUrl = `${baseUrl}/api/ecommerce-disparo/shopee/callback`;
+  res.redirect(generateShopeeAuthUrl(redirectUrl));
+});
 
 router.use(requireAccess);
 

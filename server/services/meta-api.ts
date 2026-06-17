@@ -196,6 +196,7 @@ export async function enviarTextoLivre(
 export async function obterTemplates(
   nome?: string,
   lingua?: string,
+  status?: string,
 ): Promise<{ data: any | null; error: string }> {
   const params = new URLSearchParams({
     access_token: getAccessToken(),
@@ -205,6 +206,7 @@ export async function obterTemplates(
   });
   if (nome) params.set("name", nome);
   if (lingua) params.set("language", lingua);
+  if (status) params.set("status", status);
   let url: string | null = `https://graph.facebook.com/${API_VERSION}/${getWabaId()}/message_templates?${params}`;
   const allItems: any[] = [];
   while (url) {
@@ -230,52 +232,104 @@ export interface TemplateCusto {
   cost: number; // amount_spent (USD)
 }
 
-/**
- * Busca volume e custo (amount_spent, USD) por template num período.
- * Usa template_analytics (granularidade DAILY — único suporte da Meta) e
- * agrega por template. Os template_ids são enviados em lotes de 10 (limite da API).
- */
+async function fetchLoteAnalytics(
+  lote: string[],
+  loteIdx: number,
+  startUnix: number,
+  endUnix: number,
+): Promise<{ items: TemplateCusto[]; error: string }> {
+  const idsParam = encodeURIComponent(`[${lote.join(",")}]`);
+  const metrics = encodeURIComponent(`["SENT","DELIVERED","COST"]`);
+  const fields =
+    `template_analytics.start(${startUnix}).end(${endUnix}).granularity(DAILY)` +
+    `.template_ids(${idsParam}).metric_types(${metrics})`;
+
+  let url: string | null =
+    `https://graph.facebook.com/${API_VERSION}/${getWabaId()}` +
+    `?fields=${fields}&access_token=${getAccessToken()}`;
+
+  const parcial = new Map<string, TemplateCusto>();
+  while (url) {
+    let json: any;
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+      json = await r.json();
+      if (!r.ok) {
+        const msg = json?.error?.error_user_msg || json?.error?.message || `Meta API ${r.status}`;
+        return { items: [], error: msg };
+      }
+    } catch (e: any) {
+      return { items: [], error: `Exceção ao buscar analytics: ${e.message}` };
+    }
+
+    const blocks: any[] = json?.template_analytics?.data ?? [];
+    let dpCount = 0;
+    for (const block of blocks) {
+      for (const p of block.data_points ?? []) {
+        dpCount++;
+        const id = String(p.template_id);
+        const atual = parcial.get(id) ?? { template_id: id, sent: 0, delivered: 0, cost: 0 };
+        atual.sent += Number(p.sent ?? 0);
+        atual.delivered += Number(p.delivered ?? 0);
+        const amount = (p.cost ?? []).find(
+          (c: any) => c.type === "amount_spent" || c.type === "COST",
+        );
+        atual.cost += Number(amount?.value ?? 0);
+        parcial.set(id, atual);
+      }
+    }
+    const nextUrl = json?.template_analytics?.paging?.next ?? null;
+    if (dpCount > 0 && nextUrl) console.log(`[meta-api] paginando lote ${loteIdx + 1}...`);
+    url = nextUrl;
+  }
+  return { items: [...parcial.values()], error: "" };
+}
+
 export async function obterTemplateAnalytics(
   templateIds: string[],
   startUnix: number,
   endUnix: number,
 ): Promise<{ data: Map<string, TemplateCusto>; error: string }> {
-  const resultado = new Map<string, TemplateCusto>();
   const ids = templateIds.filter(Boolean);
-  if (!ids.length) return { data: resultado, error: "" };
+  if (!ids.length) return { data: new Map(), error: "" };
 
-  for (let i = 0; i < ids.length; i += 10) {
-    const lote = ids.slice(i, i + 10);
-    const idsParam = encodeURIComponent(`[${lote.join(",")}]`);
-    const metrics = encodeURIComponent(`["SENT","DELIVERED","COST"]`);
-    const fields =
-      `template_analytics.start(${startUnix}).end(${endUnix}).granularity(DAILY)` +
-      `.template_ids(${idsParam}).metric_types(${metrics})`;
-    const url = `https://graph.facebook.com/${API_VERSION}/${getWabaId()}?fields=${fields}&access_token=${getAccessToken()}`;
+  // 1ª passagem: batch template_analytics (rápido, cobre a maioria dos templates)
+  const CHUNK_SEC = 5 * 24 * 3600;
+  const chunks: Array<{ s: number; e: number }> = [];
+  for (let s = startUnix; s < endUnix; s += CHUNK_SEC) {
+    chunks.push({ s, e: Math.min(s + CHUNK_SEC, endUnix) });
+  }
+  const lotes: string[][] = [];
+  for (let i = 0; i < ids.length; i += 10) lotes.push(ids.slice(i, i + 10));
 
-    try {
-      const r = await fetch(url, { signal: AbortSignal.timeout(60_000) });
-      const json = await r.json();
-      if (!r.ok) {
-        const msg = json?.error?.error_user_msg || json?.error?.message || `Meta API ${r.status}`;
-        return { data: resultado, error: msg };
-      }
-      const blocks: any[] = json?.template_analytics?.data ?? [];
-      for (const block of blocks) {
-        for (const p of block.data_points ?? []) {
-          const id = String(p.template_id);
-          const atual = resultado.get(id) ?? { template_id: id, sent: 0, delivered: 0, cost: 0 };
-          atual.sent += Number(p.sent ?? 0);
-          atual.delivered += Number(p.delivered ?? 0);
-          const amount = (p.cost ?? []).find((c: any) => c.type === "amount_spent");
-          atual.cost += Number(amount?.value ?? 0);
-          resultado.set(id, atual);
+  const CONCORRENCIA = 8;
+  const resultado = new Map<string, TemplateCusto>();
+
+  for (const chunk of chunks) {
+    for (let i = 0; i < lotes.length; i += CONCORRENCIA) {
+      const grupo = lotes.slice(i, i + CONCORRENCIA);
+      const resultados = await Promise.all(
+        grupo.map((lote, j) => fetchLoteAnalytics(lote, i + j, chunk.s, chunk.e)),
+      );
+      for (const r of resultados) {
+        if (r.error) return { data: resultado, error: r.error };
+        for (const item of r.items) {
+          const atual = resultado.get(item.template_id) ?? {
+            template_id: item.template_id,
+            sent: 0,
+            delivered: 0,
+            cost: 0,
+          };
+          atual.sent += item.sent;
+          atual.delivered += item.delivered;
+          atual.cost += item.cost;
+          resultado.set(item.template_id, atual);
         }
       }
-    } catch (e: any) {
-      return { data: resultado, error: `Exceção ao buscar analytics: ${e.message}` };
     }
   }
+
+
   return { data: resultado, error: "" };
 }
 

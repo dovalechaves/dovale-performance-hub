@@ -195,7 +195,7 @@ export default function RelatorioCustos() {
                 <div className="py-16 text-center text-muted-foreground"><Loader2 className="w-6 h-6 animate-spin mx-auto" /></div>
               ) : relatorio ? (
                 <>
-                  {/* Cards de total */}
+                  {}
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                     <CardTotal label="Custo total" value={brl(relatorio.totalBrl)} sub={`${usd(relatorio.totalUsd)} cobrado pela Meta`} tone="text-emerald-400" />
                     <CardTotal label="Mensagens enviadas" value={relatorio.totalVolume.toLocaleString("pt-BR")} tone="text-violet-400" />
@@ -203,7 +203,25 @@ export default function RelatorioCustos() {
                     <CardTotal label="Setores com custo" value={String(relatorio.setores.length)} tone="text-sky-400" />
                   </div>
 
-                  {/* Tabela por setor */}
+                  {}
+                  {relatorio.naoMapeado.custoUsd > 0 && (
+                    <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 flex items-start gap-3">
+                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                      <div className="text-xs text-amber-300 space-y-1">
+                        <p className="font-medium">
+                          {brl(relatorio.naoMapeado.custoBrl)} ({usd(relatorio.naoMapeado.custoUsd)}) de custo <strong>não aparecem no relatório</strong> — templates sem setor definido no De-Para.
+                        </p>
+                        <p className="text-amber-400/80">
+                          Templates com custo sem setor: {relatorio.naoMapeado.templates.join(", ") || "—"}
+                        </p>
+                        <p className="text-amber-400/70">
+                          Total real cobrado pela Meta: <span className="font-semibold text-amber-300">{brl(relatorio.totalBrl + relatorio.naoMapeado.custoBrl)}</span>
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {}
                   <div className="rounded-xl border border-border overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
@@ -247,7 +265,6 @@ export default function RelatorioCustos() {
               ) : null}
             </>
           ) : (
-            /* ─── De-Para ─── */
             <>
               <div className="flex flex-wrap items-center gap-3">
                 <button
@@ -363,8 +380,7 @@ function FragmentSetor({
         <td className="px-4 py-3 text-right text-emerald-400 font-medium">{brl(setor.custoBrl)}</td>
         <td className="px-4 py-3 text-right text-muted-foreground">{usd(setor.custoUsd)}</td>
       </tr>
-      {aberto &&
-        setor.templates.map((t) => (
+      {aberto && setor.templates.map((t) => (
           <tr key={t.template} className="border-b border-border/30 bg-muted/20 text-xs">
             <td className="px-4 py-2 pl-10 font-mono text-muted-foreground">{t.template}</td>
             <td className="px-4 py-2 text-right text-muted-foreground">{t.volume.toLocaleString("pt-BR")}</td>

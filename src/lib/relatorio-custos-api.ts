@@ -17,6 +17,13 @@ export interface CustoSetor {
   templates: CustoTemplate[];
 }
 
+export interface NaoMapeado {
+  custoUsd: number;
+  custoBrl: number;
+  volume: number;
+  templates: string[];
+}
+
 export interface RelatorioCustos {
   mes: string;
   periodo: { start: number; end: number };
@@ -25,6 +32,7 @@ export interface RelatorioCustos {
   totalBrl: number;
   totalVolume: number;
   setores: CustoSetor[];
+  naoMapeado: NaoMapeado;
 }
 
 export interface TemplateDePara {

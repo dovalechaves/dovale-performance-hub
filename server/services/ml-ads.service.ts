@@ -73,27 +73,30 @@ async function fetchPerformance(token: string, dateFrom: string, dateTo: string)
   }
 }
 
-export async function getMlAdsData(periodo: "diario" | "mensal"): Promise<MlAdsData> {
+export async function getMlAdsData(periodo: "diario" | "mensal", date?: string): Promise<MlAdsData> {
   const fallback: MlAdsData = {
     expense: 0, gmv: 0, roas: 0, clicks: 0, impressions: 0, orders: 0, fonte: "fallback",
   };
 
-  const cached = cache.get(periodo);
+  const cacheKey = date ? `${periodo}_${date}` : periodo;
+  const cached = cache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.data;
 
   const token = await getToken();
   if (!token) return fallback;
 
   const now = new Date();
+  const targetDate = date ? new Date(`${date}T00:00:00`) : now;
+
   const dateFrom = periodo === "diario"
-    ? formatDate(now)
+    ? formatDate(targetDate)
     : formatDate(new Date(now.getTime() - 28 * 24 * 60 * 60 * 1000));
-  const dateTo = formatDate(now);
+  const dateTo = periodo === "diario" ? formatDate(targetDate) : formatDate(now);
 
   const data = await fetchPerformance(token, dateFrom, dateTo);
   if (!data) return fallback;
 
-  cache.set(periodo, { data, expiresAt: Date.now() + CACHE_TTL_MS });
+  cache.set(cacheKey, { data, expiresAt: Date.now() + CACHE_TTL_MS });
   return data;
 }
 

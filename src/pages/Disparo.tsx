@@ -791,12 +791,15 @@ export default function Disparo() {
             </div>
 
             <div>
-              <Label>Rodapé (opcional)</Label>
+              <Label className="text-muted-foreground">Rodapé (desabilitado)</Label>
               <Input
-                placeholder="Ex: Dovale Indústria"
-                value={novoTemplate.footer_text}
-                onChange={(e) => updateNovo("footer_text", e.target.value)}
+                placeholder="Não use rodapé"
+                value=""
+                disabled
               />
+              <span className="text-xs text-amber-600">
+                ⚠️ Rodapé desabilitado: templates com rodapé falham no disparo pelo Chatwoot (erro 132012). Coloque esse texto no final do corpo.
+              </span>
             </div>
 
             <div>

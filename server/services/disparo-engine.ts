@@ -1,11 +1,12 @@
-import path from "path";
 import { Server as SocketServer } from "socket.io";
 import { getSupa, supaGetAll, supaInsertBatch } from "./supabase";
 import * as meta from "./meta-api";
 import * as cw from "./chatwoot";
 
 const LOTE = 50;
-const MAX_WORKERS = Number(process.env.DISPARO_MAX_WORKERS) || 20;
+// Disparo via API do Chatwoot faz ~5 chamadas por contato (contato+conversa+etiqueta+time+template).
+// Concorrência baixa + retry em 429 (no cw.enviarTemplate) evitam rate-limit do Chatwoot em volume.
+const MAX_WORKERS = Number(process.env.DISPARO_MAX_WORKERS) || 6;
 
 let io: SocketServer | null = null;
 export function setSocketIO(s: SocketServer) { io = s; }
@@ -93,6 +94,41 @@ export async function detalharTemplate(nome: string, lang: string) {
 
 // ── Processar Disparo (background) ───────────────────────────────────────────
 
+/** Monta o processed_params do Chatwoot a partir da configuração do disparo. */
+export function montarProcessedParams(cfg: Record<string, any>): cw.ProcessedParams {
+  const pp: cw.ProcessedParams = {};
+  if (Array.isArray(cfg.body_params) && cfg.body_params.length) {
+    pp.body = {};
+    cfg.body_params.forEach((v: any, i: number) => { pp.body![String(i + 1)] = String(v); });
+  }
+  const mediaUrl = String(cfg.media_url ?? "").trim();
+  const hf = String(cfg.header_format ?? "").toUpperCase();
+  if (mediaUrl && ["IMAGE", "VIDEO", "DOCUMENT"].includes(hf)) {
+    pp.header = { media_url: mediaUrl, media_type: hf.toLowerCase() };
+  }
+  return pp;
+}
+
+/** Envia o template para um contato via API do Chatwoot (acha/cria contato → conversa → time → template). */
+async function enviarParaContato(
+  contato: any, templateNome: string, inboxId: number, lang: string, category: string,
+  processedParams: cw.ProcessedParams, corpoPreview: string, etiqueta: string, timeId: number | null,
+): Promise<{ contato: any; status: string; erro: string; msgId: string }> {
+  try {
+    const contatoId = await cw.criarContato(contato.numero, contato.nome, inboxId);
+    if (!contatoId) return { contato, status: "FAILED", erro: "Falha ao achar/criar contato no Chatwoot", msgId: "" };
+    const conversaId = await cw.criarConversa(contatoId, inboxId);
+    if (!conversaId) return { contato, status: "FAILED", erro: "Falha ao criar conversa no Chatwoot", msgId: "" };
+    if (etiqueta) await cw.adicionarEtiqueta(conversaId, etiqueta);
+    if (timeId) await cw.atribuirTime(conversaId, timeId);
+    const { id, error } = await cw.enviarTemplate(conversaId, templateNome, category, lang, processedParams, corpoPreview);
+    if (id) return { contato, status: "SENT", erro: "", msgId: String(id) };
+    return { contato, status: "FAILED", erro: error, msgId: "" };
+  } catch (e: any) {
+    return { contato, status: "FAILED", erro: e.message, msgId: "" };
+  }
+}
+
 export async function processarDisparo(disparoId: number, inboxId: number) {
   const supa = getSupa();
   const { data: dData } = await supa.from("disparos").select("*").eq("id", disparoId).single();
@@ -112,13 +148,15 @@ export async function processarDisparo(disparoId: number, inboxId: number) {
 
   const cfg = parseConfiguracao(dData.configuracao);
   const lang = cfg.language_code ?? "pt_BR";
-  let compsTemplate = montarComponentesTemplate(cfg);
+  const processedParams = montarProcessedParams(cfg);
 
-  // Corpo do template para nota CW
+  // Detalhe do template: categoria (obrigatória no template_params) + corpo (preview na conversa do Chatwoot)
+  let category = "MARKETING";
   let corpoTemplate = "";
   try {
     const det = await detalharTemplate(dData.template_nome, lang);
     if (det) {
+      category = det.category ?? "MARKETING";
       const partes: string[] = [];
       if (det.header_text) partes.push(`*${det.header_text}*`);
       if (det.body_text) partes.push(det.body_text);
@@ -127,42 +165,24 @@ export async function processarDisparo(disparoId: number, inboxId: number) {
     }
   } catch {}
 
-  // Pre-upload mídia
-  const mediaUrl = cfg.media_url;
-  if (mediaUrl && compsTemplate) {
-    const mtMap: Record<string, string> = { IMAGE: "image", VIDEO: "video", DOCUMENT: "document" };
-    const mt = mtMap[String(cfg.header_format ?? "IMAGE").toUpperCase()] ?? "image";
-    // Se a URL aponta para nosso próprio endpoint de mídia, lê direto do disco
-    const mediaMatch = String(mediaUrl).match(/\/api\/disparo\/media\/([^/?#]+)/);
-    let result: { mediaId: string | null; error: string };
-    if (mediaMatch) {
-      const localPath = path.resolve("uploads_media", mediaMatch[1]);
-      result = await meta.uploadMediaFromFile(mt, localPath);
-    } else {
-      result = await meta.uploadMediaFromUrl(mt, mediaUrl);
-    }
-    if (result.mediaId) {
-      compsTemplate = meta.resolverComponentesComMediaId(compsTemplate, result.mediaId);
-      console.log(`[Disparo ${disparoId}] Mídia pré-upada: ${result.mediaId}`);
-      console.log(`[Disparo ${disparoId}] Componentes com mídia:`, JSON.stringify(compsTemplate));
-    } else {
-      const erroMsg = `Falha no upload de mídia: ${result.error}`;
-      console.error(`[Disparo ${disparoId}] ${erroMsg}`);
-      await supa.from("disparos").update({ status: "FAILED", resultado: erroMsg }).eq("id", disparoId);
-      emit("status_disparo", { id: disparoId, status: "FAILED", erro: erroMsg });
-      return;
-    }
+  // Etiqueta (do disparo ou do template_configs) e time (do disparo ou mapeado pela etiqueta)
+  let etiqueta = String(cfg.etiqueta ?? "").trim();
+  if (!etiqueta) {
+    try {
+      const { data: cfgs } = await supa.from("template_configs").select("*");
+      const nome = String(dData.template_nome).toLowerCase();
+      const row = (cfgs ?? []).find((r: any) => String(r.template_nome).toLowerCase() === nome);
+      if (row?.etiqueta) etiqueta = row.etiqueta;
+    } catch {}
   }
-
-  // Busca etiquetas do Supabase + times do Chatwoot
-  const etiquetaMap: Record<string, string> = {};
-  const timesMap: Record<string, number> = {};
-  try {
-    const { data: cfgs } = await supa.from("template_configs").select("*");
-    for (const r of cfgs ?? []) { if (r.etiqueta) etiquetaMap[r.template_nome] = r.etiqueta; }
-    const times = await cw.listarTimes();
-    for (const t of times) { timesMap[t.name.toLowerCase()] = t.id; }
-  } catch {}
+  let timeId: number | null = cfg.time_id ? Number(cfg.time_id) : null;
+  if (!timeId && etiqueta) {
+    try {
+      const times = await cw.listarTimes();
+      const t = times.find((t) => t.name.toLowerCase() === etiqueta.toLowerCase());
+      if (t) timeId = t.id;
+    } catch {}
+  }
 
   let sucessos = logsExistentes.filter((l: any) => l.status === "SENT").length;
   let falhas = logsExistentes.filter((l: any) => l.status === "FAILED").length;
@@ -180,44 +200,27 @@ export async function processarDisparo(disparoId: number, inboxId: number) {
     const lote = pendentes.slice(i, i + LOTE);
     const logsLote: any[] = [];
 
-    // Processar em paralelo (limitado a MAX_WORKERS)
+    // Processar em paralelo (limitado a MAX_WORKERS — evita rate-limit do Chatwoot)
     const chunks: any[][] = [];
     for (let j = 0; j < lote.length; j += MAX_WORKERS) chunks.push(lote.slice(j, j + MAX_WORKERS));
 
     for (const chunk of chunks) {
       const results = await Promise.allSettled(
-        chunk.map(async (contato: any) => {
-          if (i === 0) console.log(`[Disparo ${disparoId}] Enviando para ${contato.numero} template=${dData.template_nome} lang=${lang} comps=${JSON.stringify(compsTemplate)}`);
-          const { data: resp, error } = await meta.enviarTemplate(
-            contato.numero, dData.template_nome, lang, compsTemplate,
-          );
-          if (i === 0) console.log(`[Disparo ${disparoId}] Resposta ${contato.numero}: data=${JSON.stringify(resp)?.slice(0,200)} error=${error}`);
-          if (resp) {
-            const wamid = (resp.messages ?? [{}])[0]?.id ?? "";
-            return { contato, status: "SENT", erro: "", wamid };
-          }
-          return { contato, status: "FAILED", erro: error, wamid: "" };
-        }),
+        chunk.map((contato: any) =>
+          enviarParaContato(contato, dData.template_nome, inboxId, lang, category, processedParams, corpoTemplate, etiqueta, timeId),
+        ),
       );
 
       for (const r of results) {
-        const val = r.status === "fulfilled" ? r.value : { contato: null, status: "FAILED", erro: "Thread error", wamid: "" };
-        if (val.status === "SENT") {
-          sucessos++;
-          // Fire-and-forget CW integration
-          if (val.contato) {
-            integrarChatwoot(val.contato.numero, val.contato.nome, dData.template_nome, inboxId, corpoTemplate, etiquetaMap, timesMap);
-          }
-        } else {
-          falhas++;
-          console.log(`[Disparo ${disparoId}] FALHA ${val.contato?.numero}: ${val.erro}`);
-        }
+        const val = r.status === "fulfilled" ? r.value : { contato: null, status: "FAILED", erro: "Thread error", msgId: "" };
+        if (val.status === "SENT") sucessos++;
+        else { falhas++; console.log(`[Disparo ${disparoId}] FALHA ${val.contato?.numero}: ${val.erro}`); }
         logsLote.push({
           disparo_id: disparoId,
           contato_numero: val.contato?.numero ?? "?",
           status: val.status,
           mensagem_erro: val.erro,
-          meta_wamid: val.wamid,
+          meta_wamid: val.msgId,
         });
       }
     }

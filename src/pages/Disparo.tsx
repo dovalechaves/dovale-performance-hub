@@ -53,7 +53,9 @@ export default function Disparo() {
   const [templateEtiquetas, setTemplateEtiquetas] = useState<Record<string, string>>({});
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [mediaUrl, setMediaUrl] = useState("");
-  const [inboxId, setInboxId] = useState("1");
+  const [inboxId, setInboxId] = useState("117309");
+  const [chatwootTimes, setChatwootTimes] = useState<{ id: number; name: string }[]>([]);
+  const [timeId, setTimeId] = useState("");
 
   // Disparo status
   const [disparoId, setDisparoId] = useState<number | null>(null);
@@ -141,6 +143,7 @@ export default function Disparo() {
     api.fetchTemplates().then(setTemplates).catch((e) => { console.error("[disparo] fetchTemplates:", e); toast.error("Falha ao carregar templates"); });
     api.fetchTemplatesGerenciar().then(setTemplatesGerenciar).catch((e) => { console.error("[disparo] fetchTemplatesGerenciar:", e); });
     api.fetchEtiquetasChatwoot().then(setEtiquetasChatwoot).catch(() => {});
+    api.fetchChatwootTimes().then(setChatwootTimes).catch(() => {});
     api.fetchTemplateEtiquetas().then(setTemplateEtiquetas).catch(() => {});
     api.fetchDisparoAtivo().then((d) => {
       if (d.ativo) {
@@ -214,10 +217,14 @@ export default function Disparo() {
       toast.error("Selecione lista e template");
       return;
     }
+    if (!timeId) {
+      toast.error("Selecione o time do Chatwoot que vai receber as conversas");
+      return;
+    }
     setDisparoLoading(true);
     try {
       const tmpl = templates.find((t) => t.name === selectedTemplate);
-      const cfg: Record<string, unknown> = {};
+      const cfg: Record<string, unknown> = { time_id: Number(timeId) };
       if (mediaUrl && tmpl?.requires_media) cfg.media_url = mediaUrl;
       if (tmpl?.header_format) cfg.header_format = tmpl.header_format;
 
@@ -506,7 +513,20 @@ export default function Disparo() {
                     </div>
                   )}
 
-                  <Button onClick={handleDisparar} disabled={!listaId || !selectedTemplate || disparoLoading} className="w-full">
+                  <div>
+                    <Label>Time do Chatwoot (responsável pelas respostas)</Label>
+                    <Select value={timeId} onValueChange={setTimeId}>
+                      <SelectTrigger><SelectValue placeholder="Selecione o time..." /></SelectTrigger>
+                      <SelectContent>
+                        {chatwootTimes.map((t) => (
+                          <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <span className="text-xs text-muted-foreground">As conversas geradas no disparo serão atribuídas a este time.</span>
+                  </div>
+
+                  <Button onClick={handleDisparar} disabled={!listaId || !selectedTemplate || !timeId || disparoLoading} className="w-full">
                     <Send className="h-4 w-4 mr-2" />{disparoLoading ? "Iniciando..." : "Iniciar Disparo"}
                   </Button>
                 </CardContent>
@@ -780,13 +800,13 @@ export default function Disparo() {
             </div>
 
             <div>
-              <Label>Setor *</Label>
-              {etiquetasChatwoot.length > 0 ? (
+              <Label>Setor (time do Chatwoot) *</Label>
+              {chatwootTimes.length > 0 ? (
                 <Select value={novoTemplate.etiqueta} onValueChange={(v) => updateNovo("etiqueta", v)}>
-                  <SelectTrigger><SelectValue placeholder="Selecione o setor..." /></SelectTrigger>
+                  <SelectTrigger><SelectValue placeholder="Selecione o time..." /></SelectTrigger>
                   <SelectContent>
-                    {etiquetasChatwoot.map((e) => (
-                      <SelectItem key={e} value={e}>{e}</SelectItem>
+                    {chatwootTimes.map((t) => (
+                      <SelectItem key={t.id} value={t.name}>{t.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -797,7 +817,7 @@ export default function Disparo() {
                   onChange={(e) => updateNovo("etiqueta", e.target.value)}
                 />
               )}
-              <span className="text-xs text-muted-foreground">Etiqueta do Chatwoot — identifica o setor responsável pelas respostas</span>
+              <span className="text-xs text-muted-foreground">Time do Chatwoot — setor responsável pelas respostas desse template.</span>
             </div>
           </div>
           <DialogFooter>

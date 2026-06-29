@@ -188,6 +188,61 @@ export async function enviarMensagemPublica(
   }
 }
 
+// ── Enviar template (WhatsApp Cloud via Chatwoot) ────────────────────────────
+
+export interface ProcessedParams {
+  body?: Record<string, string>;
+  header?: { media_url?: string; media_type?: string; media_name?: string };
+  buttons?: Array<{ type: string; parameter: string }>;
+}
+
+/**
+ * Dispara um template aprovado pela API do Chatwoot. O Chatwoot repassa para a
+ * Meta usando o número conectado no inbox. Faz retry com backoff em 429/5xx
+ * (rate-limit do Chatwoot em disparos de volume).
+ */
+export async function enviarTemplate(
+  conversationId: number,
+  name: string,
+  category: string,
+  language: string,
+  processedParams: ProcessedParams,
+  contentPreview = "",
+  maxRetries = 4,
+): Promise<{ id: number | null; error: string }> {
+  const url = `${ACC()}/conversations/${conversationId}/messages`;
+  const body = JSON.stringify({
+    content: contentPreview || name,
+    template_params: { name, category, language, processed_params: processedParams },
+  });
+  let lastError = "";
+  for (let tentativa = 0; tentativa < maxRetries; tentativa++) {
+    try {
+      const r = await fetch(url, { method: "POST", headers: headers(), body });
+      if (r.ok) {
+        let id: number | null = null;
+        try { id = (await r.json()).id ?? null; } catch {}
+        return { id, error: "" };
+      }
+      const txt = await r.text();
+      if ((r.status === 429 || r.status >= 500) && tentativa < maxRetries - 1) {
+        await sleep(2 ** tentativa * 1000);
+        lastError = `Chatwoot ${r.status}`;
+        continue;
+      }
+      return { id: null, error: `Chatwoot ${r.status}: ${txt.slice(0, 300)}` };
+    } catch (e: any) {
+      lastError = `Exceção Chatwoot template: ${e.message}`;
+      if (tentativa < maxRetries - 1) await sleep(1000);
+    }
+  }
+  return { id: null, error: lastError };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 // ── Consultas ────────────────────────────────────────────────────────────────
 
 export async function buscarMensagensRecentes(conversationId: number): Promise<any[]> {

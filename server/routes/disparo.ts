@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import multer from "multer";
+import mime from "mime-types";
 import path from "path";
 import fs from "fs";
 import jwt from "jsonwebtoken";
@@ -27,6 +28,10 @@ const NUMEROS_APROVADORES = (process.env.NUMERO_APROVADOR ?? "5512981898755,5519
 const APROVACAO_TIMEOUT_MIN = Number(process.env.APROVACAO_TIMEOUT_MIN) || 10;
 const UPLOAD_DIR = path.resolve("uploads");
 const MEDIA_DIR = path.resolve("uploads_media");
+// Bucket público no Supabase Storage (CDN) — aguenta a Meta baixar a imagem N vezes no disparo
+const BUCKET_MIDIA = process.env.SUPABASE_BUCKET_MIDIA ?? "disparo-midia";
+// Inbox padrão do Chatwoot (configurado no .env) — usado quando o disparo não especifica
+const INBOX_PADRAO = Number(process.env.inbox_id_chatwoot) || 1;
 const MEDIA_MAX_BYTES = 16 * 1024 * 1024; // Meta limita vídeos a 16 MB
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -87,7 +92,7 @@ router.post("/webhook/chatwoot", async (req: Request, res: Response) => {
       console.log(`[webhook-chatwoot] Disparo #${d.id} AUTORIZADO via webhook.`);
       const cfg = parseConfiguracao(d.configuracao);
       await supa.from("disparos").update({ status: "PROCESSING" }).eq("id", d.id);
-      processarDisparo(d.id, cfg.inbox_id ?? 1);
+      processarDisparo(d.id, cfg.inbox_id ?? INBOX_PADRAO);
     } else {
       console.log(`[webhook-chatwoot] Disparo #${d.id} NEGADO via webhook.`);
       await supa.from("disparos").update({ status: "REJECTED" }).eq("id", d.id);
@@ -375,8 +380,26 @@ router.post("/upload-midia", uploadMidia.single("file"), async (req: Request, re
   const novoNome = `${crypto.randomUUID().replace(/-/g, "")}${ext}`;
   const destino = path.join(MEDIA_DIR, novoNome);
   fs.renameSync(req.file.path, destino);
-  const basePublica = (process.env.PUBLIC_BASE_URL ?? "").replace(/\/+$/, "") || `http://localhost:${process.env.SERVER_PORT ?? 3001}`;
-  const mediaUrl = `${basePublica}/api/disparo/media/${novoNome}`;
+
+  // Hospeda a mídia no Supabase Storage (CDN público) — é a URL que vai pro template do Chatwoot.
+  // CDN aguenta a Meta baixar a imagem uma vez por destinatário sem sobrecarregar o backend.
+  let mediaUrl: string;
+  try {
+    const supa = getSupa();
+    const buffer = fs.readFileSync(destino);
+    const contentType = mime.lookup(destino) || "application/octet-stream";
+    const { error: upErr } = await supa.storage
+      .from(BUCKET_MIDIA)
+      .upload(novoNome, buffer, { contentType: String(contentType), upsert: true });
+    if (upErr) throw upErr;
+    mediaUrl = supa.storage.from(BUCKET_MIDIA).getPublicUrl(novoNome).data.publicUrl;
+    console.log("[disparo] Mídia no Supabase Storage:", mediaUrl);
+  } catch (e: any) {
+    // Fallback: serve do próprio backend (URL pública via PUBLIC_BASE_URL)
+    console.error("[disparo] Falha no upload pro Supabase Storage, usando fallback do backend:", e.message);
+    const basePublica = (process.env.PUBLIC_BASE_URL ?? "").replace(/\/+$/, "") || `http://localhost:${process.env.SERVER_PORT ?? 3001}`;
+    mediaUrl = `${basePublica}/api/disparo/media/${novoNome}`;
+  }
 
   // Pré-gera handle Meta para agilizar criação de template (evita re-upload e timeout)
   // Timeout de 55s garante resposta antes do limite do proxy/Cloudflare (~100s)
@@ -404,7 +427,7 @@ router.get("/media/:filename", (req: Request, res: Response) => {
 // ── Disparar ─────────────────────────────────────────────────────────────────
 
 router.post("/disparar", async (req: Request, res: Response) => {
-  const { lista_id, template_nome, inbox_id = 1, configuracao: cfgRaw } = req.body ?? {};
+  const { lista_id, template_nome, inbox_id = INBOX_PADRAO, configuracao: cfgRaw } = req.body ?? {};
   if (!lista_id || !template_nome) return res.status(400).json({ erro: "lista_id e template_nome são obrigatórios" });
 
   const cfg = parseConfiguracao(cfgRaw);
@@ -575,7 +598,7 @@ router.get("/disparos/:id/aprovacao", async (req: Request, res: Response) => {
     if (textoFinal.includes("AUTORIZADO")) {
       const cfg = parseConfiguracao(d.configuracao);
       await supa.from("disparos").update({ status: "PROCESSING" }).eq("id", d.id);
-      processarDisparo(d.id, cfg.inbox_id ?? 1);
+      processarDisparo(d.id, cfg.inbox_id ?? INBOX_PADRAO);
       return res.json({ status: "aprovado" });
     }
     if (textoFinal.includes("NEGADO") || textoFinal.includes("NÃO") || textoFinal.includes("NAO")) {
@@ -601,7 +624,7 @@ router.post("/disparos/:id/aprovar", async (req: Request, res: Response) => {
   }
   const cfg = parseConfiguracao(d.configuracao);
   await supa.from("disparos").update({ status: "PROCESSING" }).eq("id", d.id);
-  processarDisparo(d.id, cfg.inbox_id ?? 1);
+  processarDisparo(d.id, cfg.inbox_id ?? INBOX_PADRAO);
   res.json({ status: "aprovado", mensagem: "Disparo aprovado e iniciado" });
 });
 
@@ -633,7 +656,7 @@ router.post("/disparos/:id/retomar", async (req: Request, res: Response) => {
   if (d.status !== "PAUSED") return res.status(400).json({ erro: `Disparo não está pausado (status: ${d.status})` });
   const cfg = parseConfiguracao(d.configuracao);
   await supa.from("disparos").update({ status: "PROCESSING" }).eq("id", d.id);
-  processarDisparo(d.id, cfg.inbox_id ?? 1);
+  processarDisparo(d.id, cfg.inbox_id ?? INBOX_PADRAO);
   res.json({ mensagem: "Disparo retomado", disparo_id: d.id });
 });
 

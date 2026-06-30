@@ -243,6 +243,39 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// ── Sincronização de templates ───────────────────────────────────────────────
+
+/** Dispara a sincronização dos templates do WhatsApp no Chatwoot (assíncrona no Chatwoot). */
+export async function sincronizarTemplates(inboxId?: number): Promise<boolean> {
+  const id = inboxId ?? INBOX_ID();
+  try {
+    const r = await fetch(`${ACC()}/inboxes/${id}/sync_templates`, {
+      method: "POST", headers: headers(), body: "{}",
+    });
+    if (r.ok) return true;
+    console.error(`[Chatwoot] sync_templates falhou: ${r.status}`);
+    return false;
+  } catch (e: any) {
+    console.error(`[Chatwoot] Exceção sync_templates: ${e.message}`);
+    return false;
+  }
+}
+
+/** Verifica se um template (por nome) já está na lista sincronizada do inbox. */
+export async function templateSincronizado(nome: string, inboxId?: number): Promise<boolean> {
+  const id = inboxId ?? INBOX_ID();
+  try {
+    const r = await fetch(`${ACC()}/inboxes/${id}`, { headers: headers() });
+    if (!r.ok) return false;
+    const ib = await r.json();
+    const tpls: any[] = ib.message_templates ?? [];
+    const alvo = nome.toLowerCase();
+    return tpls.some((t: any) => String(t.name).toLowerCase() === alvo);
+  } catch {
+    return false;
+  }
+}
+
 // ── Consultas ────────────────────────────────────────────────────────────────
 
 export async function buscarMensagensRecentes(conversationId: number): Promise<any[]> {

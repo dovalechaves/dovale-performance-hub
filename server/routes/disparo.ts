@@ -305,6 +305,10 @@ router.post("/templates", async (req: Request, res: Response) => {
       );
     }
 
+    // Dispara sync no Chatwoot (assíncrono) — quando o template for aprovado, já entra na lista.
+    // O disparo também re-sincroniza antes de enviar, então isso é só pra adiantar.
+    cw.sincronizarTemplates().catch(() => {});
+
     res.status(201).json({ mensagem: "Template enviado para aprovação na Meta", resultado: data });
   } catch (err: any) {
     console.error("[disparo] POST /templates erro:", err);

@@ -33,7 +33,8 @@ function cleanRepName(name: string | null | undefined) {
   return String(name ?? "")
     .replace(/\bLOJA\s+RIO\s+PRETO\b/gi, "")
     .replace(/\s{2,}/g, " ")
-    .trim();
+    .trim()
+    .toUpperCase();
 }
 
 function playGoalReachedChime() {

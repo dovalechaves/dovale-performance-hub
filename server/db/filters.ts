@@ -25,6 +25,11 @@ const PERMITIR_CODIGOS: Record<string, number[]> = {
 const FILTRAR_POR_NOME_CONTAINING: Record<string, string> = {
 };
 
+/** True se a loja usa whitelist de códigos (somente esses aparecem). */
+export function lojaTemWhitelist(loja: string): boolean {
+  return (PERMITIR_CODIGOS[loja]?.length ?? 0) > 0;
+}
+
 // Bancos adicionais que compõem as vendas de uma loja.
 // Quando loja=riopreto, consulta também sjc e mg com filtro "LOJA RIO PRETO".
 // O banco principal (riopreto) NÃO usa filtro — traz todos os representantes.

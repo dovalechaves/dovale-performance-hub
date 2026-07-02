@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { queryFirebird } from "../db/firebird";
-import { codigoPaiRepresentante, codigosFilhosExtraDb, firebirdFiltroRep, MULTI_DB_FILTRO, MULTI_DB_LOJAS } from "../db/filters";
+import { codigoPaiRepresentante, codigosFilhosExtraDb, firebirdFiltroRep, lojaTemWhitelist, MULTI_DB_FILTRO, MULTI_DB_LOJAS } from "../db/filters";
 
 const router = Router();
 
@@ -28,6 +28,11 @@ router.get("/", async (req, res) => {
          )`
       : filtroPrincipal;
 
+    // Lojas com whitelist já restringem os vendedores por código — nesse caso
+    // não exigimos vendas recentes, para que vendedores novos (ainda sem vendas)
+    // apareçam no painel e possam ter meta cadastrada.
+    const exigeVendaRecente = !lojaTemWhitelist(loja);
+
     const buildSql = (filtro: string) => `
       SELECT DISTINCT
         r.REP_CODIGO,
@@ -35,11 +40,11 @@ router.get("/", async (req, res) => {
       FROM REPRESENTANTES r
       WHERE r.REP_NOME IS NOT NULL
         ${filtro}
-        AND EXISTS (
+        ${exigeVendaRecente ? `AND EXISTS (
           SELECT 1 FROM PEDIDOS_VENDAS pv
           WHERE pv.PDV_REP_CODIGO = r.REP_CODIGO
             AND pv.PDV_DATA >= (CURRENT_DATE - 90)
-        )
+        )` : ""}
       ORDER BY r.REP_NOME
     `;
 

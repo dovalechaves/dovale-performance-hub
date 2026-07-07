@@ -7,8 +7,8 @@ export interface ChatwootClientConfig {
 
 const BASE_URL = (config?: ChatwootClientConfig) => (config?.baseUrl ?? process.env.base_chatwoot ?? "").replace(/\/+$/, "");
 const API_KEY = (config?: ChatwootClientConfig) => config?.apiKey ?? process.env.api_chatwoot ?? "";
-const INBOX_ID = (config?: ChatwootClientConfig) => config?.inboxId ?? Number(process.env.inbox_id_chatwoot) || 1;
-const ACCOUNT_ID = (config?: ChatwootClientConfig) => config?.accountId ?? Number(process.env.account_id_chatwoot) || 1;
+const INBOX_ID = (config?: ChatwootClientConfig) => config?.inboxId ?? (Number(process.env.inbox_id_chatwoot) || 1);
+const ACCOUNT_ID = (config?: ChatwootClientConfig) => config?.accountId ?? (Number(process.env.account_id_chatwoot) || 1);
 // Base da conta. Header usa hífen ("api-access-token") porque proxies (nginx/Cloudflare)
 // descartam headers HTTP com underscore por padrão.
 const ACC = (config?: ChatwootClientConfig) => `${BASE_URL(config)}/api/v1/accounts/${ACCOUNT_ID(config)}`;

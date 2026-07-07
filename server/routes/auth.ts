@@ -1,11 +1,12 @@
 import { Router } from "express";
 import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
 import { getPool } from "../db/sqlserver";
 
 const router = Router();
 const VALID_ROLES = ["admin", "manager", "viewer"] as const;
 const VALID_HUB_ROLES = ["admin", "viewer"] as const;
-const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento", "assistente", "multipreco", "inventario", "onboarding", "score", "cobranca", "ecommercedisparo", "sugestaocompras", "salescompass"] as const;
+const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento", "assistente", "multipreco", "inventario", "onboarding", "score", "cobranca", "ecommercedisparo", "sugestaocompras", "salescompass", "painelcomissao"] as const;
 const ECOMMERCE_DISPARO_ALLOWED = (process.env.ECOMMERCE_DISPARO_ALLOWED_USERS ?? "henrique.berbert,andreza")
   .split(",")
   .map((u) => u.trim().toLowerCase())
@@ -57,7 +58,30 @@ interface ManagedUser {
     loja: string | null;
     can_access: boolean;
     usu_codigo_sistema?: number | null;
+    config?: PainelComissaoConfig | null;
   }>;
+}
+
+// Config específica do Painel de Comissões (armazenada em USUARIOS_APPS.config como JSON)
+interface PainelComissaoConfig {
+  setores: string[];         // setores do GESTOR (RVS_NOME). [] = todos (só faz sentido p/ admin)
+  nome_vendedor: string | null; // nome canônico do VENDEDOR como aparece nas vendas
+}
+
+function parsePainelConfig(raw: unknown): PainelComissaoConfig {
+  let obj: Record<string, unknown> = {};
+  if (typeof raw === "string" && raw.trim()) {
+    try { obj = JSON.parse(raw) as Record<string, unknown>; } catch { obj = {}; }
+  } else if (raw && typeof raw === "object") {
+    obj = raw as Record<string, unknown>;
+  }
+  const setores = Array.isArray(obj.setores)
+    ? obj.setores.map((s) => String(s).trim()).filter(Boolean)
+    : [];
+  const nomeVend = obj.nome_vendedor != null && String(obj.nome_vendedor).trim()
+    ? String(obj.nome_vendedor).trim()
+    : null;
+  return { setores, nome_vendedor: nomeVend };
 }
 
 async function ensureAppsTable(pool: any): Promise<void> {
@@ -82,6 +106,14 @@ async function ensureAppsTable(pool: any): Promise<void> {
     )
     BEGIN
       ALTER TABLE dbo.USUARIOS_APPS ADD usu_codigo_sistema INT NULL;
+    END
+
+    IF NOT EXISTS (
+      SELECT 1 FROM sys.columns
+      WHERE object_id = OBJECT_ID('dbo.USUARIOS_APPS') AND name = 'config'
+    )
+    BEGIN
+      ALTER TABLE dbo.USUARIOS_APPS ADD config NVARCHAR(MAX) NULL;
     END
 
     IF NOT EXISTS (
@@ -184,6 +216,13 @@ function buildDefaultApps(usuario: string, localRole: unknown, localLoja: unknow
       loja: null,
       can_access: false,
     },
+    painelcomissao: {
+      app_key: "painelcomissao" as AppKey,
+      role: baseRole,
+      loja: null,
+      can_access: false,
+      config: { setores: [], nome_vendedor: null } as PainelComissaoConfig,
+    },
   };
 }
 
@@ -210,6 +249,7 @@ function mergeApps(
     ecommercedisparo: { ...defaults.ecommercedisparo },
     sugestaocompras: { ...defaults.sugestaocompras },
     salescompass: { ...defaults.salescompass },
+    painelcomissao: { ...defaults.painelcomissao },
   };
 
   for (const row of appRows) {
@@ -225,6 +265,7 @@ function mergeApps(
         ? isEnabledFlag(row?.ativo) && canAccessEcommerceDisparo(usuario, hubRole)
         : isEnabledFlag(row?.ativo),
       ...((appKey === "inventario" || appKey === "salescompass") && row?.usu_codigo_sistema != null ? { usu_codigo_sistema: Number(row.usu_codigo_sistema) } : {}),
+      ...(appKey === "painelcomissao" ? { config: parsePainelConfig(row?.config) } : {}),
     };
   }
 
@@ -264,6 +305,7 @@ function normalizeAppsPayload(
     ecommercedisparo: { ...defaults.ecommercedisparo },
     sugestaocompras: { ...defaults.sugestaocompras },
     salescompass: { ...defaults.salescompass },
+    painelcomissao: { ...defaults.painelcomissao },
   };
 
   if (payload && typeof payload === "object") {
@@ -283,6 +325,7 @@ function normalizeAppsPayload(
           ? (typeof raw.can_access === "boolean" ? raw.can_access : merged[appKey].can_access) && canAccessEcommerceDisparo(usuario, hubRole)
           : typeof raw.can_access === "boolean" ? raw.can_access : merged[appKey].can_access,
         ...(appKey === "salescompass" && raw.usu_codigo_sistema != null ? { usu_codigo_sistema: Number(raw.usu_codigo_sistema) } : {}),
+        ...(appKey === "painelcomissao" ? { config: parsePainelConfig(raw.config) } : {}),
       };
     }
   }
@@ -342,7 +385,7 @@ router.post("/login", async (req, res) => {
       const testAppsResult = await pool.request()
         .input("usuario", usuario)
         .query(`
-          SELECT app_key, role, loja, ativo, usu_codigo_sistema
+          SELECT app_key, role, loja, ativo, usu_codigo_sistema, config
           FROM dbo.USUARIOS_APPS
           WHERE usuario = @usuario
         `);
@@ -389,7 +432,7 @@ router.post("/login", async (req, res) => {
     const appsResult = await pool.request()
       .input("usuario", usuario)
       .query(`
-        SELECT app_key, role, loja, ativo, usu_codigo_sistema
+        SELECT app_key, role, loja, ativo, usu_codigo_sistema, config
         FROM dbo.USUARIOS_APPS
         WHERE usuario = @usuario
       `);
@@ -442,7 +485,7 @@ router.get("/me", async (req, res) => {
 
     const appsResult = await pool.request()
       .input("usuario", usuario)
-      .query(`SELECT app_key, role, loja, ativo, usu_codigo_sistema FROM dbo.USUARIOS_APPS WHERE usuario = @usuario`);
+      .query(`SELECT app_key, role, loja, ativo, usu_codigo_sistema, config FROM dbo.USUARIOS_APPS WHERE usuario = @usuario`);
 
     const apps = mergeApps(usuario, localUser.role, localUser.loja, canAccessHub, appsResult.recordset, hubRole);
 
@@ -485,9 +528,9 @@ router.get("/users", async (req, res) => {
     const [localResult, appResult] = await Promise.all([
       pool.request().query(`SELECT usuario, role, loja, ativo, hub_role FROM dbo.USUARIOS_LOJAS`),
       pool.request().query(`
-        SELECT usuario, app_key, role, loja, ativo, usu_codigo_sistema
+        SELECT usuario, app_key, role, loja, ativo, usu_codigo_sistema, config
         FROM dbo.USUARIOS_APPS
-        WHERE app_key IN ('dashboard', 'calculadora', 'disparo', 'fechamento', 'assistente', 'multipreco', 'inventario', 'onboarding', 'score', 'cobranca', 'ecommercedisparo', 'sugestaocompras', 'salescompass')
+        WHERE app_key IN ('dashboard', 'calculadora', 'disparo', 'fechamento', 'assistente', 'multipreco', 'inventario', 'onboarding', 'score', 'cobranca', 'ecommercedisparo', 'sugestaocompras', 'salescompass', 'painelcomissao')
       `),
     ]);
 
@@ -657,6 +700,7 @@ router.put("/role", async (req, res) => {
     const rawApps = (apps && typeof apps === "object") ? apps as Record<string, any> : {};
     const invUsuCodigoSistema = rawApps?.inventario?.usu_codigo_sistema ?? null;
     const scRepCodigo = rawApps?.salescompass?.usu_codigo_sistema ?? null;
+    const painelConfigJson = JSON.stringify(normalizedApps.painelcomissao.config ?? { setores: [], nome_vendedor: null });
 
     for (const appKey of MANAGED_APPS) {
       const app = normalizedApps[appKey];
@@ -691,6 +735,18 @@ router.put("/role", async (req, res) => {
             INSERT (usuario, app_key, role, loja, ativo, usu_codigo_sistema)
             VALUES (@usuario, @app_key, @role, @loja, @ativo, @usu_codigo_sistema);
         `);
+      } else if (appKey === "painelcomissao") {
+        r.input("config", painelConfigJson);
+        await r.query(`
+          MERGE dbo.USUARIOS_APPS AS target
+          USING (SELECT @usuario AS usuario, @app_key AS app_key) AS source
+            ON target.usuario = source.usuario AND target.app_key = source.app_key
+          WHEN MATCHED THEN
+            UPDATE SET role = @role, loja = @loja, ativo = @ativo, config = @config
+          WHEN NOT MATCHED THEN
+            INSERT (usuario, app_key, role, loja, ativo, config)
+            VALUES (@usuario, @app_key, @role, @loja, @ativo, @config);
+        `);
       } else {
         await r.query(`
           MERGE dbo.USUARIOS_APPS AS target
@@ -706,6 +762,52 @@ router.put("/role", async (req, res) => {
     }
 
     res.json({ ok: true });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: message });
+  }
+});
+
+/** GET /api/auth/painel-comissao/sso?usuario=xxx
+ *  Emite um JWT curto (assinado com SESSION_SECRET, compartilhado com o painel-comissao)
+ *  e devolve a URL de acesso ao painel já com o token. O painel valida o JWT no seu middleware. */
+router.get("/painel-comissao/sso", async (req, res) => {
+  try {
+    const usuario = String(req.query.usuario || "").trim();
+    if (!usuario) return res.status(400).json({ error: "usuario é obrigatório." });
+
+    const secret = process.env.SESSION_SECRET;
+    const painelUrl = process.env.PAINEL_COMISSAO_URL;
+    if (!secret) return res.status(500).json({ error: "SESSION_SECRET não configurado no Hub." });
+    if (!painelUrl) return res.status(500).json({ error: "PAINEL_COMISSAO_URL não configurado no Hub." });
+
+    const pool = await getPool();
+    await ensureAppsTable(pool);
+
+    const localResult = await pool.request()
+      .input("usuario", usuario)
+      .query(`SELECT role, loja, ativo, hub_role FROM dbo.USUARIOS_LOJAS WHERE usuario = @usuario`);
+    const localUser = localResult.recordset[0];
+    if (!localUser) return res.status(404).json({ error: "Usuário não encontrado." });
+
+    const canAccessHub = isEnabledFlag(localUser.ativo);
+    const hubRole: HubRole = isHubRole(localUser.hub_role) ? localUser.hub_role : "viewer";
+
+    const appsResult = await pool.request()
+      .input("usuario", usuario)
+      .query(`SELECT app_key, role, loja, ativo, usu_codigo_sistema, config FROM dbo.USUARIOS_APPS WHERE usuario = @usuario`);
+    const apps = mergeApps(usuario, localUser.role, localUser.loja, canAccessHub, appsResult.recordset, hubRole);
+
+    if (!canAccessHub || !apps.painelcomissao.can_access) {
+      return res.status(403).json({ error: "Usuário sem acesso ao Painel de Comissões." });
+    }
+
+    // O painel identifica o usuário pelo e-mail (samAccountName@dovale.com.br)
+    const email = usuario.includes("@") ? usuario : `${usuario}@dovale.com.br`;
+    const token = jwt.sign({ email, usuario }, secret, { algorithm: "HS256", expiresIn: "8h" });
+
+    const url = `${painelUrl.replace(/\/$/, "")}/api/sso?token=${encodeURIComponent(token)}`;
+    res.json({ url });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: message });

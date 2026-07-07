@@ -138,6 +138,13 @@ export interface AuthManagedUser {
       can_access: boolean;
       usu_codigo_sistema?: number | null;
     };
+    painelcomissao: {
+      app_key: "painelcomissao";
+      role: "admin" | "manager" | "viewer";
+      loja: string | null;
+      can_access: boolean;
+      config?: { setores: string[]; nome_vendedor: string | null } | null;
+    };
   };
 }
 

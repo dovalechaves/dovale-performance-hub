@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import { BarChart3, Calculator, LogOut, Sun, Moon, Users, RefreshCw, Loader2, ChevronDown, Settings2, Send, Archive, Bot, Database, ClipboardList, UserPlus, ShieldCheck, BellRing, ShoppingCart, Sparkles, Compass, TrendingDown } from "lucide-react";
+import { BarChart3, Calculator, LogOut, Sun, Moon, Users, RefreshCw, Loader2, ChevronDown, Settings2, Send, Archive, Bot, Database, ClipboardList, UserPlus, ShieldCheck, BellRing, ShoppingCart, Sparkles, Compass, TrendingDown, Coins, X } from "lucide-react";
 import logoBlue from "@/assets/logo-blue.png";
 import logoWhite from "@/assets/logo-white.png";
 import { API_BASE, LOJAS, getAuthUsers, updateAuthUserRole, type AuthManagedUser } from "@/services/api";
@@ -19,7 +19,16 @@ interface AppCard {
   icon: React.ReactNode;
   route: string;
   color: string;
+  external?: boolean; // app fora do SPA (aberto via SSO em nova aba)
 }
+
+// Setores do Painel de Comissões (RVS_NOME) — usados na config do Gestor
+const PAINEL_SETORES = ["TELEVENDAS", "TELEVENDAS MG", "DISTRIBUIDORES", "FERRAGENS"];
+const PAINEL_ROLE_LABELS: Record<Role, string> = {
+  admin: "Administrador",
+  manager: "Gestor",
+  viewer: "Vendedor",
+};
 
 const APPS: AppCard[] = [
   {
@@ -120,6 +129,13 @@ const APPS: AppCard[] = [
     route: "/relatorio-custos",
     color: "from-red-500/20 to-red-600/10 border-red-500/30 hover:border-red-500/60",
   },
+  {
+    title: "Painel de Comissões",
+    description: "Metas, bônus e comissões por setor e vendedor, consolidando vendas de todas as lojas.",
+    icon: <Coins className="w-8 h-8" />,
+    route: "/comissao",
+    color: "from-yellow-500/20 to-amber-600/10 border-yellow-500/30 hover:border-yellow-500/60",
+  },
 ];
 
 const APP_BY_ROUTE: Record<string, keyof AuthManagedUser["apps"]> = {
@@ -137,6 +153,7 @@ const APP_BY_ROUTE: Record<string, keyof AuthManagedUser["apps"]> = {
   "/sugestao-compras": "sugestaocompras",
   "/sales-compass": "salescompass",
   "/relatorio-custos": "disparo",
+  "/comissao": "painelcomissao",
 };
 
 // ─── Rep Selector (Sales Compass) ────────────────────────────────────────────
@@ -253,6 +270,11 @@ export default function Hub() {
   const [userPage, setUserPage] = useState(1);
   const USERS_PER_PAGE = 20;
   const [fbUsers, setFbUsers] = useState<{ codigo: number; nome: string }[]>([]);
+  const [painelModal, setPainelModal] = useState<AuthManagedUser | null>(null);
+  const [painelForm, setPainelForm] = useState<{ role: Role; setores: string[]; nome_vendedor: string }>({
+    role: "viewer", setores: [], nome_vendedor: "",
+  });
+  const [openingPainel, setOpeningPainel] = useState(false);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
@@ -321,6 +343,61 @@ export default function Hub() {
 
   const updateManagedUser = (usuario: string, updater: (u: AuthManagedUser) => AuthManagedUser) => {
     setManagedUsers((prev) => prev.map((u) => (u.usuario === usuario ? updater(u) : u)));
+  };
+
+  // Abre um app: interno via router; externo (Painel de Comissões) via SSO em nova aba
+  const openApp = async (app: AppCard) => {
+    if (!app.external) { navigate(app.route); return; }
+    if (!user || openingPainel) return;
+    setOpeningPainel(true);
+    try {
+      const r = await fetch(`${API_BASE}/auth/painel-comissao/sso?usuario=${encodeURIComponent(user.usuario)}`);
+      const data = await r.json().catch(() => ({}));
+      if (r.ok && data.url) {
+        window.open(data.url, "_blank", "noopener,noreferrer");
+      } else {
+        alert(data.error || "Não foi possível abrir o Painel de Comissões.");
+      }
+    } catch {
+      alert("Erro ao conectar ao Painel de Comissões.");
+    } finally {
+      setOpeningPainel(false);
+    }
+  };
+
+  const openPainelModal = (u: AuthManagedUser) => {
+    const cfg = u.apps.painelcomissao?.config ?? { setores: [], nome_vendedor: null };
+    setPainelForm({
+      role: u.apps.painelcomissao?.role ?? "viewer",
+      setores: Array.isArray(cfg.setores) ? cfg.setores : [],
+      nome_vendedor: cfg.nome_vendedor ?? "",
+    });
+    setPainelModal(u);
+  };
+
+  const savePainelConfig = async () => {
+    if (!painelModal) return;
+    const u = painelModal;
+    const next: AuthManagedUser = {
+      ...u,
+      apps: {
+        ...u.apps,
+        painelcomissao: {
+          ...u.apps.painelcomissao,
+          app_key: "painelcomissao",
+          role: painelForm.role,
+          loja: null,
+          can_access: u.apps.painelcomissao?.can_access ?? false,
+          config: {
+            setores: painelForm.role === "manager" ? painelForm.setores : [],
+            nome_vendedor: painelForm.role === "viewer" ? (painelForm.nome_vendedor.trim() || null) : null,
+          },
+        },
+      },
+    };
+    updateManagedUser(u.usuario, () => next);
+    setPainelModal(null);
+    await persistUser(next);
   };
 
   const appFilterOptions = APPS
@@ -425,7 +502,7 @@ export default function Hub() {
             {visibleApps.map((app) => (
               <button
                 key={app.route}
-                onClick={() => navigate(app.route)}
+                onClick={() => openApp(app)}
                 className={`text-left p-6 rounded-2xl border bg-gradient-to-br ${app.color} transition-all duration-200 hover:scale-[1.02] hover:shadow-lg group`}
               >
                 <div className="text-primary mb-4 group-hover:scale-110 transition-transform duration-200">
@@ -530,19 +607,20 @@ export default function Hub() {
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role SCmp</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Loja SCmp</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Rep SCmp</th>
+                    <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Painel Comis.</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {usersLoading ? (
                     <tr>
-                      <td colSpan={34} className="px-4 py-8 text-center text-muted-foreground">
+                      <td colSpan={35} className="px-4 py-8 text-center text-muted-foreground">
                         <Loader2 className="w-5 h-5 animate-spin mx-auto" />
                       </td>
                     </tr>
                   ) : filteredManagedUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={30} className="px-4 py-8 text-center text-muted-foreground text-xs">
+                      <td colSpan={35} className="px-4 py-8 text-center text-muted-foreground text-xs">
                         {appUserFilter === "all"
                           ? "Nenhum usuário encontrado para a busca informada."
                           : "Nenhum usuário habilitado no Hub e no app selecionado."}</td></tr>
@@ -613,6 +691,10 @@ export default function Hub() {
                                   salescompass: {
                                     ...(u.apps as any).salescompass,
                                     can_access: enabled ? ((u.apps as any).salescompass?.can_access ?? false) : false,
+                                  },
+                                  painelcomissao: {
+                                    ...(u.apps as any).painelcomissao,
+                                    can_access: enabled ? ((u.apps as any).painelcomissao?.can_access ?? false) : false,
                                   },
                                 } as any,
                                 can_access_dashboard: enabled ? u.apps.dashboard.can_access : false,
@@ -1443,6 +1525,44 @@ export default function Hub() {
                             }}
                           />
                         </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={u.apps.painelcomissao?.can_access ?? false}
+                              onChange={async (e) => {
+                                const next: AuthManagedUser = {
+                                  ...u,
+                                  apps: {
+                                    ...u.apps,
+                                    painelcomissao: {
+                                      ...u.apps.painelcomissao,
+                                      app_key: "painelcomissao",
+                                      role: u.apps.painelcomissao?.role ?? "viewer",
+                                      loja: null,
+                                      can_access: e.target.checked,
+                                      config: u.apps.painelcomissao?.config ?? { setores: [], nome_vendedor: null },
+                                    },
+                                  },
+                                };
+                                updateManagedUser(u.usuario, () => next);
+                                await persistUser(next);
+                              }}
+                              disabled={savingUser === u.usuario || !u.can_access_hub}
+                              className="h-4 w-4 rounded border-border bg-muted text-primary focus:ring-primary/50 disabled:opacity-40"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => openPainelModal(u)}
+                              disabled={!u.can_access_hub || !(u.apps.painelcomissao?.can_access ?? false)}
+                              title={`Cargo: ${PAINEL_ROLE_LABELS[u.apps.painelcomissao?.role ?? "viewer"]}`}
+                              className="inline-flex items-center gap-1 rounded-lg bg-secondary px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground hover:bg-primary/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              <Settings2 className="w-3 h-3" />
+                              {PAINEL_ROLE_LABELS[u.apps.painelcomissao?.role ?? "viewer"]}
+                            </button>
+                          </div>
+                        </td>
                         <td className="px-4 py-3 text-xs">
                           {savingUser === u.usuario && <span className="text-muted-foreground">Salvando...</span>}
                           {savedUser === u.usuario && <span className="text-primary font-semibold">Salvo</span>}
@@ -1483,6 +1603,108 @@ export default function Hub() {
               </div>
             )}
           </section>
+        )}
+
+        {painelModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setPainelModal(null)}>
+            <div
+              className="w-full max-w-md rounded-2xl border border-border bg-card shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-border px-5 py-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Painel de Comissões</h3>
+                  <p className="text-xs text-muted-foreground">{painelModal.displayname || painelModal.usuario}</p>
+                </div>
+                <button onClick={() => setPainelModal(null)} className="text-muted-foreground hover:text-foreground">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-4 px-5 py-5">
+                {/* Cargo */}
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">Cargo no painel</label>
+                  <div className="relative">
+                    <select
+                      value={painelForm.role}
+                      onChange={(e) => setPainelForm((f) => ({ ...f, role: e.target.value as Role }))}
+                      className="w-full appearance-none rounded-lg border border-border bg-muted px-3 py-2 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    >
+                      {(Object.keys(PAINEL_ROLE_LABELS) as Role[]).map((r) => (
+                        <option key={r} value={r}>{PAINEL_ROLE_LABELS[r]}</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                  </div>
+                  <p className="mt-1 text-[10px] text-muted-foreground">
+                    Administrador vê tudo · Gestor vê seus setores · Vendedor vê apenas as próprias vendas.
+                  </p>
+                </div>
+
+                {/* Setores (Gestor) */}
+                {painelForm.role === "manager" && (
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">Setores do gestor</label>
+                    <div className="flex flex-wrap gap-2">
+                      {PAINEL_SETORES.map((s) => {
+                        const on = painelForm.setores.includes(s);
+                        return (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => setPainelForm((f) => ({
+                              ...f,
+                              setores: on ? f.setores.filter((x) => x !== s) : [...f.setores, s],
+                            }))}
+                            className={`rounded-full border px-3 py-1 text-[11px] font-medium transition-colors ${on ? "border-primary bg-primary/15 text-primary" : "border-border bg-muted text-muted-foreground hover:text-foreground"}`}
+                          >
+                            {s}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {painelForm.setores.length === 0 && (
+                      <p className="mt-1 text-[10px] text-destructive">Selecione ao menos um setor.</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Nome do vendedor (Vendedor) */}
+                {painelForm.role === "viewer" && (
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">Nome do vendedor no sistema</label>
+                    <input
+                      type="text"
+                      value={painelForm.nome_vendedor}
+                      onChange={(e) => setPainelForm((f) => ({ ...f, nome_vendedor: e.target.value }))}
+                      placeholder="Ex: FERRAGENS ANESIA"
+                      className="w-full rounded-lg border border-border bg-muted px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    />
+                    <p className="mt-1 text-[10px] text-muted-foreground">
+                      Nome canônico exatamente como aparece nas vendas (após os vínculos). O vendedor verá tudo ligado a esse nome, em qualquer loja.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+                <button
+                  onClick={() => setPainelModal(null)}
+                  className="rounded-lg bg-secondary px-4 py-2 text-xs font-semibold text-foreground hover:bg-muted"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={savePainelConfig}
+                  disabled={painelForm.role === "manager" && painelForm.setores.length === 0}
+                  className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Salvar
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </main>
     </div>

@@ -79,6 +79,12 @@ interface AuthUser {
       loja: string | null;
       usu_codigo_sistema?: number | null; // rep_codigo do vendedor
     };
+    painelcomissao: {
+      canAccess: boolean;
+      role: Role;
+      loja: string | null;
+      config?: { setores: string[]; nome_vendedor: string | null } | null;
+    };
   };
 }
 
@@ -108,6 +114,7 @@ interface AuthContextValue {
       ecommercedisparo?: { role?: string; loja?: string | null; can_access?: boolean };
       sugestaocompras?: { role?: string; loja?: string | null; can_access?: boolean };
       salescompass?: { role?: string; loja?: string | null; can_access?: boolean; usu_codigo_sistema?: number | null };
+      painelcomissao?: { role?: string; loja?: string | null; can_access?: boolean; config?: { setores: string[]; nome_vendedor: string | null } | null };
     },
     hubRole?: string
   ) => void;
@@ -143,6 +150,7 @@ function buildUser(
     ecommercedisparo?: { role?: string; loja?: string | null; can_access?: boolean };
     sugestaocompras?: { role?: string; loja?: string | null; can_access?: boolean };
     salescompass?: { role?: string; loja?: string | null; can_access?: boolean; usu_codigo_sistema?: number | null };
+    painelcomissao?: { role?: string; loja?: string | null; can_access?: boolean; config?: { setores: string[]; nome_vendedor: string | null } | null };
   },
   apiHubRole?: string
 ): AuthUser {
@@ -178,6 +186,9 @@ function buildUser(
   const salescompassAccess = apiApps?.salescompass?.can_access ?? false;
   const salescompassLoja = apiApps?.salescompass?.loja ?? null;
   const salescompassRepCodigo = apiApps?.salescompass?.usu_codigo_sistema ?? null;
+  const painelcomissaoRole = resolveRole(usuario, apiApps?.painelcomissao?.role ?? apiRole);
+  const painelcomissaoAccess = apiApps?.painelcomissao?.can_access ?? false;
+  const painelcomissaoConfig = apiApps?.painelcomissao?.config ?? null;
 
   return {
     usuario,
@@ -257,6 +268,12 @@ function buildUser(
         loja: salescompassLoja,
         usu_codigo_sistema: salescompassRepCodigo,
       },
+      painelcomissao: {
+        canAccess: painelcomissaoAccess,
+        role: painelcomissaoRole,
+        loja: null,
+        config: painelcomissaoConfig,
+      },
     },
   };
 }
@@ -299,6 +316,9 @@ function loadFromStorage(): AuthUser | null {
     const salescompassAccess = (parsed.apps as any)?.salescompass?.canAccess ?? false;
     const salescompassLoja = (parsed.apps as any)?.salescompass?.loja ?? null;
     const salescompassRepCodigo = (parsed.apps as any)?.salescompass?.usu_codigo_sistema ?? null;
+    const painelcomissaoRole = (parsed.apps as any)?.painelcomissao?.role ?? parsed.role;
+    const painelcomissaoAccess = (parsed.apps as any)?.painelcomissao?.canAccess ?? false;
+    const painelcomissaoConfig = (parsed.apps as any)?.painelcomissao?.config ?? null;
 
     return {
       usuario: parsed.usuario,
@@ -378,6 +398,12 @@ function loadFromStorage(): AuthUser | null {
           loja: salescompassLoja,
           usu_codigo_sistema: salescompassRepCodigo,
         },
+        painelcomissao: {
+          canAccess: painelcomissaoAccess,
+          role: painelcomissaoRole,
+          loja: null,
+          config: painelcomissaoConfig,
+        },
       },
     };
   } catch {
@@ -438,6 +464,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ecommercedisparo?: { role?: string; loja?: string | null; can_access?: boolean };
       sugestaocompras?: { role?: string; loja?: string | null; can_access?: boolean };
       salescompass?: { role?: string; loja?: string | null; can_access?: boolean; usu_codigo_sistema?: number | null };
+      painelcomissao?: { role?: string; loja?: string | null; can_access?: boolean; config?: { setores: string[]; nome_vendedor: string | null } | null };
     },
     hubRole?: string
   ) => {

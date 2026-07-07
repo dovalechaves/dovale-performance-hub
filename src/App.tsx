@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -22,6 +22,12 @@ import EcommerceDisparo from "./pages/EcommerceDisparo.tsx";
 import SugestaoCompras from "./pages/SugestaoCompras.tsx";
 import SalesCompass from "./pages/SalesCompass.tsx";
 import RelatorioCustos from "./pages/RelatorioCustos.tsx";
+import ComissaoDashboard from "./pages/comissao/Dashboard.tsx";
+import ComissaoVendedor from "./pages/comissao/Vendedor.tsx";
+import ComissaoGestor from "./pages/comissao/Gestor.tsx";
+import ComissaoSimulacao from "./pages/comissao/Simulacao.tsx";
+import ComissaoConfiguracao from "./pages/comissao/Configuracao.tsx";
+import { ComissaoErrorBoundary } from "./pages/comissao/ComissaoErrorBoundary.tsx";
 import React from "react";
 
 const queryClient = new QueryClient();
@@ -133,7 +139,7 @@ function SalesCompassRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
   if (!user.canAccessHub) return <Navigate to="/login" replace />;
-  if (!(user as any).apps.salescompass?.canAccess) return <Navigate to="/hub" replace />;
+  if (!user.apps.salescompass?.canAccess) return <Navigate to="/hub" replace />;
   return <>{children}</>;
 }
 
@@ -145,6 +151,26 @@ function RelatorioCustosRoute({ children }: { children: React.ReactNode }) {
   if (!user.canAccessHub) return <Navigate to="/login" replace />;
   if (!user.apps.disparo.canAccess) return <Navigate to="/hub" replace />;
   return <>{children}</>;
+}
+
+function ComissaoRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  const location = useLocation();
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.canAccessHub) return <Navigate to="/login" replace />;
+  if (!user.apps.painelcomissao?.canAccess) return <Navigate to="/hub" replace />;
+  const painelRole = user.apps.painelcomissao.role;
+  const allowedByRole: Record<string, string[]> = {
+    admin: ["/comissao", "/comissao/vendedor", "/comissao/gestor", "/comissao/simulacao", "/comissao/configuracao"],
+    manager: ["/comissao/vendedor", "/comissao/gestor", "/comissao/simulacao", "/comissao/configuracao"],
+    viewer: ["/comissao/vendedor", "/comissao/simulacao"],
+  };
+  const allowed = allowedByRole[painelRole] ?? allowedByRole.viewer;
+  if (!allowed.includes(location.pathname)) {
+    const fallback = painelRole === "manager" ? "/comissao/gestor" : "/comissao/vendedor";
+    return <Navigate to={fallback} replace />;
+  }
+  return <ComissaoErrorBoundary>{children}</ComissaoErrorBoundary>;
 }
 
 function AdminManagerRoute({ children }: { children: React.ReactNode }) {
@@ -182,6 +208,11 @@ const App = () => (
             <Route path="/sugestao-compras" element={<SugestaoComprasRoute><SugestaoCompras /></SugestaoComprasRoute>} />
             <Route path="/sales-compass" element={<SalesCompassRoute><SalesCompass /></SalesCompassRoute>} />
             <Route path="/relatorio-custos" element={<RelatorioCustosRoute><RelatorioCustos /></RelatorioCustosRoute>} />
+            <Route path="/comissao" element={<ComissaoRoute><ComissaoDashboard /></ComissaoRoute>} />
+            <Route path="/comissao/vendedor" element={<ComissaoRoute><ComissaoVendedor /></ComissaoRoute>} />
+            <Route path="/comissao/gestor" element={<ComissaoRoute><ComissaoGestor /></ComissaoRoute>} />
+            <Route path="/comissao/simulacao" element={<ComissaoRoute><ComissaoSimulacao /></ComissaoRoute>} />
+            <Route path="/comissao/configuracao" element={<ComissaoRoute><ComissaoConfiguracao /></ComissaoRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

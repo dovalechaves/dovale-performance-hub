@@ -1,41 +1,34 @@
-export interface ChatwootClientConfig {
-  baseUrl?: string;
-  apiKey?: string;
-  accountId?: number;
-  inboxId?: number;
-}
-
-const BASE_URL = (config?: ChatwootClientConfig) => (config?.baseUrl ?? process.env.base_chatwoot ?? "").replace(/\/+$/, "");
-const API_KEY = (config?: ChatwootClientConfig) => config?.apiKey ?? process.env.api_chatwoot ?? "";
-const INBOX_ID = (config?: ChatwootClientConfig) => config?.inboxId ?? Number(process.env.inbox_id_chatwoot) || 1;
-const ACCOUNT_ID = (config?: ChatwootClientConfig) => config?.accountId ?? Number(process.env.account_id_chatwoot) || 1;
+const BASE_URL = () => (process.env.base_chatwoot ?? "").replace(/\/+$/, "");
+const API_KEY = () => process.env.api_chatwoot ?? "";
+const INBOX_ID = () => Number(process.env.inbox_id_chatwoot) || 1;
+const ACCOUNT_ID = () => Number(process.env.account_id_chatwoot) || 1;
 // Base da conta. Header usa hífen ("api-access-token") porque proxies (nginx/Cloudflare)
 // descartam headers HTTP com underscore por padrão.
-const ACC = (config?: ChatwootClientConfig) => `${BASE_URL(config)}/api/v1/accounts/${ACCOUNT_ID(config)}`;
+const ACC = () => `${BASE_URL()}/api/v1/accounts/${ACCOUNT_ID()}`;
 
-function headers(config?: ChatwootClientConfig): Record<string, string> {
+function headers(): Record<string, string> {
   return {
-    "api-access-token": API_KEY(config),
+    "api-access-token": API_KEY(),
     "Content-Type": "application/json",
   };
 }
 
 // ── Contatos ─────────────────────────────────────────────────────────────────
 
-export async function buscarContato(telefone: string, config?: ChatwootClientConfig): Promise<number | null> {
+export async function buscarContato(telefone: string): Promise<number | null> {
   const digitos = telefone.replace(/\D/g, "");
   if (!digitos) return null;
   const termo = digitos.slice(-9);
   try {
     let page = 1;
     while (page <= 3) {
-      const url = `${ACC(config)}/contacts/search?${new URLSearchParams({
+      const url = `${ACC()}/contacts/search?${new URLSearchParams({
         q: termo,
         page: String(page),
         per_page: "50",
         include_contacts: "true",
       })}`;
-      const r = await fetch(url, { headers: headers(config) });
+      const r = await fetch(url, { headers: headers() });
       if (!r.ok) break;
       const json = await r.json();
       const contatos: any[] = json.payload ?? [];
@@ -57,7 +50,6 @@ export async function criarContato(
   telefone: string,
   nome?: string,
   inboxId?: number,
-  config?: ChatwootClientConfig,
 ): Promise<number | null> {
   const digitos = telefone.replace(/\D/g, "");
   if (!digitos) return null;
@@ -67,17 +59,17 @@ export async function criarContato(
   const data = {
     phone_number: telefoneE164,
     name: nome ?? undefined,
-    inbox_id: inboxId ?? INBOX_ID(config),
+    inbox_id: inboxId ?? INBOX_ID(),
   };
   try {
-    const r = await fetch(`${ACC(config)}/contacts`, {
+    const r = await fetch(`${ACC()}/contacts`, {
       method: "POST",
-      headers: headers(config),
+      headers: headers(),
       body: JSON.stringify(data),
     });
     if (r.status === 422) {
       const msg = ((await r.json()).message ?? "").toLowerCase();
-      if (msg.includes("already been taken")) return buscarContato(telefoneE164, config);
+      if (msg.includes("already been taken")) return buscarContato(telefoneE164);
     }
     if (r.status !== 200 && r.status !== 201) return null;
     const payload = (await r.json()).payload ?? {};
@@ -93,13 +85,12 @@ export async function criarContato(
 export async function criarConversa(
   contatoId: number,
   inboxId?: number,
-  config?: ChatwootClientConfig,
 ): Promise<number | null> {
-  const data = { contact_id: contatoId, inbox_id: inboxId ?? INBOX_ID(config), status: "open" };
+  const data = { contact_id: contatoId, inbox_id: inboxId ?? INBOX_ID(), status: "open" };
   try {
-    const r = await fetch(`${ACC(config)}/conversations`, {
+    const r = await fetch(`${ACC()}/conversations`, {
       method: "POST",
-      headers: headers(config),
+      headers: headers(),
       body: JSON.stringify(data),
     });
     if (r.ok) return (await r.json()).id ?? null;
@@ -109,17 +100,6 @@ export async function criarConversa(
     console.error(`[Chatwoot] Exceção ao criar conversa: ${e.message}`);
     return null;
   }
-}
-
-export async function buscarConversaAberta(
-  contatoId: number,
-  inboxId?: number,
-  config?: ChatwootClientConfig,
-): Promise<number | null> {
-  const inbox = inboxId ?? INBOX_ID(config);
-  const conversas = await buscarConversasContato(contatoId, config);
-  const aberta = conversas.find((c: any) => c.status === "open" && Number(c.inbox_id) === inbox);
-  return aberta?.id ?? null;
 }
 
 // ── Etiquetas ────────────────────────────────────────────────────────────────
@@ -189,14 +169,13 @@ export async function enviarMensagemPrivada(
 export async function enviarMensagemPublica(
   conversationId: number,
   texto: string,
-  config?: ChatwootClientConfig,
 ): Promise<number | null> {
   try {
     const r = await fetch(
-      `${ACC(config)}/conversations/${conversationId}/messages`,
+      `${ACC()}/conversations/${conversationId}/messages`,
       {
         method: "POST",
-        headers: headers(config),
+        headers: headers(),
         body: JSON.stringify({ content: texto, message_type: "outgoing", private: false }),
       },
     );
@@ -205,35 +184,6 @@ export async function enviarMensagemPublica(
     return null;
   } catch (e: any) {
     console.error(`[Chatwoot] Exceção ao enviar mensagem pública: ${e.message}`);
-    return null;
-  }
-}
-
-export async function enviarArquivoPublico(
-  conversationId: number,
-  file: Buffer,
-  fileName: string,
-  contentType: string,
-  caption?: string,
-  config?: ChatwootClientConfig,
-): Promise<number | null> {
-  const form = new FormData();
-  form.append("attachments[]", new Blob([file], { type: contentType }), fileName);
-  if (caption) form.append("content", caption);
-  form.append("message_type", "outgoing");
-  form.append("private", "false");
-
-  try {
-    const r = await fetch(`${ACC(config)}/conversations/${conversationId}/messages`, {
-      method: "POST",
-      headers: { "api-access-token": API_KEY(config) },
-      body: form,
-    });
-    if (r.ok) return (await r.json()).id ?? null;
-    console.error(`[Chatwoot] enviar_arquivo_publico falhou: ${r.status} ${(await r.text()).slice(0, 300)}`);
-    return null;
-  } catch (e: any) {
-    console.error(`[Chatwoot] Exceção ao enviar arquivo público: ${e.message}`);
     return null;
   }
 }
@@ -341,11 +291,11 @@ export async function buscarMensagensRecentes(conversationId: number): Promise<a
   }
 }
 
-export async function buscarConversasContato(contatoId: number, config?: ChatwootClientConfig): Promise<any[]> {
+export async function buscarConversasContato(contatoId: number): Promise<any[]> {
   try {
     const r = await fetch(
-      `${ACC(config)}/contacts/${contatoId}/conversations`,
-      { headers: headers(config) },
+      `${ACC()}/contacts/${contatoId}/conversations`,
+      { headers: headers() },
     );
     if (r.ok) return (await r.json()).payload ?? [];
     return [];

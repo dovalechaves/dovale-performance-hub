@@ -3,78 +3,22 @@ import crypto from "crypto";
 import OpenAI from "openai";
 import sql from "mssql";
 import { getPool } from "../db/sqlserver";
+import * as cw from "../services/chatwoot";
 
 const router = Router();
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const CW_TI_BASE = "http://192.168.10.181:3000";
-const CW_TI_TOKEN = "o4Y7pWQePkSsSw5uKczFRqZ9";
-const CW_TI_INBOX = 5;
-const CW_TI_ACCOUNT = 1;
-const CW_TI_NUMEROS = ["5512981898755", "5512988467809"];
-
-function cwHeaders() {
-  return { api_access_token: CW_TI_TOKEN, "Content-Type": "application/json" };
-}
-
-async function cwBuscarContato(telefone: string): Promise<number | null> {
-  const digitos = telefone.replace(/\D/g, "");
-  const termo = digitos.slice(-9);
-  try {
-    const r = await fetch(`${CW_TI_BASE}/api/v1/accounts/${CW_TI_ACCOUNT}/contacts/search?q=${termo}&page=1&per_page=10&include_contacts=true`, { headers: cwHeaders() });
-    if (!r.ok) return null;
-    const j: any = await r.json();
-    return j.payload?.[0]?.id ?? null;
-  } catch { return null; }
-}
-
-async function cwCriarContato(telefone: string): Promise<number | null> {
-  try {
-    const r = await fetch(`${CW_TI_BASE}/api/v1/accounts/${CW_TI_ACCOUNT}/contacts`, {
-      method: "POST", headers: cwHeaders(),
-      body: JSON.stringify({ inbox_id: CW_TI_INBOX, phone_number: `+${telefone}`, name: telefone }),
-    });
-    if (!r.ok) return null;
-    const j: any = await r.json();
-    return j.payload?.contact?.id ?? j.id ?? null;
-  } catch { return null; }
-}
-
-async function cwBuscarConversaAberta(contatoId: number): Promise<number | null> {
-  try {
-    const r = await fetch(`${CW_TI_BASE}/api/v1/accounts/${CW_TI_ACCOUNT}/contacts/${contatoId}/conversations`, { headers: cwHeaders() });
-    if (!r.ok) return null;
-    const j: any = await r.json();
-    const convs = j.payload || [];
-    const aberta = convs.find((c: any) => c.status === "open" && c.inbox_id === CW_TI_INBOX);
-    return aberta?.id ?? null;
-  } catch { return null; }
-}
-
-async function cwCriarConversa(contatoId: number): Promise<number | null> {
-  try {
-    const r = await fetch(`${CW_TI_BASE}/api/v1/accounts/${CW_TI_ACCOUNT}/conversations`, {
-      method: "POST", headers: cwHeaders(),
-      body: JSON.stringify({ contact_id: contatoId, inbox_id: CW_TI_INBOX, status: "open" }),
-    });
-    if (!r.ok) return null;
-    const j: any = await r.json();
-    return j.id ?? null;
-  } catch { return null; }
-}
-
-async function cwEnviarMensagem(conversaId: number, msg: string): Promise<number | null> {
-  try {
-    const r = await fetch(`${CW_TI_BASE}/api/v1/accounts/${CW_TI_ACCOUNT}/conversations/${conversaId}/messages`, {
-      method: "POST", headers: cwHeaders(),
-      body: JSON.stringify({ content: msg, message_type: "outgoing", private: false }),
-    });
-    if (!r.ok) return null;
-    const j: any = await r.json();
-    return j.id ?? null;
-  } catch { return null; }
-}
+const CW_TI_NUMEROS = (process.env.CW_TI_NUMEROS ?? "5512981898755,5512988467809")
+  .split(",")
+  .map((n) => n.replace(/\D/g, "").trim())
+  .filter(Boolean);
+const CW_TI_CHATWOOT: cw.ChatwootClientConfig = {
+  baseUrl: process.env.CW_TI_BASE ?? "https://chatwoot.dovale.online",
+  apiKey: process.env.CW_TI_TOKEN ?? "",
+  accountId: Number(process.env.CW_TI_ACCOUNT) || 1,
+  inboxId: Number(process.env.CW_TI_INBOX) || 1,
+};
 
 async function notificarDemandaChatwoot(projectId: number, titulo: string, usuario: string, displayName: string) {
   const link = `https://hub.dovale.online/ai-assistant?projeto=${projectId}`;
@@ -91,15 +35,15 @@ async function notificarDemandaChatwoot(projectId: number, titulo: string, usuar
 
   for (const num of CW_TI_NUMEROS) {
     try {
-      let contatoId = await cwBuscarContato(num);
-      if (!contatoId) contatoId = await cwCriarContato(num);
+      let contatoId = await cw.buscarContato(num, CW_TI_CHATWOOT);
+      if (!contatoId) contatoId = await cw.criarContato(num, num, CW_TI_CHATWOOT.inboxId, CW_TI_CHATWOOT);
       if (!contatoId) { console.error(`[Demanda→WPP] Contato não encontrado: ${num}`); continue; }
 
-      let conversaId = await cwBuscarConversaAberta(contatoId);
-      if (!conversaId) conversaId = await cwCriarConversa(contatoId);
+      let conversaId = await cw.buscarConversaAberta(contatoId, CW_TI_CHATWOOT.inboxId, CW_TI_CHATWOOT);
+      if (!conversaId) conversaId = await cw.criarConversa(contatoId, CW_TI_CHATWOOT.inboxId, CW_TI_CHATWOOT);
       if (!conversaId) { console.error(`[Demanda→WPP] Conversa falhou: ${num}`); continue; }
 
-      await cwEnviarMensagem(conversaId, msg);
+      await cw.enviarMensagemPublica(conversaId, msg, CW_TI_CHATWOOT);
       console.log(`[Demanda→WPP] Notificação enviada: ${num}`);
     } catch (e: any) {
       console.error(`[Demanda→WPP] Exceção ${num}: ${e.message}`);

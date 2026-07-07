@@ -7,11 +7,23 @@ import * as XLSX from "xlsx";
 import os from "os";
 import path from "path";
 import fs from "fs";
+import * as cw from "../services/chatwoot";
+
+const INVENTARIO_NUMEROS_APROVADORES = (process.env.INVENTARIO_NUMEROS_APROVADORES ?? "5512981898755,5512988467809,5512935005923")
+  .split(",")
+  .map((n) => n.replace(/\D/g, "").trim())
+  .filter(Boolean);
+const CW_TI_CHATWOOT: cw.ChatwootClientConfig = {
+  baseUrl: process.env.CW_TI_BASE ?? "https://chatwoot.dovale.online",
+  apiKey: process.env.CW_TI_TOKEN ?? "",
+  accountId: Number(process.env.CW_TI_ACCOUNT) || 1,
+  inboxId: Number(process.env.CW_TI_INBOX) || 1,
+};
 // ── Chatwoot TI (inventário) ──
-const CW_TI_BASE = "http://192.168.10.181:3000";
-const CW_TI_TOKEN = "o4Y7pWQePkSsSw5uKczFRqZ9";
-const CW_TI_INBOX = 5;
-const CW_TI_ACCOUNT = 1;
+const CW_TI_BASE = CW_TI_CHATWOOT.baseUrl!.replace(/\/+$/, "");
+const CW_TI_TOKEN = CW_TI_CHATWOOT.apiKey ?? "";
+const CW_TI_INBOX = CW_TI_CHATWOOT.inboxId ?? 1;
+const CW_TI_ACCOUNT = CW_TI_CHATWOOT.accountId ?? 1;
 
 function cwHeaders() {
   return { api_access_token: CW_TI_TOKEN, "Content-Type": "application/json" };
@@ -66,6 +78,15 @@ async function cwEnviarMensagem(conversaId: number, msg: string): Promise<number
 }
 
 async function cwEnviarArquivo(conversaId: number, filePath: string, caption?: string): Promise<number | null> {
+  return cw.enviarArquivoPublico(
+    conversaId,
+    fs.readFileSync(filePath),
+    path.basename(filePath),
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    caption,
+    CW_TI_CHATWOOT,
+  );
+
   const form = new FormData();
   const fileBuffer = fs.readFileSync(filePath);
   const fileName = path.basename(filePath);
@@ -648,18 +669,18 @@ router.patch("/sessoes/:id/status", async (req: Request, res: Response) => {
             `🔗 *Aprovar:* ${approvalLink}`,
           ].join("\n");
 
-          const numeros = ["5512981898755", "5512988467809", "5512935005923"];
+          const numeros = INVENTARIO_NUMEROS_APROVADORES;
           for (const num of numeros) {
             try {
-              let contatoId = await cwBuscarContato(num);
-              if (!contatoId) contatoId = await cwCriarContato(num);
+              let contatoId = await cw.buscarContato(num, CW_TI_CHATWOOT);
+              if (!contatoId) contatoId = await cw.criarContato(num, num, CW_TI_CHATWOOT.inboxId, CW_TI_CHATWOOT);
               if (!contatoId) { console.error(`[Inventário→WPP] Contato não encontrado: ${num}`); continue; }
 
-              let conversaId = await cwBuscarConversaAberta(contatoId);
-              if (!conversaId) conversaId = await cwCriarConversa(contatoId);
+              let conversaId = await cw.buscarConversaAberta(contatoId, CW_TI_CHATWOOT.inboxId, CW_TI_CHATWOOT);
+              if (!conversaId) conversaId = await cw.criarConversa(contatoId, CW_TI_CHATWOOT.inboxId, CW_TI_CHATWOOT);
               if (!conversaId) { console.error(`[Inventário→WPP] Conversa falhou: ${num}`); continue; }
 
-              await cwEnviarMensagem(conversaId, msg);
+              await cw.enviarMensagemPublica(conversaId, msg, CW_TI_CHATWOOT);
               await cwEnviarArquivo(conversaId, tmpFile, `📎 Relatório - ${sessao.nome}`);
               console.log(`[Inventário→WPP] Enviado: ${num}`);
             } catch (e: any) {

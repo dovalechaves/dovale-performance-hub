@@ -8,10 +8,10 @@ import os from "os";
 import path from "path";
 import fs from "fs";
 // ── Chatwoot TI (inventário) ──
-const CW_TI_BASE = "http://192.168.10.181:3000";
-const CW_TI_TOKEN = "o4Y7pWQePkSsSw5uKczFRqZ9";
-const CW_TI_INBOX = 5;
-const CW_TI_ACCOUNT = 1;
+const CW_TI_BASE = process.env.CW_TI_BASE || "https://chatwoot.dovale.online";
+const CW_TI_TOKEN = process.env.CW_TI_TOKEN || "V1WDyvj1WTWeytVyWwKy31GL";
+const CW_TI_INBOX = Number(process.env.CW_TI_INBOX) || 1;
+const CW_TI_ACCOUNT = Number(process.env.CW_TI_ACCOUNT) || 1;
 
 function cwHeaders() {
   return { api_access_token: CW_TI_TOKEN, "Content-Type": "application/json" };
@@ -60,7 +60,7 @@ async function cwEnviarMensagem(conversaId: number, msg: string): Promise<number
     method: "POST", headers: cwHeaders(),
     body: JSON.stringify({ content: msg, message_type: "outgoing", private: false }),
   });
-  if (!r.ok) return null;
+  if (!r.ok) { console.error(`[Inventário→WPP] Mensagem falhou: ${r.status} ${await r.text()}`); return null; }
   const j: any = await r.json();
   return j.id ?? null;
 }
@@ -546,7 +546,8 @@ router.patch("/sessoes/:id/status", async (req: Request, res: Response) => {
     // ── Notify via Chatwoot on ENVIADO (sent for approval) ──
     if (status === "ENVIADO") {
       console.log(`[Inventário→WPP] Disparando notificação para sessão #${sessao.id}`);
-      (async () => {
+      await addLog(sessao.id, usuario, "WPP_ENVIO_INICIADO", "Iniciando envio do relatorio de inventario para aprovacao");
+      await (async () => {
         try {
           // Load items, contagens and locais
           const itensRes = await pool.request()
@@ -677,28 +678,64 @@ router.patch("/sessoes/:id/status", async (req: Request, res: Response) => {
           ].join("\n");
 
           const numeros = ["5512981898755", "5512988467809", "5512935005923"];
+          let enviadosWpp = 0;
+          const falhasWpp: string[] = [];
           for (const num of numeros) {
             try {
               let contatoId = await cwBuscarContato(num);
               if (!contatoId) contatoId = await cwCriarContato(num);
-              if (!contatoId) { console.error(`[Inventário→WPP] Contato não encontrado: ${num}`); continue; }
+              if (!contatoId) {
+                const msgErro = `Contato nao encontrado/criado: ${num}`;
+                falhasWpp.push(msgErro);
+                console.error(`[Inventário→WPP] ${msgErro}`);
+                continue;
+              }
 
               let conversaId = await cwBuscarConversaAberta(contatoId);
               if (!conversaId) conversaId = await cwCriarConversa(contatoId);
-              if (!conversaId) { console.error(`[Inventário→WPP] Conversa falhou: ${num}`); continue; }
+              if (!conversaId) {
+                const msgErro = `Conversa falhou: ${num}`;
+                falhasWpp.push(msgErro);
+                console.error(`[Inventário→WPP] ${msgErro}`);
+                continue;
+              }
 
-              await cwEnviarMensagem(conversaId, msg);
-              await cwEnviarArquivo(conversaId, tmpFile, `📎 Relatório - ${sessao.nome}`);
+              const msgId = await cwEnviarMensagem(conversaId, msg);
+              if (!msgId) {
+                const msgErro = `Mensagem falhou: ${num}`;
+                falhasWpp.push(msgErro);
+                console.error(`[Inventário→WPP] ${msgErro}`);
+                continue;
+              }
+              const arquivoId = await cwEnviarArquivo(conversaId, tmpFile, `📎 Relatório - ${sessao.nome}`);
+              if (!arquivoId) {
+                const msgErro = `Arquivo falhou: ${num}`;
+                falhasWpp.push(msgErro);
+                console.error(`[Inventário→WPP] ${msgErro}`);
+                continue;
+              }
+
+              enviadosWpp++;
               console.log(`[Inventário→WPP] Enviado: ${num}`);
             } catch (e: any) {
-              console.error(`[Inventário→WPP] Exceção ${num}: ${e.message}`);
+              const msgErro = `Excecao ${num}: ${e.message}`;
+              falhasWpp.push(msgErro);
+              console.error(`[Inventário→WPP] ${msgErro}`);
             }
           }
+
+          await addLog(
+            sessao.id,
+            usuario,
+            falhasWpp.length ? "WPP_ENVIO_PARCIAL" : "WPP_ENVIO_OK",
+            `Enviados: ${enviadosWpp}/${numeros.length}${falhasWpp.length ? ` | Falhas: ${falhasWpp.join("; ")}` : ""}`
+          );
 
           // Cleanup temp file
           try { fs.unlinkSync(tmpFile); } catch (_) {}
         } catch (e: any) {
           console.error(`[Inventário→WPP] Erro geral: ${e.message}`);
+          await addLog(sessao.id, usuario, "WPP_ENVIO_ERRO", e.message);
         }
       })();
     }

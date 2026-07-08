@@ -82,8 +82,8 @@ const STATUS_MAP: Record<string, { label: string; color: string; icon: React.Rea
   REJEITADO: { label: "Rejeitado", color: "bg-red-600", icon: <XCircle className="h-3 w-3" /> },
 };
 
-const LOJAS_INVENTARIO = [
-  "FORTALEZA",
+const LOJAS_INVENTARIO_DEFAULT = [
+  { value: "fortaleza", label: "Fortaleza" },
 ];
 
 const ITEMS_PER_PAGE = 25;
@@ -198,7 +198,8 @@ export default function Inventario() {
 
   // Create session
   const [showCreate, setShowCreate] = useState(false);
-  const [newLoja, setNewLoja] = useState(LOJAS_INVENTARIO[0]);
+  const [lojasInventario, setLojasInventario] = useState(LOJAS_INVENTARIO_DEFAULT);
+  const [newLoja, setNewLoja] = useState(invLoja ?? LOJAS_INVENTARIO_DEFAULT[0].value);
   const [newNome, setNewNome] = useState("");
   const [newNumLocais, setNewNumLocais] = useState(1);
   const [newNomesLocais, setNewNomesLocais] = useState<string[]>(["Local 1"]);
@@ -264,14 +265,33 @@ export default function Inventario() {
   }, []);
 
   // ── Load sessions ──
+  useEffect(() => {
+    apiFetch("/lojas")
+      .then((data) => {
+        if (Array.isArray(data) && data.length) setLojasInventario(data);
+      })
+      .catch(() => {});
+  }, [apiFetch]);
+
+  useEffect(() => {
+    if (invRole === "manager" && invLoja) {
+      setNewLoja(invLoja);
+      return;
+    }
+    if (!newLoja && lojasInventario[0]?.value) {
+      setNewLoja(lojasInventario[0].value);
+    }
+  }, [invRole, invLoja, lojasInventario, newLoja]);
+
   const loadSessoes = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await apiFetch("/sessoes");
+      const query = invRole === "manager" && invLoja ? `?loja=${encodeURIComponent(invLoja)}` : "";
+      const data = await apiFetch(`/sessoes${query}`);
       setSessoes(data);
     } catch (e: any) { toast.error(e.message); }
     finally { setLoading(false); }
-  }, [apiFetch]);
+  }, [apiFetch, invRole, invLoja]);
 
   useEffect(() => { loadSessoes(); }, [loadSessoes]);
 
@@ -285,7 +305,7 @@ export default function Inventario() {
       setItens(data.itens ?? []);
     } catch (e: any) { toast.error(e.message); }
     finally { setDetailLoading(false); }
-  }, [apiFetch]);
+  }, [apiFetch, invRole, invLoja]);
 
   const loadLogs = useCallback(async (id: number) => {
     try {
@@ -402,6 +422,8 @@ export default function Inventario() {
 
   const handleCreate = async () => {
     if (!newNome.trim()) { toast.error("Informe um nome para a sessão"); return; }
+    const lojaSessao = invRole === "manager" && invLoja ? invLoja : newLoja;
+    if (!lojaSessao) { toast.error("Informe a loja da sessao"); return; }
     setCreating(true);
     setCreateProgress({ show: true, message: "Criando sessão...", percent: 10 });
     try {
@@ -409,7 +431,7 @@ export default function Inventario() {
       const data = await apiFetch("/sessoes", {
         method: "POST",
         body: JSON.stringify({
-          loja: newLoja,
+          loja: lojaSessao,
           nome: newNome.trim(),
           usuario,
           num_locais: newNumLocais,
@@ -768,8 +790,9 @@ export default function Inventario() {
                     <label className="text-xs text-muted-foreground block mb-1">Loja</label>
                     <div className="relative inline-block">
                       <select value={newLoja} onChange={(e) => setNewLoja(e.target.value)}
-                        className="appearance-none rounded-lg border border-border bg-muted px-3 py-2 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50">
-                        {LOJAS_INVENTARIO.map((l) => <option key={l} value={l}>{l}</option>)}
+                        disabled={invRole === "manager" && !!invLoja}
+                        className="appearance-none rounded-lg border border-border bg-muted px-3 py-2 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-60">
+                        {lojasInventario.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
                       </select>
                       <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
                     </div>

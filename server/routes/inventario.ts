@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import sql from "mssql";
-import Firebird from "node-firebird";
 import { getPool } from "../db/sqlserver";
+import { executeFirebird, firebirdLojas, queryFirebird } from "../db/firebird";
 import type { Server as SocketServer } from "socket.io";
 import * as XLSX from "xlsx";
 import os from "os";
@@ -90,44 +90,41 @@ export function setInventarioIO(socketIO: SocketServer) { io = socketIO; }
 
 // ── Firebird config for inventory product lookup ────────────────────────────
 
-const fbConfig: Firebird.Options = {
-  host: process.env.DB_FIREBIRD_INV_HOST || "localhost",
-  port: Number(process.env.DB_FIREBIRD_INV_PORT) || 3050,
-  database: process.env.DB_FIREBIRD_INV_PATH || "C:\\Backup\\MICROSYS\\MSYSDADOS_FORTALEZA.FDB",
-  user: process.env.DB_FIREBIRD_INV_USER || "SYSDBA",
-  password: process.env.DB_FIREBIRD_INV_PASSWORD || "masterkey",
+type FirebirdLoja = (typeof firebirdLojas)[number];
+
+const INVENTARIO_LOJA_LABELS: Record<string, string> = {
+  bh: "Belo Horizonte",
+  l2: "Santana",
+  l3: "Rio de Janeiro",
+  fast: "Fast",
+  campinas: "Campinas",
+  riopreto: "Rio Preto",
+  sjc: "SJC",
+  mg: "Minas Gerais",
+  fortaleza: "Fortaleza",
+  uberlandia: "Uberlandia",
+  goiania: "Goiania",
 };
 
-const FB_TIMEOUT_MS = 5000;
+function normalizeLoja(raw: unknown): FirebirdLoja {
+  const value = String(raw ?? "").trim().toLowerCase();
+  if ((firebirdLojas as string[]).includes(value)) return value as FirebirdLoja;
 
-function queryFb<T = Record<string, unknown>>(sqlStr: string, params: unknown[] = []): Promise<T[]> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("Firebird connection timeout")), FB_TIMEOUT_MS);
-    Firebird.attach(fbConfig, (err, db) => {
-      if (err) { clearTimeout(timer); return reject(err); }
-      db.query(sqlStr, params, (err2, result) => {
-        clearTimeout(timer);
-        db.detach();
-        if (err2) return reject(err2);
-        resolve((result ?? []) as T[]);
-      });
-    });
-  });
+  const legacy = value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, "");
+  if (legacy === "fortaleza") return "fortaleza" as FirebirdLoja;
+
+  throw new Error(`Loja de inventario invalida: ${String(raw ?? "")}`);
 }
 
-function executeFb(sqlStr: string, params: unknown[] = []): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("Firebird connection timeout")), FB_TIMEOUT_MS);
-    Firebird.attach(fbConfig, (err, db) => {
-      if (err) { clearTimeout(timer); return reject(err); }
-      db.query(sqlStr, params, (err2) => {
-        clearTimeout(timer);
-        db.detach();
-        if (err2) return reject(err2);
-        resolve();
-      });
-    });
-  });
+function queryFb<T = Record<string, unknown>>(loja: unknown, sqlStr: string, params: unknown[] = []): Promise<T[]> {
+  return queryFirebird<T>(normalizeLoja(loja), sqlStr, params);
+}
+
+function executeFb(loja: unknown, sqlStr: string, params: unknown[] = []): Promise<void> {
+  return executeFirebird(normalizeLoja(loja), sqlStr, params);
 }
 
 interface FbProduto {
@@ -137,9 +134,9 @@ interface FbProduto {
   SALDO_ATUAL: number | null;
 }
 
-async function checkPedidosAbertos(): Promise<number> {
+async function checkPedidosAbertos(loja: unknown): Promise<number> {
   try {
-    const rows = await queryFb<{ TOTAL: number }>(
+    const rows = await queryFb<{ TOTAL: number }>(loja,
       `SELECT COUNT(*) AS TOTAL FROM PEDIDOS_VENDAS WHERE PDV_PSI_CODIGO IN ('RA', 'AA')`
     );
     return Number(rows[0]?.TOTAL ?? 0);
@@ -149,9 +146,9 @@ async function checkPedidosAbertos(): Promise<number> {
   }
 }
 
-async function lookupProduto(codigo: string): Promise<{ descricao: string | null; qtd_sistema: number; custo_fiscal: number | null } | null> {
+async function lookupProduto(loja: unknown, codigo: string): Promise<{ descricao: string | null; qtd_sistema: number; custo_fiscal: number | null } | null> {
   try {
-    const rows = await queryFb<FbProduto>(
+    const rows = await queryFb<FbProduto>(loja,
       `SELECT p.PRO_CODIGO, p.PRO_RESUMO,
               c.PCF_CUSTO_FISCAL,
               (SELECT disponivel FROM CONSULTA_ESTOQUE(p.PRO_CODIGO, 1, 0, 0, CAST('NOW' AS DATE))) AS SALDO_ATUAL
@@ -180,9 +177,9 @@ interface FbProdutoBulk {
   SALDO_ATUAL: number | null;
 }
 
-async function fetchProdutosComSaldo(): Promise<FbProdutoBulk[]> {
+async function fetchProdutosComSaldo(loja: unknown): Promise<FbProdutoBulk[]> {
   try {
-    const rows = await queryFb<FbProdutoBulk>(
+    const rows = await queryFb<FbProdutoBulk>(loja,
       `SELECT p.PRO_CODIGO, p.PRO_RESUMO,
               c.PCF_CUSTO_FISCAL,
               (SELECT disponivel FROM CONSULTA_ESTOQUE(p.PRO_CODIGO, 1, 0, 0, CAST('NOW' AS DATE))) AS SALDO_ATUAL
@@ -315,9 +312,19 @@ async function refreshCounts(sessaoId: number) {
 }
 
 
-router.get("/usuarios-sistema", async (_req: Request, res: Response) => {
+router.get("/lojas", (_req: Request, res: Response) => {
+  res.json(
+    firebirdLojas.map((value) => ({
+      value,
+      label: INVENTARIO_LOJA_LABELS[value] ?? String(value).toUpperCase(),
+    }))
+  );
+});
+
+router.get("/usuarios-sistema", async (req: Request, res: Response) => {
   try {
-    const rows = await queryFb<{ USU_CODIGO: number; USU_NOME: string }>(
+    const loja = normalizeLoja(req.query.loja ?? "fortaleza");
+    const rows = await queryFb<{ USU_CODIGO: number; USU_NOME: string }>(loja,
       `SELECT USU_CODIGO, USU_NOME FROM USUARIOS ORDER BY USU_CODIGO`
     );
     res.json(rows.map((r) => ({ codigo: r.USU_CODIGO, nome: r.USU_NOME })));
@@ -334,12 +341,12 @@ router.get("/sessoes", async (req: Request, res: Response) => {
   try {
     await init();
     const pool = await getPool();
-    const loja = req.query.loja as string | undefined;
+    const loja = req.query.loja ? normalizeLoja(req.query.loja) : undefined;
     const r = pool.request();
     let where = "";
     if (loja) {
       r.input("loja", sql.VarChar(100), loja);
-      where = "WHERE loja = @loja";
+      where = "WHERE LOWER(loja) = @loja";
     }
     const result = await r.query(`SELECT * FROM dbo.INVENTARIO_SESSOES ${where} ORDER BY criado_em DESC`);
     res.json(result.recordset);
@@ -353,10 +360,11 @@ router.post("/sessoes", async (req: Request, res: Response) => {
   try {
     await init();
     const { loja, nome, usuario, num_locais, nomes_locais } = req.body;
+    const lojaKey = normalizeLoja(loja);
     if (!loja || !nome || !usuario) return res.status(400).json({ error: "loja, nome e usuario são obrigatórios" });
 
     // Block if there are open/draft orders
-    const pedidosAbertos = await checkPedidosAbertos();
+    const pedidosAbertos = await checkPedidosAbertos(lojaKey);
     if (pedidosAbertos > 0) {
       return res.status(409).json({
         error: `Não é possível criar sessão de inventário: há ${pedidosAbertos} pedido(s) em aberto ou rascunho. Finalize-os antes de iniciar o inventário.`,
@@ -368,7 +376,7 @@ router.post("/sessoes", async (req: Request, res: Response) => {
 
     const pool = await getPool();
     const result = await pool.request()
-      .input("loja", sql.VarChar(100), loja)
+      .input("loja", sql.VarChar(100), lojaKey)
       .input("nome", sql.VarChar(200), nome)
       .input("usuario", sql.VarChar(100), usuario)
       .input("num_locais", sql.Int, n)
@@ -389,10 +397,10 @@ router.post("/sessoes", async (req: Request, res: Response) => {
     }
 
     const locaisStr = names.join(", ");
-    await addLog(sessao.id, usuario, "SESSAO_CRIADA", `Sessão "${nome}" — loja ${loja} — ${n} local(is): ${locaisStr}`);
+    await addLog(sessao.id, usuario, "SESSAO_CRIADA", `Sessão "${nome}" — loja ${lojaKey} — ${n} local(is): ${locaisStr}`);
 
     // Auto-import all products with saldo > 0 from Firebird
-    const produtos = await fetchProdutosComSaldo();
+    const produtos = await fetchProdutosComSaldo(lojaKey);
     let importados = 0;
     if (produtos.length > 0) {
       const locaisRes = await pool.request()
@@ -511,7 +519,7 @@ router.patch("/sessoes/:id/status", async (req: Request, res: Response) => {
 
     // Block EM_ANDAMENTO if there are open/draft orders in Firebird
     if (status === "EM_ANDAMENTO" && sessao.status === "RASCUNHO") {
-      const pedidosAbertos = await checkPedidosAbertos();
+      const pedidosAbertos = await checkPedidosAbertos(sessao.loja);
       if (pedidosAbertos > 0) {
         return res.status(409).json({
           error: `Não é possível iniciar o inventário: há ${pedidosAbertos} pedido(s) em aberto ou rascunho. Finalize-os antes de iniciar a contagem.`,
@@ -785,10 +793,10 @@ router.patch("/sessoes/:id/status", async (req: Request, res: Response) => {
 
         // Helper to create one Firebird inventory
         async function criarInventarioFb(obs: string, itens: any[]): Promise<number> {
-          const maxIdRows = await queryFb<{ MX: number }>(`SELECT MAX(PRI_ID) AS MX FROM PRODUTOS_INVENTARIO WHERE EMP_FIL_CODIGO = 1`);
+          const maxIdRows = await queryFb<{ MX: number }>(sessao.loja, `SELECT MAX(PRI_ID) AS MX FROM PRODUTOS_INVENTARIO WHERE EMP_FIL_CODIGO = 1`);
           const priId = (maxIdRows[0]?.MX ?? 0) + 1;
 
-          await executeFb(
+          await executeFb(sessao.loja,
             `INSERT INTO PRODUTOS_INVENTARIO (EMP_FIL_CODIGO, PRI_ID, PRI_DATA, PRI_OBS1, PRI_STS_CODIGO, PRI_USU_CODIGO, PRI_DATASISTEMA, PRI_PLE_ORIGEM, PRI_IND_AGRUPADO, PRI_VLR_TOTAL, PRI_ALTERA_CUSTO_FISCAL)
              VALUES (1, ?, ?, ?, 'AA', ?, ?, 1, 1, 0, 0)`,
             [priId, now, obs, usuCodigoSistema, now]
@@ -801,14 +809,14 @@ router.patch("/sessoes/:id/status", async (req: Request, res: Response) => {
             const vlrItem = item.qtdContada * custoUnit;
             vlrTotal += vlrItem;
 
-            await executeFb(
+            await executeFb(sessao.loja,
               `INSERT INTO PRODUTOS_INVENTARIO_ITENS (EMP_FIL_CODIGO, PRI_ID, PII_PRO_CODIGO, PII_SALDOANTERIOR, PII_INVENTARIO, PII_SALDOATUAL, PII_ID, PII_USU_CODIGO, PII_DATASISTEMA, PII_PLE_ORIGEM, PII_VLR_UNITARIO, PII_VLR_TOTAL)
                VALUES (1, ?, ?, ?, ?, ?, 0, ?, ?, 1, ?, ?)`,
               [priId, Number(item.pro_codigo), saldoAnterior, item.qtdContada, item.qtdContada, usuCodigoSistema, now, custoUnit, vlrItem]
             );
           }
 
-          await executeFb(
+          await executeFb(sessao.loja,
             `UPDATE PRODUTOS_INVENTARIO SET PRI_VLR_TOTAL = ? WHERE EMP_FIL_CODIGO = 1 AND PRI_ID = ?`,
             [vlrTotal, priId]
           );
@@ -972,7 +980,7 @@ router.post("/sessoes/:id/itens", async (req: Request, res: Response) => {
     }
 
     // Lookup product in Firebird to get descricao, qtd_sistema, custo_fiscal
-    const fbData = await lookupProduto(String(pro_codigo).trim());
+    const fbData = await lookupProduto(sessao.loja, String(pro_codigo).trim());
     const descricao = fbData?.descricao ?? req.body.descricao ?? null;
     const qtd_sistema = fbData?.qtd_sistema ?? req.body.qtd_sistema ?? 0;
     const rawCusto = fbData?.custo_fiscal ?? req.body.custo_fiscal ?? null;
@@ -1025,7 +1033,7 @@ router.patch("/contagens/:id", async (req: Request, res: Response) => {
     const cRes = await pool.request()
       .input("id", sql.Int, Number(req.params.id))
       .query(`
-        SELECT c.*, i.pro_codigo, i.sessao_id, s.status AS sessao_status
+        SELECT c.*, i.pro_codigo, i.sessao_id, s.status AS sessao_status, s.loja
         FROM dbo.INVENTARIO_CONTAGENS c
         JOIN dbo.INVENTARIO_ITENS i ON i.id = c.item_id
         JOIN dbo.INVENTARIO_SESSOES s ON s.id = i.sessao_id
@@ -1039,7 +1047,7 @@ router.patch("/contagens/:id", async (req: Request, res: Response) => {
     }
 
     // Block if open/draft orders exist
-    const pedidosAbertos = await checkPedidosAbertos();
+    const pedidosAbertos = await checkPedidosAbertos(contagem.loja);
     if (pedidosAbertos > 0) {
       return res.status(409).json({
         error: `Não é possível inserir contagem: há ${pedidosAbertos} pedido(s) em aberto ou rascunho. Resolva as pendências no sistema antes de continuar.`,
@@ -1174,7 +1182,8 @@ router.get("/sessoes/:id/logs", async (req: Request, res: Response) => {
 router.get("/produto/:codigo", async (req: Request, res: Response) => {
   try {
     const codigo = String(req.params.codigo);
-    const data = await lookupProduto(codigo);
+    const loja = normalizeLoja(req.query.loja ?? "fortaleza");
+    const data = await lookupProduto(loja, codigo);
     if (!data) {
       return res.status(404).json({ error: "Produto não encontrado no Firebird" });
     }

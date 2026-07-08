@@ -172,6 +172,7 @@ function buildUser(
   const multiprecoAccess = apiApps?.multipreco?.can_access ?? false;
   const inventarioRole = resolveRole(usuario, apiApps?.inventario?.role ?? apiRole);
   const inventarioAccess = apiApps?.inventario?.can_access ?? false;
+  const inventarioLoja = apiApps?.inventario?.loja ?? null;
   const onboardingRole = resolveRole(usuario, apiApps?.onboarding?.role ?? apiRole);
   const onboardingAccess = apiApps?.onboarding?.can_access ?? false;
   const scoreRole = resolveRole(usuario, apiApps?.score?.role ?? apiRole);
@@ -235,7 +236,7 @@ function buildUser(
       inventario: {
         canAccess: inventarioAccess,
         role: inventarioRole,
-        loja: null,
+        loja: inventarioLoja,
       },
       onboarding: {
         canAccess: onboardingAccess,
@@ -302,6 +303,7 @@ function loadFromStorage(): AuthUser | null {
     const multiprecoAccess = (parsed.apps as any)?.multipreco?.canAccess ?? false;
     const inventarioRole = (parsed.apps as any)?.inventario?.role ?? parsed.role;
     const inventarioAccess = (parsed.apps as any)?.inventario?.canAccess ?? false;
+    const inventarioLoja = (parsed.apps as any)?.inventario?.loja ?? null;
     const onboardingRole = (parsed.apps as any)?.onboarding?.role ?? parsed.role;
     const onboardingAccess = (parsed.apps as any)?.onboarding?.canAccess ?? false;
     const scoreRole = (parsed.apps as any)?.score?.role ?? parsed.role;
@@ -365,7 +367,7 @@ function loadFromStorage(): AuthUser | null {
         inventario: {
           canAccess: inventarioAccess,
           role: inventarioRole,
-          loja: null,
+          loja: inventarioLoja,
         },
         onboarding: {
           canAccess: onboardingAccess,

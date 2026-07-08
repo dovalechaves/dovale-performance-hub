@@ -166,7 +166,7 @@ function buildDefaultApps(usuario: string, localRole: unknown, localLoja: unknow
     inventario: {
       app_key: "inventario" as AppKey,
       role: baseRole,
-      loja: null,
+      loja: baseRole === "manager" ? (localLoja ? String(localLoja) : "fortaleza") : null,
       can_access: false,
     },
     onboarding: {
@@ -248,7 +248,7 @@ function mergeApps(
     merged[appKey] = {
       app_key: appKey,
       role,
-      loja: (appKey === "dashboard" || appKey === "calculadora" || appKey === "fechamento" || appKey === "salescompass") && role === "manager" ? (row?.loja ? String(row.loja) : null) :
+      loja: (appKey === "dashboard" || appKey === "calculadora" || appKey === "fechamento" || appKey === "salescompass" || appKey === "inventario") && role === "manager" ? (row?.loja ? String(row.loja) : null) :
             appKey === "salescompass" && role !== "admin" ? (row?.loja ? String(row.loja) : null) : null,
       can_access: isEnabledFlag(row?.ativo),
       ...((appKey === "inventario" || appKey === "salescompass") && row?.usu_codigo_sistema != null ? { usu_codigo_sistema: Number(row.usu_codigo_sistema) } : {}),
@@ -301,7 +301,7 @@ function normalizeAppsPayload(
       const raw = rawApps[appKey];
       if (!raw || typeof raw !== "object") continue;
       const role = isRole(raw.role) ? raw.role : merged[appKey].role;
-      const lojaValue = (appKey === "dashboard" || appKey === "calculadora" || appKey === "fechamento" || appKey === "salescompass")
+      const lojaValue = (appKey === "dashboard" || appKey === "calculadora" || appKey === "fechamento" || appKey === "salescompass" || appKey === "inventario")
         ? (raw.loja ? String(raw.loja) : null)
         : null;
       merged[appKey] = {
@@ -309,7 +309,7 @@ function normalizeAppsPayload(
         role,
         loja: lojaValue,
         can_access: typeof raw.can_access === "boolean" ? raw.can_access : merged[appKey].can_access,
-        ...(appKey === "salescompass" && raw.usu_codigo_sistema != null ? { usu_codigo_sistema: Number(raw.usu_codigo_sistema) } : {}),
+        ...((appKey === "inventario" || appKey === "salescompass") && raw.usu_codigo_sistema != null ? { usu_codigo_sistema: Number(raw.usu_codigo_sistema) } : {}),
         ...(appKey === "painelcomissao" ? { config: parsePainelConfig(raw.config) } : {}),
       };
     }

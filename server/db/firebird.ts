@@ -88,12 +88,20 @@ const lojas: Record<string, FirebirdConfig> = {
   },
 };
 
+export function getFirebirdConfig(loja: keyof typeof lojas): FirebirdConfig {
+  const config = lojas[loja];
+  if (!config) {
+    throw new Error(`Loja "${String(loja)}" nao configurada`);
+  }
+  return config;
+}
+
 export function queryFirebird<T = Record<string, unknown>>(
   loja: keyof typeof lojas,
   sql: string,
   params: unknown[] = []
 ): Promise<T[]> {
-  const config = lojas[loja];
+  const config = getFirebirdConfig(loja);
   console.log(`[firebird] ${loja} config: host=${config.host}, db=${config.database}`);
   if (!config.host || !config.database) {
     console.error(`[firebird] ${loja} NOT CONFIGURED — host or database missing`);
@@ -118,6 +126,36 @@ export function queryFirebird<T = Record<string, unknown>>(
           console.log(`[firebird] ${loja} query OK: ${rows.length} rows`);
           resolve(rows);
         });
+      });
+    });
+  });
+}
+
+export function executeFirebird(
+  loja: keyof typeof lojas,
+  sql: string,
+  params: unknown[] = []
+): Promise<void> {
+  const config = getFirebirdConfig(loja);
+  console.log(`[firebird] ${loja} exec: host=${config.host}, db=${config.database}`);
+  if (!config.host || !config.database) {
+    console.error(`[firebird] ${loja} NOT CONFIGURED - host or database missing`);
+    return Promise.reject(new Error(`Loja "${loja}" nao configurada no .env`));
+  }
+
+  return new Promise((resolve, reject) => {
+    Firebird.attach(config, (err, db) => {
+      if (err) {
+        console.error(`[firebird] ${loja} attach FAILED:`, err.message);
+        return reject(err);
+      }
+      db.query(sql, params, (err2) => {
+        db.detach();
+        if (err2) {
+          console.error(`[firebird] ${loja} exec FAILED:`, err2.message);
+          return reject(err2);
+        }
+        resolve();
       });
     });
   });

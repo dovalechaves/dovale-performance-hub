@@ -291,16 +291,6 @@ async function getReport(periodo: Periodo, data?: string) {
       { origem: "Mercado Livre Ads", investimento: mlInvestimento, receita: mlReceita, roas: mlRoas, conversao: mlConversao, clicks: mlAds.clicks, impressoes: mlAds.impressions, pedidos: mlAds.orders, fonte: mlAds.fonte },
     ],
     analise: analisesMemoria[periodo] ?? null,
-    pontos_criticos: [
-      "Shopee abaixo do ritmo esperado, com ticket menor.",
-      "Site próprio lidera conversão e deve receber reforço em campanhas de remarketing.",
-      "Mercado Livre mantém volume alto, mas exige atenção ao custo de frete por pedido.",
-    ],
-    direcionamentos: [
-      "Redistribuir verba de campanhas com ROAS abaixo de 4,5 para Google Ads e Site.",
-      "Revisar kits de maior giro na Shopee para recuperar ticket sem reduzir volume.",
-      "Priorizar estoque dos SKUs que puxam Site e Mercado Livre nas próximas 48h.",
-    ],
   };
 }
 
@@ -311,6 +301,9 @@ async function montarMensagem(periodo: Periodo, data?: string): Promise<string> 
   const canais = report.canais
     .map((c) => `- ${c.canal}: ${formatCurrency(c.faturamento)} | ${c.pedidos} pedidos | ticket ${formatCurrency(c.ticket_medio)}`)
     .join("\n");
+  const analiseTexto = report.analise?.texto
+    ? report.analise.texto.split("\n").map((linha: string) => linha.trim()).filter(Boolean).join("\n")
+    : "- Analise do bot ainda nao gerada para este periodo.";
 
   return [
     `Relatorio ${label} Ecommerce - Dovale`,
@@ -327,11 +320,8 @@ async function montarMensagem(periodo: Periodo, data?: string): Promise<string> 
     "Canais:",
     canais,
     "",
-    "Pontos criticos:",
-    ...report.pontos_criticos.map((item: string) => `- ${item}`),
-    "",
-    "Direcionamentos:",
-    ...report.direcionamentos.map((item: string) => `- ${item}`),
+    "Analise do bot:",
+    analiseTexto,
   ].join("\n");
 }
 

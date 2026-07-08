@@ -8,10 +8,10 @@ import os from "os";
 import path from "path";
 import fs from "fs";
 // ── Chatwoot TI (inventário) ──
-const CW_TI_BASE = "http://192.168.10.181:3000";
-const CW_TI_TOKEN = "o4Y7pWQePkSsSw5uKczFRqZ9";
-const CW_TI_INBOX = 5;
-const CW_TI_ACCOUNT = 1;
+const CW_TI_BASE = process.env.CW_TI_BASE || "https://chatwoot.dovale.online";
+const CW_TI_TOKEN = process.env.CW_TI_TOKEN || "V1WDyvj1WTWeytVyWwKy31GL";
+const CW_TI_INBOX = Number(process.env.CW_TI_INBOX) || 1;
+const CW_TI_ACCOUNT = Number(process.env.CW_TI_ACCOUNT) || 1;
 
 function cwHeaders() {
   return { api_access_token: CW_TI_TOKEN, "Content-Type": "application/json" };

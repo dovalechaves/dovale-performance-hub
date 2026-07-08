@@ -133,6 +133,10 @@ export default function EcommerceDisparo() {
     if (!usuario) return;
     setPreviewLoading(true);
     try {
+      if (periodo === "diario") {
+        await gerarAnaliseEcommerce(usuario, periodo, dataSelecionada);
+        await loadReport();
+      }
       const data = await previewRelatorioEcommerce(usuario, periodo, periodo === "diario" ? dataSelecionada : undefined);
       setPreview(data.mensagem);
     } catch (e: unknown) {
@@ -140,7 +144,7 @@ export default function EcommerceDisparo() {
     } finally {
       setPreviewLoading(false);
     }
-  }, [usuario, periodo, dataSelecionada]);
+  }, [usuario, periodo, dataSelecionada, loadReport]);
 
   useEffect(() => { loadReport(); }, [loadReport]);
   useEffect(() => { if (tab === "historico") loadHistorico(); }, [tab, loadHistorico]);
@@ -174,6 +178,9 @@ export default function EcommerceDisparo() {
     if (!usuario) return;
     setSending(true);
     try {
+      if (periodo === "diario") {
+        await gerarAnaliseEcommerce(usuario, periodo, dataSelecionada);
+      }
       const data = await enviarRelatorioEcommerce(usuario, periodo, periodo === "diario" ? dataSelecionada : undefined);
       toast.success(data.falhas?.length ? `${data.enviados} envio(s), ${data.falhas.length} falha(s)` : `${data.enviados} envio(s) realizado(s)`);
       await loadHistorico();

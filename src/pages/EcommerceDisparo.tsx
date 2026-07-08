@@ -365,6 +365,9 @@ export default function EcommerceDisparo() {
                                 <p><span className="text-muted-foreground">Receita</span> {formatCurrency(item.receita ?? 0)}</p>
                                 <p><span className="text-muted-foreground">ROAS</span> {(item.roas ?? 0).toFixed(2)}x</p>
                                 <p><span className="text-muted-foreground">Conv.</span> {formatPercent(item.conversao ?? 0)}</p>
+                                {item.fonte === "fallback" && (
+                                  <p className="md:col-span-5 text-yellow-500 font-medium">Dados de Ads indisponíveis na API.</p>
+                                )}
                               </>
                             )}
                           </div>

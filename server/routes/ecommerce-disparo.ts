@@ -161,6 +161,29 @@ function formatCurrency(value: number): string {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
 }
 
+function formatPercent(value: number): string {
+  return `${value.toFixed(1)}%`;
+}
+
+function isoDateOffset(days: number): string {
+  const d = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function pctChange(atual: number, anterior: number): number {
+  if (!anterior && !atual) return 0;
+  if (!anterior) return 100;
+  return ((atual - anterior) / anterior) * 100;
+}
+
+function diffText(atual: number, anterior: number, currency = false): string {
+  const diff = atual - anterior;
+  const formatted = currency ? formatCurrency(Math.abs(diff)) : Math.abs(diff).toFixed(0);
+  const sinal = diff >= 0 ? "alta" : "queda";
+  return `${sinal} de ${formatted} (${formatPercent(pctChange(atual, anterior))})`;
+}
+
 async function getMetas() {
   try {
     const pool = await getPool();
@@ -264,8 +287,8 @@ async function getReport(periodo: Periodo, data?: string) {
     },
     canais,
     trafego_pago: [
-      { origem: "Shopee Ads",      investimento: shopeeInvestimento, receita: shopeeReceita, roas: shopeeRoas, conversao: shopeeConversao, fonte: shopeeAds.fonte },
-      { origem: "Mercado Livre Ads", investimento: mlInvestimento, receita: mlReceita, roas: mlRoas, conversao: mlConversao, fonte: mlAds.fonte },
+      { origem: "Shopee Ads", investimento: shopeeInvestimento, receita: shopeeReceita, roas: shopeeRoas, conversao: shopeeConversao, clicks: shopeeAds.clicks, impressoes: shopeeAds.impressions, pedidos: shopeeAds.orders, fonte: shopeeAds.fonte },
+      { origem: "Mercado Livre Ads", investimento: mlInvestimento, receita: mlReceita, roas: mlRoas, conversao: mlConversao, clicks: mlAds.clicks, impressoes: mlAds.impressions, pedidos: mlAds.orders, fonte: mlAds.fonte },
     ],
     analise: analisesMemoria[periodo] ?? null,
     pontos_criticos: [
@@ -403,13 +426,84 @@ router.get("/teste-canais", async (_req, res) => {
 
 router.post("/analise/gerar", async (req, res) => {
   try {
-    const periodo = req.query.periodo === "mensal" ? "mensal" : "diario";
-    const data = typeof req.query.data === "string" ? req.query.data : undefined;
-    const report = await getReport(periodo, data);
-    const topCanal = [...report.canais].sort((a, b) => b.faturamento - a.faturamento)[0];
-    const piorVariacao = [...report.canais].sort((a, b) => a.variacao - b.variacao)[0];
-    const melhorVariacao = [...report.canais].sort((a, b) => b.variacao - a.variacao)[0];
+    const ontem = isoDateOffset(-1);
+    const anteontem = isoDateOffset(-2);
+    const [report, anterior] = await Promise.all([
+      getReport("diario", ontem),
+      getReport("diario", anteontem),
+    ]);
+
+    const canaisAtuais = new Map(report.canais.map((c) => [c.canal, c]));
+    const canaisAnteriores = new Map(anterior.canais.map((c) => [c.canal, c]));
+    const nomesCanais = Array.from(new Set([...canaisAtuais.keys(), ...canaisAnteriores.keys()]));
+    const comparativoCanais = nomesCanais.map((canal) => {
+      const atual = canaisAtuais.get(canal);
+      const prev = canaisAnteriores.get(canal);
+      const faturamentoAtual = atual?.faturamento ?? 0;
+      const faturamentoAnterior = prev?.faturamento ?? 0;
+      const pedidosAtual = atual?.pedidos ?? 0;
+      const pedidosAnterior = prev?.pedidos ?? 0;
+      return {
+        canal,
+        diff: faturamentoAtual - faturamentoAnterior,
+        variacao: pctChange(faturamentoAtual, faturamentoAnterior),
+        pedidosDiff: pedidosAtual - pedidosAnterior,
+      };
+    }).sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
+
+    const maiorGanho = [...comparativoCanais].sort((a, b) => b.diff - a.diff)[0];
+    const maiorPerda = [...comparativoCanais].sort((a, b) => a.diff - b.diff)[0];
+    const canaisQueda = comparativoCanais.filter((c) => c.diff < 0).slice(0, 3);
+    const canaisAlta = comparativoCanais.filter((c) => c.diff > 0).slice(0, 3);
+
+    const adsAtual = report.trafego_pago.reduce((acc, item: any) => ({
+      investimento: acc.investimento + Number(item.investimento ?? 0),
+      receita: acc.receita + Number(item.receita ?? 0),
+      clicks: acc.clicks + Number(item.clicks ?? 0),
+      impressoes: acc.impressoes + Number(item.impressoes ?? 0),
+      pedidos: acc.pedidos + Number(item.pedidos ?? 0),
+    }), { investimento: 0, receita: 0, clicks: 0, impressoes: 0, pedidos: 0 });
+    const adsAnterior = anterior.trafego_pago.reduce((acc, item: any) => ({
+      investimento: acc.investimento + Number(item.investimento ?? 0),
+      receita: acc.receita + Number(item.receita ?? 0),
+      clicks: acc.clicks + Number(item.clicks ?? 0),
+      impressoes: acc.impressoes + Number(item.impressoes ?? 0),
+      pedidos: acc.pedidos + Number(item.pedidos ?? 0),
+    }), { investimento: 0, receita: 0, clicks: 0, impressoes: 0, pedidos: 0 });
+
+    const roasAtual = adsAtual.investimento > 0 ? adsAtual.receita / adsAtual.investimento : 0;
+    const roasAnterior = adsAnterior.investimento > 0 ? adsAnterior.receita / adsAnterior.investimento : 0;
+    const participacaoAds = report.kpis.faturamento > 0 ? (adsAtual.receita / report.kpis.faturamento) * 100 : 0;
+    const conversaoAdsAtual = adsAtual.clicks > 0 ? (adsAtual.pedidos / adsAtual.clicks) * 100 : 0;
+    const conversaoAdsAnterior = adsAnterior.clicks > 0 ? (adsAnterior.pedidos / adsAnterior.clicks) * 100 : 0;
+
+    const faturamentoVar = pctChange(report.kpis.faturamento, anterior.kpis.faturamento);
+    const ticketVar = pctChange(report.kpis.ticket_medio, anterior.kpis.ticket_medio);
+    const adsReceitaVar = pctChange(adsAtual.receita, adsAnterior.receita);
+    const adsInvestVar = pctChange(adsAtual.investimento, adsAnterior.investimento);
+
+    const diagnostico =
+      faturamentoVar < -5 && adsReceitaVar >= 0
+        ? "A queda parece mais ligada ao varejo organico/canais do que ao trafego pago, porque a receita atribuida de Ads nao caiu na mesma direcao."
+        : faturamentoVar < -5 && adsReceitaVar < faturamentoVar
+          ? "A queda tem forte sinal de pressao em trafego pago: a receita atribuida de Ads caiu mais que o faturamento total."
+          : faturamentoVar > 5 && adsInvestVar <= 0
+            ? "O crescimento veio com boa eficiencia, sem depender de aumento proporcional de investimento."
+            : "O dia ficou relativamente alinhado ao padrao recente; a leitura principal deve focar mix de canais e eficiencia de Ads.";
+
+    const recomendacao =
+      maiorPerda && Math.abs(maiorPerda.diff) > Math.abs(report.kpis.faturamento * 0.1)
+        ? `Prioridade: investigar ${maiorPerda.canal}, que sozinho explica ${formatCurrency(Math.abs(maiorPerda.diff))} de perda contra anteontem. Validar ruptura, preco, frete, buybox/anuncio e status dos SKUs campeoes antes de aumentar verba.`
+        : roasAtual >= 8 && adsAtual.investimento > 0
+          ? "Ha eficiencia em Ads. Se estoque e preco estiverem saudaveis, testar aumento gradual de verba nos conjuntos com ROAS alto, acompanhando ticket e pedidos a cada poucas horas."
+          : "Evitar aumentar verba no escuro. Primeiro separar queda de demanda, ruptura e perda de competitividade por canal; depois redistribuir investimento para os canais com melhor resposta.";
+
+    const periodo: Periodo = "diario";
+    const data = ontem;
     const realizado = report.kpis.meta > 0 ? (report.kpis.faturamento / report.kpis.meta) * 100 : 0;
+    const topCanal = [...report.canais].sort((a, b) => b.faturamento - a.faturamento)[0];
+    const melhorVariacao = maiorGanho ? { canal: maiorGanho.canal, variacao: maiorGanho.variacao } : null;
+    const piorVariacao = maiorPerda ? { canal: maiorPerda.canal, variacao: maiorPerda.variacao } : null;
 
     const texto = [
       `- Faturamento em ${formatCurrency(report.kpis.faturamento)}, equivalente a ${realizado.toFixed(1)}% da meta de ${formatCurrency(report.kpis.meta)}.`,
@@ -420,13 +514,23 @@ router.post("/analise/gerar", async (req, res) => {
     ].join("\n");
 
     const analise: AnaliseBot = {
-      texto,
+      texto: [
+        `- Base analisada: ontem (${ontem}) contra anteontem (${anteontem}).`,
+        `- Receita total: ${formatCurrency(report.kpis.faturamento)} contra ${formatCurrency(anterior.kpis.faturamento)}, ${diffText(report.kpis.faturamento, anterior.kpis.faturamento, true)}. Pedidos tiveram ${diffText(report.kpis.pedidos, anterior.kpis.pedidos)} e ticket medio ficou em ${formatCurrency(report.kpis.ticket_medio)} (${formatPercent(ticketVar)}).`,
+        `- Diagnostico: ${diagnostico}`,
+        `- Canais que mais mexeram no resultado: ${maiorPerda?.canal ?? "sem canal"} foi o maior peso negativo (${formatCurrency(maiorPerda?.diff ?? 0)}, ${formatPercent(maiorPerda?.variacao ?? 0)}), enquanto ${maiorGanho?.canal ?? "sem canal"} foi o principal amortecedor/ganho (${formatCurrency(maiorGanho?.diff ?? 0)}, ${formatPercent(maiorGanho?.variacao ?? 0)}).`,
+        `- Quedas por canal: ${canaisQueda.length ? canaisQueda.map((c) => `${c.canal} ${formatCurrency(c.diff)} (${formatPercent(c.variacao)}, pedidos ${c.pedidosDiff >= 0 ? "+" : ""}${c.pedidosDiff})`).join("; ") : "nenhum canal relevante em queda."}`,
+        `- Altas por canal: ${canaisAlta.length ? canaisAlta.map((c) => `${c.canal} +${formatCurrency(c.diff)} (${formatPercent(c.variacao)}, pedidos ${c.pedidosDiff >= 0 ? "+" : ""}${c.pedidosDiff})`).join("; ") : "nenhum canal relevante em alta."}`,
+        `- Ads: investimento ${formatCurrency(adsAtual.investimento)} (${formatPercent(adsInvestVar)}), receita atribuida ${formatCurrency(adsAtual.receita)} (${formatPercent(adsReceitaVar)}), ROAS ${roasAtual.toFixed(2)}x contra ${roasAnterior.toFixed(2)}x. Ads respondeu por ${formatPercent(participacaoAds)} do faturamento do dia.`,
+        `- Funil de Ads: ${adsAtual.impressoes.toFixed(0)} impressoes, ${adsAtual.clicks.toFixed(0)} clicks e ${adsAtual.pedidos.toFixed(0)} pedidos; conversao estimada ${formatPercent(conversaoAdsAtual)} contra ${formatPercent(conversaoAdsAnterior)} no dia anterior.`,
+        `- Acao recomendada: ${recomendacao}`,
+      ].join("\n"),
       gerado_em: new Date().toISOString(),
-      data_referencia: data ?? new Date().toISOString().slice(0, 10),
-      modelo: "heuristico",
+      data_referencia: ontem,
+      modelo: "comparativo_diario",
     };
 
-    analisesMemoria[periodo] = analise;
+    analisesMemoria.diario = analise;
     res.json(analise);
   } catch (e: any) {
     res.status(500).json({ erro: e.message });

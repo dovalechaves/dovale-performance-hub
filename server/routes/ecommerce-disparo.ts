@@ -6,18 +6,115 @@ import { getCanaisDiario, getCanaisMensal, getCanaisRaw, CanalResumo } from "../
 
 const router = Router();
 
-const ALLOWED_USERS = (process.env.ECOMMERCE_DISPARO_ALLOWED_USERS ?? "henrique.berbert,andreza")
-  .split(",")
-  .map((u) => u.trim().toLowerCase())
-  .filter(Boolean);
-
 type Periodo = "diario" | "mensal";
 
+const CW_TI_BASE = process.env.CW_TI_BASE || "https://chatwoot.dovale.online";
+const CW_TI_TOKEN = process.env.CW_TI_TOKEN || "V1WDyvj1WTWeytVyWwKy31GL";
+const CW_TI_INBOX = Number(process.env.CW_TI_INBOX) || 1;
+const CW_TI_ACCOUNT = Number(process.env.CW_TI_ACCOUNT) || 1;
 
-function usuarioAutorizado(usuario: string): boolean {
-  const normalized = usuario.trim().toLowerCase();
-  if (!normalized) return false;
-  return ALLOWED_USERS.some((allowed) => normalized === allowed || normalized.includes(allowed));
+interface AnaliseBot {
+  texto: string;
+  gerado_em: string;
+  data_referencia: string;
+  modelo: string;
+}
+
+const analisesMemoria: Partial<Record<Periodo, AnaliseBot>> = {};
+
+function cwHeaders() {
+  return { api_access_token: CW_TI_TOKEN, "Content-Type": "application/json" };
+}
+
+function normalizarTelefone(telefone: string): string {
+  const digitos = telefone.replace(/\D/g, "");
+  if (digitos.length === 10 || digitos.length === 11) return `55${digitos}`;
+  return digitos;
+}
+
+function getDestinatariosEcommerce() {
+  const numeros = (process.env.ECOMMERCE_DISPARO_NUMEROS ?? "12981898755,551232121073,5512981505116")
+    .split(",")
+    .map((n) => normalizarTelefone(n))
+    .filter(Boolean);
+
+  return numeros.map((telefone, index) => ({
+    nome: index === 0 ? "Disparo Ecommerce" : `Disparo Ecommerce ${index + 1}`,
+    telefone: `+${telefone}`,
+    telefone_normalizado: telefone,
+  }));
+}
+
+async function cwBuscarContato(telefone: string): Promise<number | null> {
+  const termo = telefone.replace(/\D/g, "").slice(-9);
+  const r = await fetch(`${CW_TI_BASE}/api/v1/accounts/${CW_TI_ACCOUNT}/contacts/search?q=${termo}&page=1&per_page=10&include_contacts=true`, { headers: cwHeaders() });
+  if (!r.ok) return null;
+  const j: any = await r.json();
+  return j.payload?.[0]?.id ?? null;
+}
+
+async function cwCriarContato(telefone: string, nome: string): Promise<number | null> {
+  const r = await fetch(`${CW_TI_BASE}/api/v1/accounts/${CW_TI_ACCOUNT}/contacts`, {
+    method: "POST",
+    headers: cwHeaders(),
+    body: JSON.stringify({ inbox_id: CW_TI_INBOX, phone_number: `+${telefone}`, name: nome }),
+  });
+  if (!r.ok) {
+    console.error(`[Ecommerce->WPP] Criar contato falhou: ${r.status} ${await r.text()}`);
+    return null;
+  }
+  const j: any = await r.json();
+  return j.payload?.contact?.id ?? j.id ?? null;
+}
+
+async function cwBuscarConversaAberta(contatoId: number): Promise<number | null> {
+  const r = await fetch(`${CW_TI_BASE}/api/v1/accounts/${CW_TI_ACCOUNT}/contacts/${contatoId}/conversations`, { headers: cwHeaders() });
+  if (!r.ok) return null;
+  const j: any = await r.json();
+  const convs = j.payload || [];
+  const aberta = convs.find((c: any) => c.status === "open" && c.inbox_id === CW_TI_INBOX);
+  return aberta?.id ?? null;
+}
+
+async function cwCriarConversa(contatoId: number): Promise<number | null> {
+  const r = await fetch(`${CW_TI_BASE}/api/v1/accounts/${CW_TI_ACCOUNT}/conversations`, {
+    method: "POST",
+    headers: cwHeaders(),
+    body: JSON.stringify({ contact_id: contatoId, inbox_id: CW_TI_INBOX, status: "open" }),
+  });
+  if (!r.ok) {
+    console.error(`[Ecommerce->WPP] Criar conversa falhou: ${r.status} ${await r.text()}`);
+    return null;
+  }
+  const j: any = await r.json();
+  return j.id ?? null;
+}
+
+async function cwEnviarMensagem(conversaId: number, msg: string): Promise<number | null> {
+  const r = await fetch(`${CW_TI_BASE}/api/v1/accounts/${CW_TI_ACCOUNT}/conversations/${conversaId}/messages`, {
+    method: "POST",
+    headers: cwHeaders(),
+    body: JSON.stringify({ content: msg, message_type: "outgoing", private: false }),
+  });
+  if (!r.ok) {
+    console.error(`[Ecommerce->WPP] Mensagem falhou: ${r.status} ${await r.text()}`);
+    return null;
+  }
+  const j: any = await r.json();
+  return j.id ?? null;
+}
+
+async function enviarWhatsApp(telefone: string, nome: string, mensagem: string) {
+  const contatoId = await cwBuscarContato(telefone) ?? await cwCriarContato(telefone, nome);
+  if (!contatoId) throw new Error(`Contato nao encontrado/criado para ${telefone}`);
+
+  const conversaId = await cwBuscarConversaAberta(contatoId) ?? await cwCriarConversa(contatoId);
+  if (!conversaId) throw new Error(`Conversa nao encontrada/criada para ${telefone}`);
+
+  const mensagemId = await cwEnviarMensagem(conversaId, mensagem);
+  if (!mensagemId) throw new Error(`Mensagem nao enviada para ${telefone}`);
+
+  return { contatoId, conversaId, mensagemId };
 }
 
 async function isHubAdmin(usuario: string): Promise<boolean> {
@@ -32,29 +129,65 @@ async function isHubAdmin(usuario: string): Promise<boolean> {
   }
 }
 
+async function canAccessEcommerceDisparo(usuario: string): Promise<boolean> {
+  try {
+    const pool = await getPool();
+    const result = await pool.request()
+      .input("usuario", usuario.toLowerCase())
+      .query(`
+        SELECT TOP 1 ua.ativo
+        FROM dbo.USUARIOS_APPS ua
+        INNER JOIN dbo.USUARIOS_LOJAS ul ON LOWER(ul.usuario) = LOWER(ua.usuario)
+        WHERE LOWER(ua.usuario) = @usuario
+          AND ua.app_key = 'ecommercedisparo'
+          AND ua.ativo = 1
+          AND ul.ativo = 1
+      `);
+    return Boolean(result.recordset[0]);
+  } catch {
+    return false;
+  }
+}
+
 async function requireAccess(req: Request, res: Response, next: NextFunction) {
   const usuario = String(req.headers["x-dovale-usuario"] ?? req.query.usuario ?? "").trim();
-  if (usuarioAutorizado(usuario)) return next();
+  if (!usuario) return res.status(401).json({ erro: "Usuario nao informado." });
   if (await isHubAdmin(usuario)) return next();
-  return res.status(403).json({ erro: "Acesso permitido apenas para Henrique e Andreza." });
+  if (await canAccessEcommerceDisparo(usuario)) return next();
+  return res.status(403).json({ erro: "Sem permissao para acessar Relatorios Ecommerce." });
 }
 
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
 }
 
+async function getMetas() {
+  try {
+    const pool = await getPool();
+    const result = await pool.request().query(
+      "SELECT TOP 1 meta_diario, meta_mensal FROM dbo.ECOMMERCE_METAS WHERE id = 1"
+    );
+    return {
+      meta_diario: Number(result.recordset[0]?.meta_diario ?? 165000),
+      meta_mensal: Number(result.recordset[0]?.meta_mensal ?? 3200000),
+    };
+  } catch {
+    return { meta_diario: 165000, meta_mensal: 3200000 };
+  }
+}
+
 const canaisDiario: CanalResumo[] = [
-  { canal: "Mercado Livre", faturamento: 68450.9, pedidos: 312, ticket_medio: 219.39, conversao: 3.8, margem: 21.4, variacao: 8.7 },
-  { canal: "Shopee", faturamento: 24890.2, pedidos: 184, ticket_medio: 135.27, conversao: 2.9, margem: 17.8, variacao: -3.1 },
-  { canal: "Amazon", faturamento: 18320.5, pedidos: 76, ticket_medio: 241.06, conversao: 2.4, margem: 19.2, variacao: 5.4 },
-  { canal: "Site", faturamento: 42870.4, pedidos: 138, ticket_medio: 310.66, conversao: 4.6, margem: 26.1, variacao: 12.2 },
+  { canal: "Mercado Livre", faturamento: 68450.9, pedidos: 312, ticket_medio: 219.39, conversao: 3.8, variacao: 8.7 },
+  { canal: "Shopee", faturamento: 24890.2, pedidos: 184, ticket_medio: 135.27, conversao: 2.9, variacao: -3.1 },
+  { canal: "Amazon", faturamento: 18320.5, pedidos: 76, ticket_medio: 241.06, conversao: 2.4, variacao: 5.4 },
+  { canal: "Site", faturamento: 42870.4, pedidos: 138, ticket_medio: 310.66, conversao: 4.6, variacao: 12.2 },
 ];
 
 const canaisMensal: CanalResumo[] = [
-  { canal: "Mercado Livre", faturamento: 1298400.8, pedidos: 5940, ticket_medio: 218.59, conversao: 3.6, margem: 21.2, variacao: 9.4 },
-  { canal: "Shopee", faturamento: 486300.2, pedidos: 3680, ticket_medio: 132.15, conversao: 2.8, margem: 17.2, variacao: 1.8 },
-  { canal: "Amazon", faturamento: 358900.7, pedidos: 1492, ticket_medio: 240.55, conversao: 2.3, margem: 18.8, variacao: 6.3 },
-  { canal: "Site", faturamento: 821760.4, pedidos: 2655, ticket_medio: 309.51, conversao: 4.8, margem: 26.9, variacao: 14.1 },
+  { canal: "Mercado Livre", faturamento: 1298400.8, pedidos: 5940, ticket_medio: 218.59, conversao: 3.6, variacao: 9.4 },
+  { canal: "Shopee", faturamento: 486300.2, pedidos: 3680, ticket_medio: 132.15, conversao: 2.8, variacao: 1.8 },
+  { canal: "Amazon", faturamento: 358900.7, pedidos: 1492, ticket_medio: 240.55, conversao: 2.3, variacao: 6.3 },
+  { canal: "Site", faturamento: 821760.4, pedidos: 2655, ticket_medio: 309.51, conversao: 4.8, variacao: 14.1 },
 ];
 
 const historico = [
@@ -65,14 +198,14 @@ const historico = [
 ];
 
 async function getReport(periodo: Periodo, data?: string) {
+  const metas = await getMetas();
   const canaisDb = periodo === "mensal" ? await getCanaisMensal() : await getCanaisDiario(data);
   const canais = canaisDb ?? (periodo === "mensal" ? canaisMensal : canaisDiario);
   const faturamento = canais.reduce((acc, c) => acc + c.faturamento, 0);
   const pedidos = canais.reduce((acc, c) => acc + c.pedidos, 0);
-  const margemMedia = canais.reduce((acc, c) => acc + c.margem, 0) / canais.length;
   const conversaoMedia = canais.reduce((acc, c) => acc + c.conversao, 0) / canais.length;
   const ticketMedio = faturamento / pedidos;
-  const meta = periodo === "mensal" ? 3200000 : 165000;
+  const meta = periodo === "mensal" ? metas.meta_mensal : metas.meta_diario;
 
   const [shopeeAds, mlAds] = await Promise.all([
     getShopeeAdsData(periodo, data),
@@ -103,14 +236,11 @@ async function getReport(periodo: Periodo, data?: string) {
     fonte: shopeeAds.fonte === "api" || mlAds.fonte === "api" ? "ads_api" : "sem_dados_trafego",
     integracoes: {
       tray: "mockado",
-      whatsapp: "simulado",
+      whatsapp: "chatwoot",
       shopee_ads: shopeeAds.fonte,
       ml_ads: mlAds.fonte,
     },
-    destinatarios: [
-      { nome: "Henrique Berbert", telefone: process.env.ECOMMERCE_DISPARO_HENRIQUE ?? "+55 12 98152-9989" },
-      { nome: "Andreza Ferreira", telefone: process.env.ECOMMERCE_DISPARO_ANDREZA ?? "+55 12 98189-8755" },
-    ],
+    destinatarios: getDestinatariosEcommerce().map(({ nome, telefone }) => ({ nome, telefone })),
     agenda: {
       diario: "08:00 em dias úteis",
       mensal: "08:30 no primeiro dia útil",
@@ -121,7 +251,6 @@ async function getReport(periodo: Periodo, data?: string) {
       ticket_medio: ticketMedio,
       conversao: conversaoMedia,
       roas: roasGeral,
-      margem: margemMedia,
       investimento: investimentoTotal,
       receita_paga: receitaTotal,
       meta,
@@ -138,25 +267,26 @@ async function getReport(periodo: Periodo, data?: string) {
       { origem: "Shopee Ads",      investimento: shopeeInvestimento, receita: shopeeReceita, roas: shopeeRoas, conversao: shopeeConversao, fonte: shopeeAds.fonte },
       { origem: "Mercado Livre Ads", investimento: mlInvestimento, receita: mlReceita, roas: mlRoas, conversao: mlConversao, fonte: mlAds.fonte },
     ],
+    analise: analisesMemoria[periodo] ?? null,
     pontos_criticos: [
-      "Shopee abaixo do ritmo esperado, com queda de margem e ticket menor.",
+      "Shopee abaixo do ritmo esperado, com ticket menor.",
       "Site próprio lidera conversão e deve receber reforço em campanhas de remarketing.",
       "Mercado Livre mantém volume alto, mas exige atenção ao custo de frete por pedido.",
     ],
     direcionamentos: [
       "Redistribuir verba de campanhas com ROAS abaixo de 4,5 para Google Ads e Site.",
-      "Revisar kits de maior giro na Shopee para recuperar margem sem reduzir volume.",
+      "Revisar kits de maior giro na Shopee para recuperar ticket sem reduzir volume.",
       "Priorizar estoque dos SKUs que puxam Site e Mercado Livre nas próximas 48h.",
     ],
   };
 }
 
-async function montarMensagem(periodo: Periodo): Promise<string> {
-  const report = await getReport(periodo);
+async function montarMensagem(periodo: Periodo, data?: string): Promise<string> {
+  const report = await getReport(periodo, data);
   const label = periodo === "mensal" ? "MENSAL" : "DIARIO";
   const topCanal = [...report.canais].sort((a, b) => b.faturamento - a.faturamento)[0];
   const canais = report.canais
-    .map((c) => `- ${c.canal}: ${formatCurrency(c.faturamento)} | ${c.pedidos} pedidos | margem ${c.margem.toFixed(1)}%`)
+    .map((c) => `- ${c.canal}: ${formatCurrency(c.faturamento)} | ${c.pedidos} pedidos | ticket ${formatCurrency(c.ticket_medio)}`)
     .join("\n");
 
   return [
@@ -167,7 +297,6 @@ async function montarMensagem(periodo: Periodo): Promise<string> {
     `Ticket medio: ${formatCurrency(report.kpis.ticket_medio)}`,
     `Conversao: ${report.kpis.conversao.toFixed(1)}%`,
     `ROAS: ${report.kpis.roas.toFixed(2)}x`,
-    `Margem: ${report.kpis.margem.toFixed(1)}%`,
     `Projecao: ${formatCurrency(report.kpis.projecao_fechamento)}`,
     "",
     `Canal destaque: ${topCanal.canal} (${formatCurrency(topCanal.faturamento)})`,
@@ -210,16 +339,7 @@ router.get("/shopee/auth", (_req, res) => {
 router.use(requireAccess);
 
 router.get("/metas", async (_req, res) => {
-  try {
-    const pool = await getPool();
-    const result = await pool.request().query(
-      "SELECT TOP 1 meta_diario, meta_mensal FROM dbo.ECOMMERCE_METAS WHERE id = 1"
-    );
-    if (!result.recordset[0]) return res.json({ meta_diario: 165000, meta_mensal: 3200000 });
-    res.json(result.recordset[0]);
-  } catch {
-    res.json({ meta_diario: 165000, meta_mensal: 3200000 });
-  }
+  res.json(await getMetas());
 });
 
 router.put("/metas", async (req, res) => {
@@ -281,14 +401,76 @@ router.get("/teste-canais", async (_req, res) => {
   res.json(await getCanaisRaw());
 });
 
+router.post("/analise/gerar", async (req, res) => {
+  try {
+    const periodo = req.query.periodo === "mensal" ? "mensal" : "diario";
+    const data = typeof req.query.data === "string" ? req.query.data : undefined;
+    const report = await getReport(periodo, data);
+    const topCanal = [...report.canais].sort((a, b) => b.faturamento - a.faturamento)[0];
+    const piorVariacao = [...report.canais].sort((a, b) => a.variacao - b.variacao)[0];
+    const melhorVariacao = [...report.canais].sort((a, b) => b.variacao - a.variacao)[0];
+    const realizado = report.kpis.meta > 0 ? (report.kpis.faturamento / report.kpis.meta) * 100 : 0;
+
+    const texto = [
+      `- Faturamento em ${formatCurrency(report.kpis.faturamento)}, equivalente a ${realizado.toFixed(1)}% da meta de ${formatCurrency(report.kpis.meta)}.`,
+      `- Canal destaque: ${topCanal?.canal ?? "sem canal"} com ${formatCurrency(topCanal?.faturamento ?? 0)} e ${topCanal?.pedidos ?? 0} pedido(s).`,
+      `- Melhor variação: ${melhorVariacao?.canal ?? "sem canal"} (${(melhorVariacao?.variacao ?? 0).toFixed(1)}%).`,
+      `- Ponto de atenção: ${piorVariacao?.canal ?? "sem canal"} (${(piorVariacao?.variacao ?? 0).toFixed(1)}%).`,
+      `- Tráfego pago: investimento de ${formatCurrency(report.kpis.investimento)} para receita atribuída de ${formatCurrency(report.kpis.receita_paga)} e ROAS ${report.kpis.roas.toFixed(2)}x.`,
+    ].join("\n");
+
+    const analise: AnaliseBot = {
+      texto,
+      gerado_em: new Date().toISOString(),
+      data_referencia: data ?? new Date().toISOString().slice(0, 10),
+      modelo: "heuristico",
+    };
+
+    analisesMemoria[periodo] = analise;
+    res.json(analise);
+  } catch (e: any) {
+    res.status(500).json({ erro: e.message });
+  }
+});
+
 router.post("/preview", async (req, res) => {
   const periodo = req.body?.periodo === "mensal" ? "mensal" : "diario";
-  res.json({ periodo, mensagem: await montarMensagem(periodo), modo_simulacao: true });
+  const data = typeof req.body?.data === "string" ? req.body.data : undefined;
+  res.json({ periodo, mensagem: await montarMensagem(periodo, data), modo_simulacao: true });
 });
 
 router.post("/enviar", async (req, res) => {
+  try {
+    const periodo = req.body?.periodo === "mensal" ? "mensal" : "diario";
+    const data = typeof req.body?.data === "string" ? req.body.data : undefined;
+    const mensagem = await montarMensagem(periodo, data);
+    const destinatarios = getDestinatariosEcommerce();
+    const resultados = await Promise.allSettled(
+      destinatarios.map((dest) => enviarWhatsApp(dest.telefone_normalizado, dest.nome, mensagem))
+    );
+    const enviados = resultados.filter((r) => r.status === "fulfilled").length;
+    const falhas = resultados
+      .map((r, index) => r.status === "rejected" ? `${destinatarios[index].telefone}: ${r.reason?.message ?? "falha desconhecida"}` : null)
+      .filter(Boolean);
+
+    res.status(enviados > 0 ? 200 : 502).json({
+      ok: enviados > 0,
+      periodo,
+      modo_simulacao: false,
+      enviados,
+      falhas,
+      destinatarios: destinatarios.map(({ nome, telefone }) => ({ nome, telefone })),
+      mensagem: enviados > 0 ? "Relatorio enviado pelo Chatwoot." : "Nenhum relatorio foi enviado pelo Chatwoot.",
+    });
+  } catch (e: any) {
+    res.status(500).json({ erro: e.message });
+  }
+});
+
+router.post("/enviar-simulado-legado", async (req, res) => {
   const periodo = req.body?.periodo === "mensal" ? "mensal" : "diario";
-  const report = await getReport(periodo);
+  const data = typeof req.body?.data === "string" ? req.body.data : undefined;
+  const report = await getReport(periodo, data);
   res.json({
     ok: true,
     periodo,

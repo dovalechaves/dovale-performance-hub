@@ -6,7 +6,6 @@ export interface CanalResumo {
   pedidos: number;
   ticket_medio: number;
   conversao: number;
-  margem: number;
   variacao: number;
 }
 
@@ -115,7 +114,6 @@ function agruparPorCanal(rows: RowCanal[]): CanalResumo[] {
       pedidos:      dados.pedidos,
       ticket_medio: parseFloat(ticketMedio.toFixed(2)),
       conversao:    0,  // requer dados de tráfego
-      margem:       0,  // requer dados de custo
       variacao,
     });
   }

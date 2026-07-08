@@ -7,17 +7,6 @@ const router = Router();
 const VALID_ROLES = ["admin", "manager", "viewer"] as const;
 const VALID_HUB_ROLES = ["admin", "viewer"] as const;
 const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento", "assistente", "multipreco", "inventario", "onboarding", "score", "cobranca", "ecommercedisparo", "sugestaocompras", "salescompass", "painelcomissao"] as const;
-const ECOMMERCE_DISPARO_ALLOWED = (process.env.ECOMMERCE_DISPARO_ALLOWED_USERS ?? "henrique.berbert,andreza")
-  .split(",")
-  .map((u) => u.trim().toLowerCase())
-  .filter(Boolean);
-
-function canAccessEcommerceDisparo(usuario: string, hubRole?: string): boolean {
-  if (hubRole === "admin") return true;
-  const normalized = String(usuario || "").trim().toLowerCase();
-  if (!normalized) return false;
-  return ECOMMERCE_DISPARO_ALLOWED.some((allowed) => normalized === allowed || normalized.includes(allowed));
-}
 
 type Role = typeof VALID_ROLES[number];
 type HubRole = typeof VALID_HUB_ROLES[number];
@@ -202,7 +191,7 @@ function buildDefaultApps(usuario: string, localRole: unknown, localLoja: unknow
       app_key: "ecommercedisparo" as AppKey,
       role: baseRole,
       loja: null,
-      can_access: canAccessHub && canAccessEcommerceDisparo(usuario, hubRole),
+      can_access: false,
     },
     sugestaocompras: {
       app_key: "sugestaocompras" as AppKey,
@@ -261,9 +250,7 @@ function mergeApps(
       role,
       loja: (appKey === "dashboard" || appKey === "calculadora" || appKey === "fechamento" || appKey === "salescompass") && role === "manager" ? (row?.loja ? String(row.loja) : null) :
             appKey === "salescompass" && role !== "admin" ? (row?.loja ? String(row.loja) : null) : null,
-      can_access: appKey === "ecommercedisparo"
-        ? isEnabledFlag(row?.ativo) && canAccessEcommerceDisparo(usuario, hubRole)
-        : isEnabledFlag(row?.ativo),
+      can_access: isEnabledFlag(row?.ativo),
       ...((appKey === "inventario" || appKey === "salescompass") && row?.usu_codigo_sistema != null ? { usu_codigo_sistema: Number(row.usu_codigo_sistema) } : {}),
       ...(appKey === "painelcomissao" ? { config: parsePainelConfig(row?.config) } : {}),
     };
@@ -321,9 +308,7 @@ function normalizeAppsPayload(
         app_key: appKey,
         role,
         loja: lojaValue,
-        can_access: appKey === "ecommercedisparo"
-          ? (typeof raw.can_access === "boolean" ? raw.can_access : merged[appKey].can_access) && canAccessEcommerceDisparo(usuario, hubRole)
-          : typeof raw.can_access === "boolean" ? raw.can_access : merged[appKey].can_access,
+        can_access: typeof raw.can_access === "boolean" ? raw.can_access : merged[appKey].can_access,
         ...(appKey === "salescompass" && raw.usu_codigo_sistema != null ? { usu_codigo_sistema: Number(raw.usu_codigo_sistema) } : {}),
         ...(appKey === "painelcomissao" ? { config: parsePainelConfig(raw.config) } : {}),
       };

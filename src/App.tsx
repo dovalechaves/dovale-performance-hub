@@ -123,7 +123,7 @@ function EcommerceDisparoRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
   if (!user.canAccessHub) return <Navigate to="/login" replace />;
-  if (!user.apps.ecommercedisparo.canAccess) return <Navigate to="/hub" replace />;
+  if (!user.apps.ecommercedisparo?.canAccess) return <Navigate to="/hub" replace />;
   return <>{children}</>;
 }
 

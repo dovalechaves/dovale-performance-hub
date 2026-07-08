@@ -581,6 +581,9 @@ router.patch("/sessoes/:id/status", async (req: Request, res: Response) => {
           const allRows: any[] = [];
           const contadosRows: any[] = [];
           const naoContadosRows: any[] = [];
+          const naoContadosDetalhes: string[] = [];
+          const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+          const fmtQtd = (v: number) => v.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
 
           for (const item of itensRes.recordset) {
             const cs = contagensMap[item.id] || [];
@@ -612,14 +615,20 @@ router.patch("/sessoes/:id/status", async (req: Request, res: Response) => {
               const ct = cs.find((c: any) => c.local_id === loc.id);
               row[loc.nome] = ct?.qtd_contada != null ? Number(ct.qtd_contada) : "";
             }
-            row["Total Contado"] = qtdContada ?? "";
-            row["Diferença"] = qtdContada != null ? qtdContada - qtdSis : "";
+            row["Status"] = qtdContada != null ? "Contado" : "Nao contado";
+            row["Total Contado"] = qtdContada ?? 0;
+            row["Diferença"] = (qtdContada ?? 0) - qtdSis;
             row["Custo Fiscal"] = custo;
-            row["Vlr Diferença"] = qtdContada != null ? (qtdContada - qtdSis) * custo : "";
+            row["Vlr Diferença"] = ((qtdContada ?? 0) - qtdSis) * custo;
 
             allRows.push(row);
             if (qtdContada !== null) contadosRows.push(row);
-            else naoContadosRows.push(row);
+            else {
+              naoContadosRows.push(row);
+              naoContadosDetalhes.push(
+                `• ${item.pro_codigo} - ${item.descricao ?? "Sem descricao"} | Sist: ${fmtQtd(qtdSis)} | Dif: ${fmtQtd(-qtdSis)} | ${fmt(-qtdSis * custo)}`
+              );
+            }
           }
 
           // Generate XLSX with 3 sheets
@@ -630,9 +639,10 @@ router.patch("/sessoes/:id/status", async (req: Request, res: Response) => {
           const tmpFile = path.join(os.tmpdir(), `inventario_${sessao.id}_${Date.now()}.xlsx`);
           XLSX.writeFile(wb, tmpFile);
 
-          const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-          const fmtQtd = (v: number) => v.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
           const approvalLink = `https://hub.dovale.online/inventario?sessao=${sessao.id}`;
+          const naoContadosPreviewLimit = 25;
+          const naoContadosPreview = naoContadosDetalhes.slice(0, naoContadosPreviewLimit);
+          const naoContadosRestantes = Math.max(0, naoContadosDetalhes.length - naoContadosPreviewLimit);
 
           const msg = [
             `📦 *INVENTÁRIO ENVIADO PARA APROVAÇÃO*`,
@@ -645,6 +655,12 @@ router.patch("/sessoes/:id/status", async (req: Request, res: Response) => {
             `• Total de itens: ${itensRes.recordset.length}`,
             `• Contados: ${contados}`,
             `• Não contados: ${naoContados}`,
+            ...(naoContadosPreview.length > 0 ? [
+              ``,
+              `⚠️ *Itens não contados (${naoContados}):*`,
+              ...naoContadosPreview,
+              ...(naoContadosRestantes > 0 ? [`• ... +${naoContadosRestantes} item(ns) na aba "Não Contados" do anexo`] : []),
+            ] : []),
             ``,
             `📦 *Quantidade:*`,
             `• Sistema (antiga): ${fmtQtd(totalQtdSistema)}`,

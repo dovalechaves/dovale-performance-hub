@@ -88,6 +88,10 @@ const LOJAS_INVENTARIO = [
 
 const ITEMS_PER_PAGE = 25;
 
+function onlyDigits(value: string) {
+  return value.replace(/\D/g, "");
+}
+
 function fmtDate(d: string | null) {
   if (!d) return "—";
   return new Date(d).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
@@ -240,6 +244,8 @@ export default function Inventario() {
   // Feedback (reject)
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackText, setFeedbackText] = useState("");
+  const [showApprovalSent, setShowApprovalSent] = useState(false);
+  const [statusChanging, setStatusChanging] = useState<string | null>(null);
 
   // Logs panel
   const [showLogs, setShowLogs] = useState(false);
@@ -277,10 +283,15 @@ export default function Inventario() {
       setSelectedSessao(data);
       setLocais(data.locais ?? []);
       setItens(data.itens ?? []);
+    } catch (e: any) { toast.error(e.message); }
+    finally { setDetailLoading(false); }
+  }, [apiFetch]);
+
+  const loadLogs = useCallback(async (id: number) => {
+    try {
       const logsData = await apiFetch(`/sessoes/${id}/logs`);
       setLogs(logsData);
     } catch (e: any) { toast.error(e.message); }
-    finally { setDetailLoading(false); }
   }, [apiFetch]);
 
   // Restore session from URL on mount
@@ -293,6 +304,55 @@ export default function Inventario() {
   // ── Real-time WebSocket ──
   const selectedSessaoRef = useRef(selectedSessao);
   useEffect(() => { selectedSessaoRef.current = selectedSessao; }, [selectedSessao]);
+  const itensRef = useRef(itens);
+  useEffect(() => { itensRef.current = itens; }, [itens]);
+  const viewRef = useRef(view);
+  useEffect(() => { viewRef.current = view; }, [view]);
+  const showLogsRef = useRef(showLogs);
+  useEffect(() => { showLogsRef.current = showLogs; }, [showLogs]);
+
+  useEffect(() => {
+    if (showLogs && selectedSessao) loadLogs(selectedSessao.id);
+  }, [showLogs, selectedSessao?.id, loadLogs]);
+
+  const applyContagemUpdate = useCallback((data: any) => {
+    let touchedSessaoId: number | null = null;
+    let nextTotalContados: number | null = null;
+
+    setItens((prev) => {
+      let changed = false;
+      const next = prev.map((item) => {
+        const matchesItem = data.item_id ? item.id === data.item_id : item.contagens?.some((c) => c.id === data.contagem_id);
+        if (!matchesItem) return item;
+
+        changed = true;
+        touchedSessaoId = item.sessao_id;
+        const contagens = item.contagens.map((c) =>
+          c.id === data.contagem_id || (data.local_id && c.local_id === data.local_id)
+            ? { ...c, qtd_contada: Number(data.qtd_contada), contado_por: data.usuario ?? c.contado_por, contado_em: new Date().toISOString() }
+            : c
+        );
+        const filled = contagens.filter((c) => c.qtd_contada !== null && c.qtd_contada !== undefined);
+        const qtd_contada = filled.length > 0
+          ? filled.reduce((sum, c) => sum + Number(c.qtd_contada), 0)
+          : null;
+        return { ...item, contagens, qtd_contada };
+      });
+
+      if (changed) {
+        nextTotalContados = next.filter((i) => i.qtd_contada !== null).length;
+        return next;
+      }
+      return prev;
+    });
+
+    if (nextTotalContados !== null) {
+      setSelectedSessao((cur) => cur && (!touchedSessaoId || cur.id === touchedSessaoId)
+        ? { ...cur, total_contados: nextTotalContados }
+        : cur
+      );
+    }
+  }, []);
 
   useEffect(() => {
     const socketUrl = API_BASE.replace(/\/api$/, "");
@@ -301,13 +361,18 @@ export default function Inventario() {
     socket.on("inventario:contagem-atualizada", (data: any) => {
       const cur = selectedSessaoRef.current;
       if (cur && data.sessao_id === cur.id) {
-        loadDetail(cur.id);
+        const itemKnown = itensRef.current.some((item) =>
+          data.item_id ? item.id === data.item_id : item.contagens?.some((c) => c.id === data.contagem_id)
+        );
+        if (itemKnown) applyContagemUpdate(data);
+        else loadDetail(cur.id);
+        if (showLogsRef.current) loadLogs(cur.id);
       }
-      loadSessoes();
+      if (viewRef.current === "list") loadSessoes();
     });
 
     return () => { socket.disconnect(); };
-  }, [loadDetail, loadSessoes]);
+  }, [applyContagemUpdate, loadDetail, loadLogs, loadSessoes]);
 
   const openDetail = (s: Sessao) => {
     setView("detail");
@@ -365,28 +430,38 @@ export default function Inventario() {
   // ── Status change ──
   const changeStatus = async (status: string, feedback?: string) => {
     if (!selectedSessao) return;
+    setStatusChanging(status);
     try {
       await apiFetch(`/sessoes/${selectedSessao.id}/status`, {
         method: "PATCH",
         body: JSON.stringify({ status, usuario, feedback }),
       });
       toast.success(`Status → ${STATUS_MAP[status]?.label || status}`);
-      loadDetail(selectedSessao.id);
-      loadSessoes();
+      await Promise.all([loadDetail(selectedSessao.id), loadSessoes()]);
+      if (status === "ENVIADO") setShowApprovalSent(true);
     } catch (e: any) { toast.error(e.message); }
+    finally { setStatusChanging(null); }
   };
 
   // ── Add item ──
+  const addItemToSession = async (codigo: string) => {
+    if (!selectedSessao) return null;
+    return apiFetch(`/sessoes/${selectedSessao.id}/itens`, {
+      method: "POST",
+      body: JSON.stringify({ pro_codigo: codigo.trim(), usuario }),
+    });
+  };
+
   const handleAddItem = async () => {
     if (!selectedSessao || !addCodigo.trim()) return;
     setAdding(true);
     try {
-      await apiFetch(`/sessoes/${selectedSessao.id}/itens`, {
-        method: "POST",
-        body: JSON.stringify({ pro_codigo: addCodigo.trim(), usuario }),
-      });
+      const item = await addItemToSession(addCodigo);
+      if (item) {
+        setItens((prev) => [...prev, item]);
+        setSelectedSessao((cur) => cur ? { ...cur, total_itens: cur.total_itens + 1 } : cur);
+      }
       setAddCodigo("");
-      loadDetail(selectedSessao.id);
     } catch (e: any) { toast.error(e.message); }
     finally { setAdding(false); }
   };
@@ -399,7 +474,7 @@ export default function Inventario() {
         method: "PATCH",
         body: JSON.stringify({ qtd_contada: qtd, usuario }),
       });
-      loadDetail(selectedSessao.id);
+      applyContagemUpdate({ contagem_id: contagemId, qtd_contada: qtd, usuario });
     } catch (e: any) { toast.error(e.message); }
   };
 
@@ -415,14 +490,32 @@ export default function Inventario() {
       toast.success(`Contagem salva: ${contagemCodigo || "item"} → ${qtd}`);
       setContagemCodigo("");
       setContagemQtd("");
-      loadDetail(selectedSessao.id);
+      applyContagemUpdate({ contagem_id: contagemId, qtd_contada: qtd, usuario });
     } catch (e: any) { toast.error(e.message); }
     finally { setSavingContagem(false); }
   };
 
   const handleInsertContagem = async () => {
     if (!selectedSessao || !contagemCodigo.trim() || !contagemLocalId || contagemQtd === "") return;
-    const item = itens.find((i) => String(i.pro_codigo) === contagemCodigo.trim());
+    const codigo = contagemCodigo.trim();
+    let item = itens.find((i) => String(i.pro_codigo) === codigo);
+
+    if (!item) {
+      setSavingContagem(true);
+      try {
+        const created = await addItemToSession(codigo);
+        if (created) {
+          item = created;
+          setItens((prev) => [...prev, created]);
+          setSelectedSessao((cur) => cur ? { ...cur, total_itens: cur.total_itens + 1 } : cur);
+        }
+      } catch (e: any) {
+        toast.error(e.message);
+        setSavingContagem(false);
+        return;
+      }
+      setSavingContagem(false);
+    }
     if (!item) { toast.error("Produto não encontrado nesta sessão"); return; }
     const contagem = item.contagens?.find((c) => c.local_id === contagemLocalId);
     if (!contagem) { toast.error("Contagem não encontrada para este local"); return; }
@@ -557,7 +650,7 @@ export default function Inventario() {
       list = sorted;
     }
     return list;
-  }, [itens, itemFilter, itemSearch, itemSort]);
+  }, [itens, itemFilter, itemSearch, itemSort, isViewer, usuario]);
 
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / ITEMS_PER_PAGE));
   const safePage = Math.min(itemPage, totalPages);
@@ -567,16 +660,28 @@ export default function Inventario() {
   useEffect(() => { setItemPage(1); }, [itemFilter, itemSearch]);
 
   // Summary stats (viewer sees only their counted items)
-  const statsBase = isViewer
-    ? itens.filter((i) => i.contagens?.some((c) => c.contado_por === usuario && c.qtd_contada !== null))
-    : itens;
-  const totalContados = statsBase.filter((i) => i.qtd_contada !== null).length;
-  const totalNaoContados = statsBase.filter((i) => i.qtd_contada === null).length;
-  const totalDivergentes = statsBase.filter((i) => i.qtd_contada !== null && i.qtd_contada !== i.qtd_sistema).length;
-  const valorDiferenca = statsBase.reduce((acc, i) => {
-    if (i.qtd_contada === null || i.custo_fiscal === null) return acc;
-    return acc + (i.qtd_contada - i.qtd_sistema) * i.custo_fiscal;
-  }, 0);
+  const { totalContados, totalNaoContados, totalDivergentes, valorDiferenca } = useMemo(() => {
+    let totalContados = 0;
+    let totalNaoContados = 0;
+    let totalDivergentes = 0;
+    let valorDiferenca = 0;
+
+    for (const item of itens) {
+      if (isViewer && !item.contagens?.some((c) => c.contado_por === usuario && c.qtd_contada !== null)) continue;
+
+      if (item.qtd_contada === null) {
+        totalNaoContados++;
+        continue;
+      }
+
+      totalContados++;
+      const diff = item.qtd_contada - item.qtd_sistema;
+      if (diff !== 0) totalDivergentes++;
+      if (item.custo_fiscal !== null) valorDiferenca += diff * item.custo_fiscal;
+    }
+
+    return { totalContados, totalNaoContados, totalDivergentes, valorDiferenca };
+  }, [itens, isViewer, usuario]);
 
   // Filtered sessions (role-based)
   const filteredSessoes = useMemo(() => {
@@ -837,8 +942,8 @@ export default function Inventario() {
                   <div className="flex flex-wrap gap-2">
                     {selectedSessao.status === "RASCUNHO" && isManager && (
                       <>
-                        <button onClick={() => changeStatus("EM_ANDAMENTO")} className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 transition-colors">
-                          <ChevronRight className="w-3 h-3" /> Iniciar Contagem
+                        <button onClick={() => changeStatus("EM_ANDAMENTO")} disabled={statusChanging !== null} className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                          {statusChanging === "EM_ANDAMENTO" ? <Loader2 className="w-3 h-3 animate-spin" /> : <ChevronRight className="w-3 h-3" />} Iniciar Contagem
                         </button>
                         <button onClick={handleDeleteSessao} className="inline-flex items-center gap-1 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 transition-colors">
                           <Trash2 className="w-3 h-3" /> Excluir
@@ -846,18 +951,18 @@ export default function Inventario() {
                       </>
                     )}
                     {selectedSessao.status === "EM_ANDAMENTO" && isManager && (
-                      <button onClick={() => changeStatus("CONCLUIDO")} className="inline-flex items-center gap-1 rounded-lg bg-yellow-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-yellow-700 transition-colors">
+                      <button onClick={() => changeStatus("CONCLUIDO")} disabled={statusChanging !== null} className="inline-flex items-center gap-1 rounded-lg bg-yellow-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-yellow-700 disabled:opacity-50 transition-colors">
                         <PackageCheck className="w-3 h-3" /> Concluir Inventário
                       </button>
                     )}
                     {selectedSessao.status === "CONCLUIDO" && isManager && (
-                      <button onClick={() => changeStatus("ENVIADO")} className="inline-flex items-center gap-1 rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-700 transition-colors">
+                      <button onClick={() => changeStatus("ENVIADO")} disabled={statusChanging !== null} className="inline-flex items-center gap-1 rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-700 disabled:opacity-50 transition-colors">
                         <Send className="w-3 h-3" /> Enviar p/ Aprovação
                       </button>
                     )}
                     {selectedSessao.status === "ENVIADO" && isAdmin && (
                       <>
-                        <button onClick={() => changeStatus("APROVADO")} className="inline-flex items-center gap-1 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 transition-colors">
+                        <button onClick={() => changeStatus("APROVADO")} disabled={statusChanging !== null} className="inline-flex items-center gap-1 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50 transition-colors">
                           <CheckCircle2 className="w-3 h-3" /> Aprovar
                         </button>
                         <button onClick={() => setShowFeedback(true)} className="inline-flex items-center gap-1 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 transition-colors">
@@ -866,7 +971,7 @@ export default function Inventario() {
                       </>
                     )}
                     {selectedSessao.status === "REJEITADO" && isManager && (
-                      <button onClick={() => changeStatus("EM_ANDAMENTO")} className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 transition-colors">
+                      <button onClick={() => changeStatus("EM_ANDAMENTO")} disabled={statusChanging !== null} className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors">
                         <RotateCcw className="w-3 h-3" /> Retomar Contagem
                       </button>
                     )}
@@ -957,7 +1062,7 @@ export default function Inventario() {
                     </div>
                     {showContagem && (
                       <div className="flex flex-col sm:flex-row gap-2 mt-3" onClick={(e) => e.stopPropagation()}>
-                        <input type="text" value={contagemCodigo} onChange={(e) => setContagemCodigo(e.target.value)}
+                        <input type="text" inputMode="numeric" pattern="[0-9]*" value={contagemCodigo} onChange={(e) => setContagemCodigo(onlyDigits(e.target.value))}
                           placeholder="Código do produto"
                           className="flex-1 min-w-0 rounded-lg border border-border bg-muted px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50" />
                         {locais.length > 1 && (
@@ -1135,6 +1240,35 @@ export default function Inventario() {
               />
             </div>
             <p className="text-[10px] text-muted-foreground text-right">{createProgress.percent}%</p>
+          </div>
+        </div>
+      )}
+
+      {/* Approval sent modal */}
+      {showApprovalSent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-xl space-y-5 mx-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-green-500/10 text-green-600">
+                <Send className="h-5 w-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-foreground">Inventário enviado para aprovação</h3>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  O responsável já pode analisar a contagem, conferir divergências e aprovar ou devolver o inventário para ajustes.
+                </p>
+              </div>
+            </div>
+            <div className="rounded-lg border border-green-500/20 bg-green-500/5 px-3 py-2 text-xs text-muted-foreground">
+              Status atual: <span className="font-semibold text-green-600">Enviado para aprovação</span>
+            </div>
+            <div className="flex justify-end">
+              <button
+                onClick={() => setShowApprovalSent(false)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90 transition-opacity">
+                <CheckCircle2 className="h-3.5 w-3.5" /> Entendi
+              </button>
+            </div>
           </div>
         </div>
       )}

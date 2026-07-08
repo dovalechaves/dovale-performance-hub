@@ -262,6 +262,18 @@ async function ensureTables() {
       detalhes    NVARCHAR(MAX) NULL,
       criado_em   DATETIME NOT NULL DEFAULT GETDATE()
     );
+
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_INVENTARIO_ITENS_SESSAO_CODIGO' AND object_id = OBJECT_ID('dbo.INVENTARIO_ITENS'))
+      CREATE INDEX IX_INVENTARIO_ITENS_SESSAO_CODIGO ON dbo.INVENTARIO_ITENS (sessao_id, pro_codigo);
+
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_INVENTARIO_CONTAGENS_ITEM' AND object_id = OBJECT_ID('dbo.INVENTARIO_CONTAGENS'))
+      CREATE INDEX IX_INVENTARIO_CONTAGENS_ITEM ON dbo.INVENTARIO_CONTAGENS (item_id);
+
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_INVENTARIO_LOCAIS_SESSAO_ORDEM' AND object_id = OBJECT_ID('dbo.INVENTARIO_LOCAIS'))
+      CREATE INDEX IX_INVENTARIO_LOCAIS_SESSAO_ORDEM ON dbo.INVENTARIO_LOCAIS (sessao_id, ordem);
+
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_INVENTARIO_LOGS_SESSAO_CRIADO' AND object_id = OBJECT_ID('dbo.INVENTARIO_LOGS'))
+      CREATE INDEX IX_INVENTARIO_LOGS_SESSAO_CRIADO ON dbo.INVENTARIO_LOGS (sessao_id, criado_em DESC);
   `);
 }
 
@@ -432,21 +444,21 @@ router.get("/sessoes/:id", async (req: Request, res: Response) => {
       .query(`SELECT * FROM dbo.INVENTARIO_SESSOES WHERE id = @id`);
     if (!sessao.recordset.length) return res.status(404).json({ error: "Sessão não encontrada" });
 
-    const locais = await pool.request()
-      .input("sid", sql.Int, sid)
-      .query(`SELECT * FROM dbo.INVENTARIO_LOCAIS WHERE sessao_id = @sid ORDER BY ordem`);
-
-    const itens = await pool.request()
-      .input("sid", sql.Int, sid)
-      .query(`SELECT * FROM dbo.INVENTARIO_ITENS WHERE sessao_id = @sid ORDER BY id`);
-
-    const contagens = await pool.request()
-      .input("sid", sql.Int, sid)
-      .query(`
-        SELECT c.* FROM dbo.INVENTARIO_CONTAGENS c
-        JOIN dbo.INVENTARIO_ITENS i ON i.id = c.item_id
-        WHERE i.sessao_id = @sid
-      `);
+    const [locais, itens, contagens] = await Promise.all([
+      pool.request()
+        .input("sid", sql.Int, sid)
+        .query(`SELECT * FROM dbo.INVENTARIO_LOCAIS WHERE sessao_id = @sid ORDER BY ordem`),
+      pool.request()
+        .input("sid", sql.Int, sid)
+        .query(`SELECT * FROM dbo.INVENTARIO_ITENS WHERE sessao_id = @sid ORDER BY id`),
+      pool.request()
+        .input("sid", sql.Int, sid)
+        .query(`
+          SELECT c.* FROM dbo.INVENTARIO_CONTAGENS c
+          JOIN dbo.INVENTARIO_ITENS i ON i.id = c.item_id
+          WHERE i.sessao_id = @sid
+        `),
+    ]);
 
     // Group contagens by item_id
     const contagensMap: Record<number, any[]> = {};
@@ -931,16 +943,18 @@ router.post("/sessoes/:id/itens", async (req: Request, res: Response) => {
       .input("sid", sql.Int, sessao.id)
       .query(`SELECT id FROM dbo.INVENTARIO_LOCAIS WHERE sessao_id = @sid ORDER BY ordem`);
 
+    const contagensCriadas: any[] = [];
     for (const loc of locais.recordset) {
-      await pool.request()
+      const contagemRes = await pool.request()
         .input("item_id", sql.Int, item.id)
         .input("local_id", sql.Int, loc.id)
-        .query(`INSERT INTO dbo.INVENTARIO_CONTAGENS (item_id, local_id) VALUES (@item_id, @local_id)`);
+        .query(`INSERT INTO dbo.INVENTARIO_CONTAGENS (item_id, local_id) OUTPUT INSERTED.* VALUES (@item_id, @local_id)`);
+      contagensCriadas.push(contagemRes.recordset[0]);
     }
 
     await refreshCounts(sessao.id);
     await addLog(sessao.id, usuario, "ITEM_ADICIONADO", `Produto ${pro_codigo}`);
-    res.status(201).json(item);
+    res.status(201).json({ ...item, qtd_contada: null, contagens: contagensCriadas });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

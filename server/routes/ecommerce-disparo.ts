@@ -38,7 +38,7 @@ function normalizarTelefone(telefone: string): string {
 }
 
 function getDestinatariosEcommerce() {
-  const numeros = (process.env.ECOMMERCE_DISPARO_NUMEROS ?? "12981898755")
+  const numeros = (process.env.ECOMMERCE_DISPARO_NUMEROS ?? "12981898755,551232121073,5512981505116")
     .split(",")
     .map((n) => normalizarTelefone(n))
     .filter(Boolean);

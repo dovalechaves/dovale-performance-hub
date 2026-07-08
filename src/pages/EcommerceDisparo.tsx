@@ -12,6 +12,7 @@ import {
   Send,
   Settings,
   ShoppingCart,
+  Sparkles,
   Sun,
   TrendingUp,
   X,
@@ -25,6 +26,7 @@ import {
   fetchEcommerceReport,
   fetchEcommerceMetas,
   fetchHistoricoEcommerce,
+  gerarAnaliseEcommerce,
   previewRelatorioEcommerce,
   salvarEcommerceMetas,
   type EcommerceReport,
@@ -66,12 +68,15 @@ export default function EcommerceDisparo() {
   const [loading, setLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [sending, setSending] = useState(false);
+  const [gerandoAnalise, setGerandoAnalise] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [metaDiario, setMetaDiario] = useState(165000);
   const [metaMensal, setMetaMensal] = useState(3200000);
   const [metaDiarioInput, setMetaDiarioInput] = useState(165000);
   const [metaMensalInput, setMetaMensalInput] = useState(3200000);
   const [metasLoading, setMetasLoading] = useState(false);
+
+  const usuario = user?.usuario ?? "";
 
   useEffect(() => {
     if (!usuario) return;
@@ -95,8 +100,6 @@ export default function EcommerceDisparo() {
       setMetasLoading(false);
     }
   }
-
-  const usuario = user?.usuario ?? "";
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
@@ -130,14 +133,14 @@ export default function EcommerceDisparo() {
     if (!usuario) return;
     setPreviewLoading(true);
     try {
-      const data = await previewRelatorioEcommerce(usuario, periodo);
+      const data = await previewRelatorioEcommerce(usuario, periodo, periodo === "diario" ? dataSelecionada : undefined);
       setPreview(data.mensagem);
     } catch (e: unknown) {
       toast.error(errorMessage(e, "Falha ao gerar preview"));
     } finally {
       setPreviewLoading(false);
     }
-  }, [usuario, periodo]);
+  }, [usuario, periodo, dataSelecionada]);
 
   useEffect(() => { loadReport(); }, [loadReport]);
   useEffect(() => { if (tab === "historico") loadHistorico(); }, [tab, loadHistorico]);
@@ -150,20 +153,33 @@ export default function EcommerceDisparo() {
       { label: "Pedidos", value: String(report.kpis.pedidos), icon: <ShoppingCart className="w-4 h-4" />, tone: "text-emerald-400" },
       { label: "Ticket", value: formatCurrency(report.kpis.ticket_medio), icon: <BarChart3 className="w-4 h-4" />, tone: "text-violet-400" },
       { label: "ROAS", value: `${report.kpis.roas.toFixed(2)}x`, icon: <RefreshCw className="w-4 h-4" />, tone: "text-green-400" },
-      { label: "Margem", value: formatPercent(report.kpis.margem), icon: <BarChart3 className="w-4 h-4" />, tone: "text-cyan-400" },
     ];
   }, [report]);
+
+  const gerarAnalise = async () => {
+    if (!usuario) return;
+    setGerandoAnalise(true);
+    try {
+      await gerarAnaliseEcommerce(usuario, periodo, periodo === "diario" ? dataSelecionada : undefined);
+      await loadReport();
+      toast.success("Análise gerada");
+    } catch (e: unknown) {
+      toast.error(errorMessage(e, "Falha ao gerar análise"));
+    } finally {
+      setGerandoAnalise(false);
+    }
+  };
 
   const handleEnviar = async () => {
     if (!usuario) return;
     setSending(true);
     try {
-      const data = await enviarRelatorioEcommerce(usuario, periodo);
-      toast.success(`${data.enviados} envios simulados`);
+      const data = await enviarRelatorioEcommerce(usuario, periodo, periodo === "diario" ? dataSelecionada : undefined);
+      toast.success(data.falhas?.length ? `${data.enviados} envio(s), ${data.falhas.length} falha(s)` : `${data.enviados} envio(s) realizado(s)`);
       await loadHistorico();
       setTab("historico");
     } catch (e: unknown) {
-      toast.error(errorMessage(e, "Falha ao simular envio"));
+      toast.error(errorMessage(e, "Falha ao enviar relatório"));
     } finally {
       setSending(false);
     }
@@ -206,7 +222,7 @@ export default function EcommerceDisparo() {
           <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
             <p className="text-xs text-amber-400 font-medium">
-              Dados Tray e envio WhatsApp estão mockados nesta primeira versão. A estrutura já está pronta para trocar a fonte pela integração real.
+              Dados de canais dependem da base ecommerce e tráfego pago depende das APIs configuradas. O envio WhatsApp usa o Chatwoot do inventário.
             </p>
           </div>
 
@@ -261,7 +277,7 @@ export default function EcommerceDisparo() {
                 <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
               ) : report && (
                 <>
-                  <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {kpiCards.map((card) => (
                       <div key={card.label} className="rounded-xl border border-border bg-card p-4">
                         <div className={`mb-2 ${card.tone}`}>{card.icon}</div>
@@ -273,10 +289,10 @@ export default function EcommerceDisparo() {
 
                   <div className="grid grid-cols-1 lg:grid-cols-[1.5fr_1fr] gap-4">
                     <div className="rounded-xl border border-border overflow-x-auto">
-                      <table className="w-full text-xs min-w-[760px]">
+                      <table className="w-full text-xs min-w-[680px]">
                         <thead>
                           <tr className="border-b border-border bg-muted/40">
-                            {["Canal", "Faturamento", "Pedidos", "Ticket", "Margem", "Variação"].map((h) => (
+                            {["Canal", "Faturamento", "Pedidos", "Ticket", "Variação"].map((h) => (
                               <th key={h} className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">{h}</th>
                             ))}
                           </tr>
@@ -288,7 +304,6 @@ export default function EcommerceDisparo() {
                               <td className="px-4 py-3 text-foreground">{formatCurrency(canal.faturamento)}</td>
                               <td className="px-4 py-3 text-muted-foreground">{canal.pedidos}</td>
                               <td className="px-4 py-3 text-muted-foreground">{formatCurrency(canal.ticket_medio)}</td>
-                              <td className="px-4 py-3 text-muted-foreground">{formatPercent(canal.margem)}</td>
                               <td className={`px-4 py-3 font-semibold ${canal.variacao >= 0 ? "text-green-400" : "text-red-400"}`}>
                                 {canal.variacao >= 0 ? "+" : ""}{formatPercent(canal.variacao)}
                               </td>
@@ -365,23 +380,45 @@ export default function EcommerceDisparo() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    <div className="rounded-xl border border-border bg-card p-5">
-                      <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3">Pontos críticos</p>
-                      <div className="space-y-2">
-                        {report.pontos_criticos.map((item) => (
-                          <p key={item} className="text-sm text-foreground">{item}</p>
-                        ))}
+                  <div className="rounded-xl border border-border bg-card p-5">
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-violet-400" />
+                        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Análise do Bot</p>
+                        {report.analise?.gerado_em && (
+                          <span className="text-[10px] text-muted-foreground">
+                            · {formatDateTime(report.analise.gerado_em)}
+                          </span>
+                        )}
                       </div>
+                      <button
+                        onClick={gerarAnalise}
+                        disabled={gerandoAnalise}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-secondary px-3 py-1.5 text-xs text-muted-foreground hover:bg-primary/10 hover:text-foreground transition-colors disabled:opacity-40"
+                      >
+                        {gerandoAnalise ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                        Gerar agora
+                      </button>
                     </div>
-                    <div className="rounded-xl border border-border bg-card p-5">
-                      <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3">Direcionamentos</p>
-                      <div className="space-y-2">
-                        {report.direcionamentos.map((item) => (
-                          <p key={item} className="text-sm text-foreground">{item}</p>
-                        ))}
+                    {report.analise?.texto ? (
+                      <div className="space-y-1.5 text-sm leading-relaxed">
+                        {report.analise.texto.split("\n").filter((l) => l.trim()).map((linha, i) => {
+                          const t = linha.trim();
+                          return t.startsWith("-") || t.startsWith("•") ? (
+                            <p key={i} className="flex gap-2 text-foreground">
+                              <span className="text-violet-400">•</span>
+                              <span>{t.replace(/^[-•]\s*/, "")}</span>
+                            </p>
+                          ) : (
+                            <p key={i} className="text-foreground">{t}</p>
+                          );
+                        })}
                       </div>
-                    </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        Nenhuma análise gerada ainda. O bot gera automaticamente à meia-noite (mensal no dia 1), ou clique em "Gerar agora".
+                      </p>
+                    )}
                   </div>
                 </>
               )}
@@ -405,12 +442,12 @@ export default function EcommerceDisparo() {
 
               <div className="rounded-xl border border-border bg-card p-5 space-y-4 h-fit">
                 <div>
-                  <p className="text-sm font-semibold text-foreground">Envio simulado</p>
-                  <p className="text-xs text-muted-foreground mt-1">Valida o fluxo de disparo sem chamar a API real do WhatsApp.</p>
+                  <p className="text-sm font-semibold text-foreground">Envio WhatsApp</p>
+                  <p className="text-xs text-muted-foreground mt-1">Dispara o relatório pelo Chatwoot configurado.</p>
                 </div>
                 <button onClick={handleEnviar} disabled={sending} className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40">
                   {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                  Simular envio
+                  Enviar relatório
                 </button>
               </div>
             </div>

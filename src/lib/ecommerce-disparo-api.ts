@@ -9,7 +9,6 @@ export interface CanalResumo {
   pedidos: number;
   ticket_medio: number;
   conversao: number;
-  margem: number;
   variacao: number;
 }
 
@@ -42,7 +41,6 @@ export interface EcommerceReport {
     ticket_medio: number;
     conversao: number;
     roas: number;
-    margem: number;
     investimento: number;
     receita_paga: number;
     meta: number;
@@ -56,8 +54,14 @@ export interface EcommerceReport {
   };
   canais: CanalResumo[];
   trafego_pago: TrafegoPagoItem[];
-  pontos_criticos: string[];
-  direcionamentos: string[];
+  analise: AnaliseBot | null;
+}
+
+export interface AnaliseBot {
+  texto: string;
+  gerado_em?: string;
+  data_referencia?: string;
+  modelo?: string;
 }
 
 export interface HistoricoEnvio {
@@ -96,13 +100,24 @@ export async function fetchHistoricoEcommerce(usuario: string): Promise<{ total:
 export async function previewRelatorioEcommerce(
   usuario: string,
   periodo: PeriodoRelatorio,
+  data?: string,
 ): Promise<{ periodo: PeriodoRelatorio; mensagem: string; modo_simulacao: boolean }> {
   const res = await fetch(`${BASE}/preview`, {
     method: "POST",
     headers: headers(usuario),
-    body: JSON.stringify({ periodo }),
+    body: JSON.stringify({ periodo, data }),
   });
   return handleResponse<{ periodo: PeriodoRelatorio; mensagem: string; modo_simulacao: boolean }>(res);
+}
+
+export async function gerarAnaliseEcommerce(usuario: string, periodo: PeriodoRelatorio, data?: string): Promise<AnaliseBot> {
+  const params = new URLSearchParams({ periodo });
+  if (data) params.set("data", data);
+  const res = await fetch(`${BASE}/analise/gerar?${params}`, {
+    method: "POST",
+    headers: headers(usuario),
+  });
+  return handleResponse<AnaliseBot>(res);
 }
 
 export interface EcommerceMetas {
@@ -127,11 +142,12 @@ export async function salvarEcommerceMetas(usuario: string, metas: EcommerceMeta
 export async function enviarRelatorioEcommerce(
   usuario: string,
   periodo: PeriodoRelatorio,
-): Promise<{ ok: boolean; periodo: PeriodoRelatorio; modo_simulacao: boolean; enviados: number; mensagem: string }> {
+  data?: string,
+): Promise<{ ok: boolean; periodo: PeriodoRelatorio; modo_simulacao: boolean; enviados: number; falhas?: string[]; mensagem: string }> {
   const res = await fetch(`${BASE}/enviar`, {
     method: "POST",
     headers: headers(usuario),
-    body: JSON.stringify({ periodo }),
+    body: JSON.stringify({ periodo, data }),
   });
-  return handleResponse<{ ok: boolean; periodo: PeriodoRelatorio; modo_simulacao: boolean; enviados: number; mensagem: string }>(res);
+  return handleResponse<{ ok: boolean; periodo: PeriodoRelatorio; modo_simulacao: boolean; enviados: number; falhas?: string[]; mensagem: string }>(res);
 }

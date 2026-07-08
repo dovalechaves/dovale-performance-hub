@@ -6,11 +6,6 @@ import { getCanaisDiario, getCanaisMensal, getCanaisRaw, CanalResumo } from "../
 
 const router = Router();
 
-const ALLOWED_USERS = (process.env.ECOMMERCE_DISPARO_ALLOWED_USERS ?? "henrique.berbert,andreza")
-  .split(",")
-  .map((u) => u.trim().toLowerCase())
-  .filter(Boolean);
-
 type Periodo = "diario" | "mensal";
 
 const CW_TI_BASE = process.env.CW_TI_BASE || "https://chatwoot.dovale.online";
@@ -122,12 +117,6 @@ async function enviarWhatsApp(telefone: string, nome: string, mensagem: string) 
   return { contatoId, conversaId, mensagemId };
 }
 
-function usuarioAutorizado(usuario: string): boolean {
-  const normalized = usuario.trim().toLowerCase();
-  if (!normalized) return false;
-  return ALLOWED_USERS.some((allowed) => normalized === allowed || normalized.includes(allowed));
-}
-
 async function isHubAdmin(usuario: string): Promise<boolean> {
   try {
     const pool = await getPool();
@@ -140,11 +129,32 @@ async function isHubAdmin(usuario: string): Promise<boolean> {
   }
 }
 
+async function canAccessEcommerceDisparo(usuario: string): Promise<boolean> {
+  try {
+    const pool = await getPool();
+    const result = await pool.request()
+      .input("usuario", usuario.toLowerCase())
+      .query(`
+        SELECT TOP 1 ua.ativo
+        FROM dbo.USUARIOS_APPS ua
+        INNER JOIN dbo.USUARIOS_LOJAS ul ON LOWER(ul.usuario) = LOWER(ua.usuario)
+        WHERE LOWER(ua.usuario) = @usuario
+          AND ua.app_key = 'ecommercedisparo'
+          AND ua.ativo = 1
+          AND ul.ativo = 1
+      `);
+    return Boolean(result.recordset[0]);
+  } catch {
+    return false;
+  }
+}
+
 async function requireAccess(req: Request, res: Response, next: NextFunction) {
   const usuario = String(req.headers["x-dovale-usuario"] ?? req.query.usuario ?? "").trim();
-  if (usuarioAutorizado(usuario)) return next();
+  if (!usuario) return res.status(401).json({ erro: "Usuario nao informado." });
   if (await isHubAdmin(usuario)) return next();
-  return res.status(403).json({ erro: "Acesso permitido apenas para Henrique e Andreza." });
+  if (await canAccessEcommerceDisparo(usuario)) return next();
+  return res.status(403).json({ erro: "Sem permissao para acessar Relatorios Ecommerce." });
 }
 
 function formatCurrency(value: number): string {

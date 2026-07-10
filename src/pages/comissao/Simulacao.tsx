@@ -343,18 +343,23 @@ export default function ComissaoSimulacao() {
   useEffect(() => {
     if (!usuario || usuario === 'loading') return;
     if (usuario.cargo === 'VENDEDOR') {
-      api('/filtros', { cache: 'no-store' })
-        .then((r) => r.json())
-        .then((f) => {
-          const lista = f.vendedores || (usuario.nome_vendedor ? [usuario.nome_vendedor] : []);
-          const nome = lista[0] || usuario.nome_vendedor || '';
-          setVendedor(nome);
-          setFerrVendedor(nome);
-          setDistVendedor(nome);
-          setVendedores(lista);
-          setFerrVendedores(lista);
-          setDistVendedores(lista);
-        });
+      // Cada vendedor pertence a um único setor — descobrimos qual consultando
+      // os três filtros por setor e vendo em qual deles o nome aparece.
+      Promise.all([
+        api('/filtros?setor=TELEVENDAS,TELEVENDAS MG', { cache: 'no-store' }).then((r) => r.json()),
+        api('/filtros?setor=FERRAGENS', { cache: 'no-store' }).then((r) => r.json()),
+        api('/filtros?setor=DISTRIBUIDORES', { cache: 'no-store' }).then((r) => r.json()),
+      ]).then(([tv, fe, di]) => {
+        const tvLista: string[] = tv.vendedores || [];
+        const feLista: string[] = fe.vendedores || [];
+        const diLista: string[] = di.vendedores || [];
+        setVendedores(tvLista);
+        setFerrVendedores(feLista);
+        setDistVendedores(diLista);
+        setVendedor(tvLista[0] || '');
+        setFerrVendedor(feLista[0] || '');
+        setDistVendedor(diLista[0] || '');
+      });
     } else {
       api('/filtros', { cache: 'no-store' })
         .then((r) => r.json())
@@ -374,10 +379,19 @@ export default function ComissaoSimulacao() {
   const isVendedor = usuario && usuario !== 'loading' && usuario.cargo === 'VENDEDOR';
   const isAdm = usuario && usuario !== 'loading' && usuario.cargo === 'ADM';
   const abasPermitidas = useMemo(() => ([
-    { key: 'televendas', label: 'Televendas / Televendas MG', allowed: isVendedor || isLoadingUser || isAdm || setoresUsuario.some((s) => s === 'TELEVENDAS' || s === 'TELEVENDAS MG') },
-    { key: 'ferragens', label: 'Ferragens', allowed: isVendedor || isLoadingUser || isAdm || setoresUsuario.includes('FERRAGENS') },
-    { key: 'distribuidores', label: 'Distribuidores', allowed: isVendedor || isLoadingUser || isAdm || setoresUsuario.includes('DISTRIBUIDORES') },
-  ] as const).filter((tab) => tab.allowed), [isAdm, isLoadingUser, isVendedor, setoresUsuario]);
+    {
+      key: 'televendas', label: 'Televendas / Televendas MG',
+      allowed: isLoadingUser || isAdm || setoresUsuario.some((s) => s === 'TELEVENDAS' || s === 'TELEVENDAS MG') || (isVendedor && vendedores.length > 0),
+    },
+    {
+      key: 'ferragens', label: 'Ferragens',
+      allowed: isLoadingUser || isAdm || setoresUsuario.includes('FERRAGENS') || (isVendedor && ferrVendedores.length > 0),
+    },
+    {
+      key: 'distribuidores', label: 'Distribuidores',
+      allowed: isLoadingUser || isAdm || setoresUsuario.includes('DISTRIBUIDORES') || (isVendedor && distVendedores.length > 0),
+    },
+  ] as const).filter((tab) => tab.allowed), [isAdm, isLoadingUser, isVendedor, setoresUsuario, vendedores, ferrVendedores, distVendedores]);
 
   useEffect(() => {
     if (abasPermitidas.length && !abasPermitidas.some((tab) => tab.key === modoSetor)) {

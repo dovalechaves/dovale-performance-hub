@@ -4,7 +4,7 @@ import sql from "mssql";
 import { getPool } from "../db/sqlserver";
 import { getComissaoUsuario, podeVerTudo, isADM, type ComissaoUsuario } from "../services/comissao/permissions";
 import { SETORES_ATIVOS, addSetoresGlobais } from "../services/comissao/setores";
-import { ensureVendedorAtivoTable } from "../services/comissao/vendedorAtivoTable";
+import { ensureVendedorAtivoTable, getVendedoresInativos } from "../services/comissao/vendedorAtivoTable";
 import {
   calcularComissaoTelevendas, isTelevendas,
   type MetaConfig, type BonusConfig,
@@ -276,7 +276,7 @@ function fbVendas(emp: string) {
     left join produtos_nivel2 pn on pn.codigo = p.pro_nivel2
     left join produtos_nivel1 g on g.codigo = p.pro_nivel1
     left join produtos_nivel3 pg on pg.codigo = p.pro_nivel3
-    where ped.pdv_data > DATEADD(MONTH, -4, current_date)
+    where ped.pdv_data > DATEADD(MONTH, -8, current_date)
     and ped.pdv_psi_codigo not in ('CC')
     and ped.pdv_tve_codigo not in ('6','7','26', '34')
     and c.cli_codigo not in ('44274','98030','49268')
@@ -302,7 +302,7 @@ const FB_VENDAS_LOCKEY = `
   left join produtos_nivel2 pn on pn.codigo = p.pro_nivel2
   left join produtos_nivel1 g on g.codigo = p.pro_nivel1
   left join produtos_nivel3 pg on pg.codigo = p.pro_nivel3
-  where ped.pdv_data > DATEADD(MONTH, -4, current_date)
+  where ped.pdv_data > DATEADD(MONTH, -8, current_date)
   and ped.pdv_psi_codigo not in ('CC')
   and ped.pdv_tve_codigo not in ('6','7','26', '34')
   and c.cli_codigo not in ('44274','98030','49268')
@@ -410,16 +410,24 @@ router.get("/dashboard", async (req: any, res: any) => {
     const vendasAno = filtrarVendas(todasVendas, fBase);
     const vendasPeriodo = filtrarVendas(todasVendas, fPeriodo);
 
+    // Vendedores inativos não aparecem em nenhuma estatística por vendedor
+    let inativosSet = new Set<string>();
+    try {
+      inativosSet = await getVendedoresInativos();
+    } catch { /* se falhar, não filtra inativos */ }
+    const vendasAnoAtivos = vendasAno.filter(v => !v.USU_NOME || !inativosSet.has(v.USU_NOME));
+    const vendasPeriodoAtivos = vendasPeriodo.filter(v => !v.USU_NOME || !inativosSet.has(v.USU_NOME));
+
     // ── Total Ano ──────────────────────────────────────────────────────────
     const total_vendas = somarVendas(vendasAno);
-    const total_vendedores = new Set(vendasAno.filter(v => v.SUM > 0 && v.USU_NOME).map(v => v.USU_NOME)).size;
+    const total_vendedores = new Set(vendasAnoAtivos.filter(v => v.SUM > 0 && v.USU_NOME).map(v => v.USU_NOME)).size;
     const total_setores = new Set(vendasAno.filter(v => v.RVS_NOME).map(v => v.RVS_NOME)).size;
 
     // ── Total Mês / Período ────────────────────────────────────────────────
     const total_vendas_mes = somarVendas(vendasPeriodo);
 
     // ── Top 10 vendedores (período) ────────────────────────────────────────
-    const byVend = groupBy(vendasPeriodo.filter(v => v.USU_NOME), v => `${v.USU_NOME}||${v.RVS_NOME}||${v.EMP}`);
+    const byVend = groupBy(vendasPeriodoAtivos.filter(v => v.USU_NOME), v => `${v.USU_NOME}||${v.RVS_NOME}||${v.EMP}`);
     const top_vendedores = [...byVend.entries()]
       .map(([k, rows]) => {
         const [vendedor, setor, empresa] = k.split('||');
@@ -487,7 +495,7 @@ router.get("/dashboard", async (req: any, res: any) => {
         // PA = vendas televendas no período
         const vendasTv = filtrarVendas(todasVendas, { ...fPeriodo, setores: televendasSetores });
         const paMap: Record<string, number> = {};
-        vendasTv.filter(v => v.USU_NOME).forEach(v => {
+        vendasTv.filter(v => v.USU_NOME && !inativosSet.has(v.USU_NOME)).forEach(v => {
           paMap[v.USU_NOME!] = (paMap[v.USU_NOME!] ?? 0) + v.SUM;
         });
 
@@ -598,7 +606,17 @@ router.get("/filtros", async (req: any, res: any) => {
     const todasVendas = await getVendas(ano);
 
     if (usuario.cargo === 'VENDEDOR') {
-      const nomes = [...new Set(todasVendas.map((v) => v.USU_NOME).filter(Boolean))].sort();
+      const setorFiltroVend = req.query.setor;
+      const setoresFiltroVend = setorFiltroVend
+        ? String(setorFiltroVend).split(',').map((s: string) => s.trim()).filter(Boolean)
+        : [];
+      const vendasVend = filtrarVendas(todasVendas, {
+        inicio: `${ano}-01-01`,
+        fim: `${ano}-12-31`,
+        userSetores: [],
+        setores: setoresFiltroVend,
+      });
+      const nomes = [...new Set(vendasVend.map((v) => v.USU_NOME).filter(Boolean))].sort();
       return res.json({
         vendedores: filtrarVendedoresPorConfig(nomes, usuario.nome_vendedor),
         setores: [],
@@ -620,12 +638,7 @@ router.get("/filtros", async (req: any, res: any) => {
     // Vendedores inativos (ainda vem do SQL Server)
     let inativosSet = new Set<string>();
     try {
-      await ensureVendedorAtivoTable();
-      const pool = await getPool();
-      const r = await pool.request().query(
-        `SELECT nome_vendedor FROM [TI-PAINELCOMISSAO_VENDEDOR_ATIVO] WHERE ativo = 0`
-      );
-      inativosSet = new Set(r.recordset.map((row: { nome_vendedor: string }) => row.nome_vendedor));
+      inativosSet = await getVendedoresInativos();
     } catch { /* se falhar, não filtra inativos */ }
 
     const vendedores = [...new Set(
@@ -683,13 +696,18 @@ router.get("/vendedores", async (req: any, res: any) => {
       getRecebimentos(ano),
     ]);
 
+    let inativosSet = new Set<string>();
+    try {
+      inativosSet = await getVendedoresInativos();
+    } catch { /* se falhar, não filtra inativos */ }
+
     const vendas = filtrarVendas(todasVendas, {
       inicio: dataInicio,
       fim: dataFim,
       userSetores,
       setores: setor ? [setor] : [],
       empresa: empresa ?? undefined,
-    }).filter(v => v.USU_NOME !== null);
+    }).filter(v => v.USU_NOME !== null && !inativosSet.has(v.USU_NOME));
 
     const recMap: Record<string, number> = {};
     filtrarReceb(todosReceb, { inicio: dataInicio, fim: dataFim }).forEach(r => {
@@ -744,6 +762,13 @@ router.get("/vendedor/:nome", async (req: any, res: any) => {
   if (usuario.cargo === 'VENDEDOR' && !vendedorCasaComConfig(vendedor, usuario.nome_vendedor)) {
     return res.status(403).json({ error: 'Sem permissão' });
   }
+
+  try {
+    const inativosSet = await getVendedoresInativos();
+    if (inativosSet.has(vendedor)) {
+      return res.status(404).json({ error: 'Vendedor inativo' });
+    }
+  } catch { /* se falhar, não bloqueia por inativo */ }
 
   const ano = parseInt(req.query.ano || new Date().getFullYear().toString());
   const mes = req.query.mes;
@@ -1041,6 +1066,84 @@ router.get("/vendedor/:nome", async (req: any, res: any) => {
     });
   } catch (error) {
     console.error('Erro ao buscar vendedor:', error);
+    return res.status(500).json({ error: 'Erro ao buscar dados' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GET /vendedor/:nome/evolucao — últimos 6 meses (total vendas + PA)
+// ═══════════════════════════════════════════════════════════════════════════
+router.get("/vendedor/:nome/evolucao", async (req: any, res: any) => {
+  const actor = getActor(req);
+  if (!actor) return res.status(401).json({ error: "Não autenticado" });
+  const usuario = await getComissaoUsuario(actor);
+  if (!usuario) return res.status(403).json({ error: "Sem permissão" });
+
+  const vendedor = decodeURIComponent(req.params.nome).trim();
+
+  if (usuario.cargo === 'VENDEDOR' && !vendedorCasaComConfig(vendedor, usuario.nome_vendedor)) {
+    return res.status(403).json({ error: 'Sem permissão' });
+  }
+
+  try {
+    const inativosSet = await getVendedoresInativos();
+    if (inativosSet.has(vendedor)) {
+      return res.status(404).json({ error: 'Vendedor inativo' });
+    }
+  } catch { /* se falhar, não bloqueia por inativo */ }
+
+  const hoje = new Date();
+  const anoRef = parseInt(req.query.ano) || hoje.getFullYear();
+  const mesRef = parseInt(req.query.mes) || hoje.getMonth() + 1;
+
+  // Últimos 6 meses terminando em anoRef/mesRef (cruza virada de ano se necessário)
+  const meses: { ano: number; mes: number }[] = [];
+  let a = anoRef, m = mesRef;
+  for (let i = 0; i < 6; i++) {
+    meses.unshift({ ano: a, mes: m });
+    m -= 1;
+    if (m === 0) { m = 12; a -= 1; }
+  }
+
+  try {
+    const anosNecessarios = [...new Set(meses.map((x) => x.ano))];
+    const vendasPorAno = await Promise.all(anosNecessarios.map((ano) => getVendas(ano)));
+    const todasVendas = vendasPorAno.flat();
+
+    const userSetores = usuario.cargo === "GESTOR" ? usuario.setores : [];
+    const primeiroMes = meses[0];
+    const ultimoMes = meses[meses.length - 1];
+    const inicio = `${primeiroMes.ano}-${String(primeiroMes.mes).padStart(2, '0')}-01`;
+    const fim = new Date(ultimoMes.ano, ultimoMes.mes, 0).toISOString().split('T')[0];
+
+    const vendasVendedor = filtrarVendas(todasVendas, { inicio, fim, userSetores, setores: [], vendedor });
+
+    if (usuario.cargo === "GESTOR" && vendasVendedor.length === 0) {
+      return res.status(403).json({ error: "Sem permissão" });
+    }
+
+    const setorDoVendedor = vendasVendedor[0]?.RVS_NOME ?? '';
+    if (!podeVerTudo(usuario.cargo) && usuario.cargo !== 'VENDEDOR' && setorDoVendedor && !usuario.setores.includes(setorDoVendedor)) {
+      return res.status(403).json({ error: 'Sem permissão' });
+    }
+
+    const mapa = new Map<string, { total_vendas: number; valor_pa: number }>();
+    meses.forEach(({ ano, mes }) => mapa.set(`${ano}-${mes}`, { total_vendas: 0, valor_pa: 0 }));
+
+    vendasVendedor.forEach((v) => {
+      const key = `${v.PDV_DATA.getFullYear()}-${v.PDV_DATA.getMonth() + 1}`;
+      const entry = mapa.get(key);
+      if (!entry) return;
+      entry.total_vendas += v.SUM;
+      const isPA = v.SUBGRUPO === 'CHAVE' || ['PRODUÇÃO', 'DOVALE'].includes(v.GRUPO ?? '');
+      if (isPA) entry.valor_pa += v.SUM;
+    });
+
+    const evolucao = meses.map(({ ano, mes }) => ({ ano, mes, ...mapa.get(`${ano}-${mes}`)! }));
+
+    return res.json({ evolucao, is_televendas: isTelevendas(setorDoVendedor) });
+  } catch (error) {
+    console.error('Erro ao buscar evolução do vendedor:', error);
     return res.status(500).json({ error: 'Erro ao buscar dados' });
   }
 });

@@ -388,6 +388,7 @@ export default function ComissaoVendedor() {
           <KPICard
             title={isTelevendas ? 'Total PA' : 'Total Vendido'}
             value={loading ? '...' : formatBRL(isTelevendas ? (data?.valor_pa ?? 0) : totalVendas)}
+            extra={isTelevendas && !loading ? `Geral: ${formatBRL(totalVendas)}` : undefined}
             subtitle={mes ? MESES[mes - 1] : `Ano ${ano}`}
             icon={<DollarSign size={18} />}
             accent
@@ -444,12 +445,14 @@ export default function ComissaoVendedor() {
 
             {/* PA Breakdown */}
             <div className="rounded-xl p-5 shadow-sm" style={{ background: '#ffffff', border: '1px solid #e2e8f0' }}>
-              <h2 className="text-sm font-bold mb-4" style={{ color: '#00205C' }}>Vendas PA — {MESES[mesSel - 1]}</h2>
+              <h2 className="text-sm font-bold mb-4" style={{ color: '#00205C' }}>Vendas — {MESES[mesSel - 1]}</h2>
               <div className="space-y-3">
                 {[
                   { label: 'Chave', valor: data?.valor_chave ?? 0, color: '#1e40af', bg: '#eff6ff' },
                   { label: 'Ferragens PA', valor: data?.valor_ferragens_pa ?? 0, color: '#065f46', bg: '#f0fdf4' },
+                  { label: 'Mercadorias', valor: data?.valor_mercadoria ?? 0, color: '#92400e', bg: '#fff7ed' },
                   { label: 'Total PA', valor: ctv.valor_pa, color: '#00205C', bg: '#f8fafc', bold: true },
+                  { label: 'Valor Geral', valor: totalVendas, color: '#00205C', bg: '#f8fafc', bold: true },
                   { label: 'Recebimentos', valor: ctv.total_recebido, color: '#92400e', bg: '#fffbeb' },
                 ].map((row, i) => (
                   <div key={i} className="flex justify-between items-center py-1.5 px-3 rounded-lg text-sm"

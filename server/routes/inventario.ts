@@ -7,7 +7,7 @@ import * as XLSX from "xlsx";
 import os from "os";
 import path from "path";
 import fs from "fs";
-// ── Chatwoot TI (inventário) ──
+
 const CW_TI_BASE = "http://192.168.10.181:3000";
 const CW_TI_TOKEN = "o4Y7pWQePkSsSw5uKczFRqZ9";
 const CW_TI_INBOX = 5;
@@ -87,8 +87,6 @@ const router = Router();
 
 let io: SocketServer | null = null;
 export function setInventarioIO(socketIO: SocketServer) { io = socketIO; }
-
-// ── Firebird config for inventory product lookup ────────────────────────────
 
 const fbConfig: Firebird.Options = {
   host: process.env.DB_FIREBIRD_INV_HOST || "localhost",
@@ -751,9 +749,7 @@ router.patch("/sessoes/:id/status", async (req: Request, res: Response) => {
           return priId;
         }
 
-        // Create inventory for COUNTED items
         const priContados = await criarInventarioFb(`${baseNome} - CONTADOS`, itensContados);
-        // Create inventory for UNCOUNTED items
         const priNaoContados = await criarInventarioFb(`${baseNome} - NAO CONTADOS`, itensNaoContados);
 
         await addLog(
@@ -799,9 +795,6 @@ router.delete("/sessoes/:id", async (req: Request, res: Response) => {
   }
 });
 
-// ── Locations ────────────────────────────────────────────────────────────────
-
-// Add new location to existing session
 router.post("/sessoes/:id/locais", async (req: Request, res: Response) => {
   try {
     await init();
@@ -827,7 +820,6 @@ router.post("/sessoes/:id/locais", async (req: Request, res: Response) => {
       .query(`SELECT ISNULL(MAX(ordem), 0) AS mx FROM dbo.INVENTARIO_LOCAIS WHERE sessao_id = @sid`);
     const nextOrdem = maxOrdem.recordset[0].mx + 1;
 
-    // Insert local
     const localRes = await pool.request()
       .input("sessao_id", sql.Int, sid)
       .input("ordem", sql.Int, nextOrdem)
@@ -835,7 +827,6 @@ router.post("/sessoes/:id/locais", async (req: Request, res: Response) => {
       .query(`INSERT INTO dbo.INVENTARIO_LOCAIS (sessao_id, ordem, nome) OUTPUT INSERTED.* VALUES (@sessao_id, @ordem, @nome)`);
     const newLocal = localRes.recordset[0];
 
-    // Update num_locais
     await pool.request()
       .input("id", sql.Int, sid)
       .input("n", sql.Int, nextOrdem)

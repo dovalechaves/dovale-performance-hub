@@ -16,6 +16,8 @@ import AiAssistant from "./pages/AiAssistant.tsx";
 import MultiPreco from "./pages/MultiPreco.tsx";
 import Inventario from "./pages/Inventario.tsx";
 import Onboarding from "./pages/Onboarding.tsx";
+import PrimeiraMovimentacao from "./pages/PrimeiraMovimentacao.tsx";
+import InventarioFullApi from "./pages/InventarioFullApi.tsx";
 
 const queryClient = new QueryClient();
 
@@ -90,6 +92,22 @@ function OnboardingRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function PrimeiraMovRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.canAccessHub) return <Navigate to="/login" replace />;
+  if (!user.apps.primeiramov.canAccess) return <Navigate to="/hub" replace />;
+  return <>{children}</>;
+}
+
+function InventarioFullRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.canAccessHub) return <Navigate to="/login" replace />;
+  if (!user.apps.invfull?.canAccess) return <Navigate to="/hub" replace />;
+  return <>{children}</>;
+}
+
 function AdminManagerRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
@@ -119,6 +137,8 @@ const App = () => (
             <Route path="/multi-preco" element={<MultiPrecoRoute><MultiPreco /></MultiPrecoRoute>} />
             <Route path="/inventario" element={<InventarioRoute><Inventario /></InventarioRoute>} />
             <Route path="/onboarding" element={<OnboardingRoute><Onboarding /></OnboardingRoute>} />
+            <Route path="/primeira-movimentacao" element={<PrimeiraMovRoute><PrimeiraMovimentacao /></PrimeiraMovRoute>} />
+            <Route path="/inventario-full-api" element={<InventarioFullRoute><InventarioFullApi /></InventarioFullRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

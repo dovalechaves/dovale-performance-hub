@@ -51,6 +51,16 @@ interface AuthUser {
       role: Role;
       loja: string | null;
     };
+    primeiramov: {
+      canAccess: boolean;
+      role: Role;
+      loja: string | null;
+    };
+    invfull: {
+      canAccess: boolean;
+      role: Role;
+      loja: string | null;
+    };
   };
 }
 
@@ -73,6 +83,7 @@ interface AuthContextValue {
       assistente?: { role?: string; loja?: string | null; can_access?: boolean };
       multipreco?: { role?: string; loja?: string | null; can_access?: boolean };
       inventario?: { role?: string; loja?: string | null; can_access?: boolean };
+      primeiramov?: { role?: string; loja?: string | null; can_access?: boolean };
     }
   ) => void;
   logout: () => void;
@@ -97,6 +108,8 @@ function buildUser(
     multipreco?: { role?: string; loja?: string | null; can_access?: boolean };
     inventario?: { role?: string; loja?: string | null; can_access?: boolean };
     onboarding?: { role?: string; loja?: string | null; can_access?: boolean };
+    primeiramov?: { role?: string; loja?: string | null; can_access?: boolean };
+    invfull?: { role?: string; loja?: string | null; can_access?: boolean };
   }
 ): AuthUser {
   const dashboardRole = resolveRole(usuario, apiApps?.dashboard?.role ?? apiRole);
@@ -118,6 +131,10 @@ function buildUser(
   const inventarioAccess = apiApps?.inventario?.can_access ?? false;
   const onboardingRole = resolveRole(usuario, apiApps?.onboarding?.role ?? apiRole);
   const onboardingAccess = apiApps?.onboarding?.can_access ?? false;
+  const primeiramovRole = resolveRole(usuario, apiApps?.primeiramov?.role ?? apiRole);
+  const primeiramovAccess = apiApps?.primeiramov?.can_access ?? false;
+  const invfullRole = resolveRole(usuario, apiApps?.invfull?.role ?? apiRole);
+  const invfullAccess = apiApps?.invfull?.can_access ?? false;
 
   return {
     usuario,
@@ -169,6 +186,16 @@ function buildUser(
         role: onboardingRole,
         loja: null,
       },
+      primeiramov: {
+        canAccess: primeiramovAccess,
+        role: primeiramovRole,
+        loja: null,
+      },
+      invfull: {
+        canAccess: invfullAccess,
+        role: invfullRole,
+        loja: null,
+      },
     },
   };
 }
@@ -197,6 +224,10 @@ function loadFromStorage(): AuthUser | null {
     const inventarioAccess = (parsed.apps as any)?.inventario?.canAccess ?? false;
     const onboardingRole = (parsed.apps as any)?.onboarding?.role ?? parsed.role;
     const onboardingAccess = (parsed.apps as any)?.onboarding?.canAccess ?? false;
+    const primeiramovRole = (parsed.apps as any)?.primeiramov?.role ?? parsed.role;
+    const primeiramovAccess = (parsed.apps as any)?.primeiramov?.canAccess ?? false;
+    const invfullRole = (parsed.apps as any)?.invfull?.role ?? parsed.role;
+    const invfullAccess = (parsed.apps as any)?.invfull?.canAccess ?? false;
 
     return {
       usuario: parsed.usuario,
@@ -246,6 +277,16 @@ function loadFromStorage(): AuthUser | null {
         onboarding: {
           canAccess: onboardingAccess,
           role: onboardingRole,
+          loja: null,
+        },
+        primeiramov: {
+          canAccess: primeiramovAccess,
+          role: primeiramovRole,
+          loja: null,
+        },
+        invfull: {
+          canAccess: invfullAccess,
+          role: invfullRole,
           loja: null,
         },
       },
@@ -300,6 +341,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       assistente?: { role?: string; loja?: string | null; can_access?: boolean };
       multipreco?: { role?: string; loja?: string | null; can_access?: boolean };
       inventario?: { role?: string; loja?: string | null; can_access?: boolean };
+      primeiramov?: { role?: string; loja?: string | null; can_access?: boolean };
     }
   ) => {
     const authUser = buildUser(usuario, displayName, token, apiRole, loja, canAccessDashboard, canAccessHub, apps);

@@ -13,9 +13,12 @@ import disparoRouter, { setSocketIO } from "./routes/disparo";
 import aiAssistantRouter from "./routes/ai-assistant";
 import multiPrecoRouter from "./routes/multi-preco";
 import inventarioRouter, { setInventarioIO } from "./routes/inventario";
+import inventarioFullRouter, { setInventarioFullIO } from "./routes/inventario-full-api";
 import onboardingRouter from "./routes/onboarding";
+import productFirstMovementRouter from "./routes/product-first-movement";
 import { startSyncJob } from "./jobs/syncJob";
 import { startStockSnapshotJob, runStockSnapshotManual, getStockSnapshotStatus } from "./jobs/stockSnapshotJob";
+import { startProductFirstMovementJob } from "./jobs/productFirstMovementJob";
 import { setupSwagger } from "./swagger";
 
 const app = express();
@@ -34,7 +37,9 @@ app.use("/api/disparo",         disparoRouter);
 app.use("/api/ai-assistant",    aiAssistantRouter);
 app.use("/api/multi-preco",     multiPrecoRouter);
 app.use("/api/inventario",      inventarioRouter);
+app.use("/api/inventario-full-api", inventarioFullRouter);
 app.use("/api/onboarding",      onboardingRouter);
+app.use("/api/product-first-movement", productFirstMovementRouter);
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
@@ -86,6 +91,7 @@ const httpServer = createServer(app);
 const io = new SocketServer(httpServer, { cors: { origin: "*" } });
 setSocketIO(io);
 setInventarioIO(io);
+setInventarioFullIO(io);
 
 io.on("connection", (socket) => {
   console.log(`[socket.io] cliente conectado: ${socket.id}`);
@@ -95,4 +101,5 @@ io.on("connection", (socket) => {
 httpServer.listen(PORT, "0.0.0.0", () => {
   console.log(`[server] rodando em http://0.0.0.0:${PORT}`);
   startStockSnapshotJob().catch((err) => console.error("[stock-snapshot] Erro ao iniciar:", err));
+  startProductFirstMovementJob().catch((err) => console.error("[product-first-movement] Erro ao iniciar:", err));
 });

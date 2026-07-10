@@ -4,7 +4,7 @@ import { getPool } from "../db/sqlserver";
 
 const router = Router();
 const VALID_ROLES = ["admin", "manager", "viewer"] as const;
-const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento", "assistente", "multipreco", "inventario", "onboarding"] as const;
+const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento", "assistente", "multipreco", "inventario", "onboarding", "primeiramov", "invfull"] as const;
 
 type Role = typeof VALID_ROLES[number];
 type AppKey = typeof MANAGED_APPS[number];
@@ -128,6 +128,18 @@ function buildDefaultApps(usuario: string, localRole: unknown, localLoja: unknow
       loja: null,
       can_access: false,
     },
+    primeiramov: {
+      app_key: "primeiramov" as AppKey,
+      role: baseRole,
+      loja: null,
+      can_access: false,
+    },
+    invfull: {
+      app_key: "invfull" as AppKey,
+      role: baseRole,
+      loja: null,
+      can_access: false,
+    },
   };
 }
 
@@ -148,6 +160,8 @@ function mergeApps(
     multipreco: { ...defaults.multipreco },
     inventario: { ...defaults.inventario },
     onboarding: { ...defaults.onboarding },
+    primeiramov: { ...defaults.primeiramov },
+    invfull: { ...defaults.invfull },
   };
 
   for (const row of appRows) {
@@ -193,6 +207,8 @@ function normalizeAppsPayload(
     multipreco: { ...defaults.multipreco },
     inventario: { ...defaults.inventario },
     onboarding: { ...defaults.onboarding },
+    primeiramov: { ...defaults.primeiramov },
+    invfull: { ...defaults.invfull },
   };
 
   if (payload && typeof payload === "object") {
@@ -404,7 +420,7 @@ router.get("/users", async (req, res) => {
       pool.request().query(`
         SELECT usuario, app_key, role, loja, ativo, usu_codigo_sistema
         FROM dbo.USUARIOS_APPS
-        WHERE app_key IN ('dashboard', 'calculadora', 'disparo', 'fechamento', 'assistente', 'multipreco', 'inventario', 'onboarding')
+        WHERE app_key IN ('dashboard', 'calculadora', 'disparo', 'fechamento', 'assistente', 'multipreco', 'inventario', 'onboarding', 'primeiramov')
       `),
     ]);
 

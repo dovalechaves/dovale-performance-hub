@@ -135,6 +135,47 @@ function estimateMagaluShipping(weightGrams: number, tierDiscount: number): numb
   return row.base * (1 - tierDiscount);
 }
 
+// ── TikTok Shop — frete por destino (origem São Paulo/Rio de Janeiro) ─────────
+// Valores máximos de cada faixa da tabela oficial do Seller Center (conservador).
+// As colunas seguem a ordem de TIKTOK_DEST_ORDER.
+type TiktokDest =
+  | "sp_central" | "sp_remote" | "rj_central" | "rj_remote"
+  | "sudeste" | "sul" | "nordeste" | "norte" | "centro_oeste";
+
+const TIKTOK_DEST_LABELS: Record<TiktokDest, string> = {
+  sp_central: "São Paulo Central",
+  sp_remote: "São Paulo Remoto",
+  rj_central: "Rio de Janeiro Central",
+  rj_remote: "Rio de Janeiro Remoto",
+  sudeste: "Sudeste (demais)",
+  sul: "Sul",
+  nordeste: "Nordeste",
+  norte: "Norte",
+  centro_oeste: "Centro-Oeste",
+};
+
+const TIKTOK_DEST_ORDER: TiktokDest[] = [
+  "sp_central", "sp_remote", "rj_central", "rj_remote",
+  "sudeste", "sul", "nordeste", "norte", "centro_oeste",
+];
+
+// Origem SP — custo em R$ por faixa de peso (linhas) × destino (colunas).
+const TIKTOK_SHIPPING_TABLE_SP: { max_weight_kg: number; costs: number[] }[] = [
+  { max_weight_kg: 0.5,  costs: [8.4,  10.8, 9.6,  12.0,  12.1,  11.5,  23.3,  39.5,  23.6]  },
+  { max_weight_kg: 1.25, costs: [9.6,  12.0, 10.8, 14.5,  14.3,  13.3,  26.9,  45.5,  27.2]  },
+  { max_weight_kg: 3.0,  costs: [13.2, 16.9, 14.5, 22.6,  20.8,  19.8,  38.2,  66.1,  38.4]  },
+  { max_weight_kg: 10.0, costs: [29.4, 35.7, 29.9, 41.6,  43.1,  41.9,  79.05, 137.4, 78.5]  },
+  { max_weight_kg: 30.0, costs: [76.0, 91.3, 77.5, 109.2, 107.5, 105.6, 194.8, 341.5, 192.3] },
+];
+
+function estimateTiktokShipping(weightGrams: number, dest: TiktokDest): number {
+  const weightKg = weightGrams / 1000.0;
+  const col = TIKTOK_DEST_ORDER.indexOf(dest);
+  const row = TIKTOK_SHIPPING_TABLE_SP.find((r) => weightKg <= r.max_weight_kg)
+    ?? TIKTOK_SHIPPING_TABLE_SP[TIKTOK_SHIPPING_TABLE_SP.length - 1];
+  return row.costs[col] ?? 0;
+}
+
 const inputClass =
   "w-full bg-secondary border-0 rounded-lg px-4 py-3.5 text-sm font-medium text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary transition-all duration-200";
 const labelClass = "text-xs font-semibold uppercase tracking-widest text-muted-foreground";
@@ -168,6 +209,7 @@ const MarketplaceCalculator = () => {
   const [custoProduto, setCustoProduto] = useState("");
   const [taxaPlataforma, setTaxaPlataforma] = useState("");
   const [magaluTier, setMagaluTier] = useState<MagaluTier>("silver");
+  const [tiktokDest, setTiktokDest] = useState<TiktokDest>("sudeste");
   
   // New calculation states
   const [precoVenda, setPrecoVenda] = useState("");
@@ -215,7 +257,7 @@ const MarketplaceCalculator = () => {
     if (isML) return `${LISTING_FEES[listingType]}%`;
     if (marketplace === "amazon") return "11%";
     if (marketplace === "shopee") return "14%~20% + fixo";
-    if (marketplace === "tiktok") return "6% + R$4";
+    if (marketplace === "tiktok") return "6% + R$2 (< R$79)";
     if (marketplace === "magalu") return "14% + R$5";
     return "—";
   }, [marketplace, isML, listingType]);
@@ -260,7 +302,7 @@ const MarketplaceCalculator = () => {
     } else if (marketplace === "shopee") {
       taxa = shopeeFee(price);
     } else if (marketplace === "tiktok") {
-      taxa = price * 0.06 + 4;
+      taxa = price * 0.06 + (price < 79 ? 2 : 0);
     } else if (marketplace === "magalu") {
       taxa = price * 0.14 + 5;
     }
@@ -271,7 +313,7 @@ const MarketplaceCalculator = () => {
     } else if (marketplace === "amazon") {
       shipping = estimateAmazonShipping(price, peso) * (1 - descontoFrete / 100);
     } else if (marketplace === "tiktok") {
-      shipping = price * 0.06 * (1 - descontoFrete / 100);
+      shipping = estimateTiktokShipping(peso, tiktokDest) * (1 - descontoFrete / 100);
     } else if (marketplace === "magalu") {
       shipping = estimateMagaluShipping(peso, MAGALU_TIER_DISCOUNT[magaluTier]) * (1 - descontoFrete / 100);
     }
@@ -295,7 +337,7 @@ const MarketplaceCalculator = () => {
       custoMaximo,
       lucroInverso,
     };
-  }, [precoVenda, desconto, descontoFrete, custoProduto, custoOpUnit, custoRealOverride, marketplace, isML, listingType, pesoGramas, magaluTier, margemDesejada, mode]);
+  }, [precoVenda, desconto, descontoFrete, custoProduto, custoOpUnit, custoRealOverride, marketplace, isML, listingType, pesoGramas, magaluTier, tiktokDest, margemDesejada, mode]);
 
   const buscarProduto = async () => {
     if (!codigoProduto.trim()) return;
@@ -654,6 +696,24 @@ const MarketplaceCalculator = () => {
             </div>
           )}
 
+          {marketplace === "tiktok" && (
+            <div className="space-y-2 mb-6">
+              <label className={labelClass}>Destino do Frete (origem SP)</label>
+              <div className="relative">
+                <select
+                  value={tiktokDest}
+                  onChange={(e) => setTiktokDest(e.target.value as TiktokDest)}
+                  className={selectClass}
+                >
+                  {Object.entries(TIKTOK_DEST_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+                <ChevronIcon />
+              </div>
+            </div>
+          )}
+
           {/* Preço de Venda com Desconto */}
           <div className="space-y-2 mb-6">
             <label className={labelClass}>Preço Final c/ Desconto (R$)</label>
@@ -770,6 +830,7 @@ const MarketplaceCalculator = () => {
                 <ResultRow label="Peso" value={`${pesoGramas}g`} />
                 {hasFrete && <ResultRow label="Desconto no Frete" value={`${descontoFrete}%`} />}
                 {marketplace === "magalu" && <ResultRow label="Reputação" value={MAGALU_TIER_LABELS[magaluTier]} />}
+                {marketplace === "tiktok" && <ResultRow label="Destino do Frete" value={TIKTOK_DEST_LABELS[tiktokDest]} />}
                 {hasFrete && <ResultRow label="Custo de Frete (Estimado)" value={fmt(results.frete)} />}
               </>
             )}

@@ -13,6 +13,7 @@ import disparoRouter, { setSocketIO } from "./routes/disparo";
 import aiAssistantRouter from "./routes/ai-assistant";
 import multiPrecoRouter from "./routes/multi-preco";
 import inventarioRouter, { setInventarioIO } from "./routes/inventario";
+import inventarioFullRouter, { setInventarioFullIO } from "./routes/inventario-full-api";
 import onboardingRouter from "./routes/onboarding";
 import scoreRouter from "./routes/score";
 import cobrancaRouter from "./routes/cobranca";
@@ -21,10 +22,12 @@ import sugestaoComprasRouter from "./routes/sugestao-compras";
 import salesCompassRouter from "./routes/sales-compass";
 import relatorioCustosRouter from "./routes/relatorio-custos";
 import comissaoRouter from "./routes/comissao";
+import productFirstMovementRouter from "./routes/product-first-movement";
 import { startSyncJob } from "./jobs/syncJob";
 import { startStockSnapshotJob, runStockSnapshotManual, getStockSnapshotStatus } from "./jobs/stockSnapshotJob";
 import { startMultiPrecoJob } from "./jobs/multiPrecoJob";
 import { startCobrancaJob } from "./jobs/cobrancaJob";
+import { startProductFirstMovementJob } from "./jobs/productFirstMovementJob";
 import { setupSwagger } from "./swagger";
 
 const app = express();
@@ -51,6 +54,7 @@ app.use("/api/disparo",         disparoRouter);
 app.use("/api/ai-assistant",    aiAssistantRouter);
 app.use("/api/multi-preco",     multiPrecoRouter);
 app.use("/api/inventario",      inventarioRouter);
+app.use("/api/inventario-full-api", inventarioFullRouter);
 app.use("/api/onboarding",      onboardingRouter);
 app.use("/api/score",           scoreRouter);
 app.use("/api/cobranca",        cobrancaRouter);
@@ -59,6 +63,7 @@ app.use("/api/sugestao-compras",  sugestaoComprasRouter);
 app.use("/api/sales-compass",     salesCompassRouter);
 app.use("/api/relatorio-custos",  relatorioCustosRouter);
 app.use("/api/comissao",          comissaoRouter);
+app.use("/api/product-first-movement", productFirstMovementRouter);
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
@@ -110,6 +115,7 @@ const httpServer = createServer(app);
 const io = new SocketServer(httpServer, { cors: { origin: "*" } });
 setSocketIO(io);
 setInventarioIO(io);
+setInventarioFullIO(io);
 
 io.on("connection", (socket) => {
   console.log(`[socket.io] cliente conectado: ${socket.id}`);
@@ -121,4 +127,5 @@ httpServer.listen(PORT, "0.0.0.0", () => {
   startStockSnapshotJob().catch((err) => console.error("[stock-snapshot] Erro ao iniciar:", err));
   startMultiPrecoJob();
   startCobrancaJob();
+  startProductFirstMovementJob().catch((err) => console.error("[product-first-movement] Erro ao iniciar:", err));
 });

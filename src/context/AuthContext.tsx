@@ -53,6 +53,16 @@ interface AuthUser {
       role: Role;
       loja: string | null;
     };
+    primeiramov: {
+      canAccess: boolean;
+      role: Role;
+      loja: string | null;
+    };
+    invfull: {
+      canAccess: boolean;
+      role: Role;
+      loja: string | null;
+    };
     score: {
       canAccess: boolean;
       role: Role;
@@ -109,6 +119,8 @@ interface AuthContextValue {
       multipreco?: { role?: string; loja?: string | null; can_access?: boolean };
       inventario?: { role?: string; loja?: string | null; can_access?: boolean };
       onboarding?: { role?: string; loja?: string | null; can_access?: boolean };
+      primeiramov?: { role?: string; loja?: string | null; can_access?: boolean };
+      invfull?: { role?: string; loja?: string | null; can_access?: boolean };
       score?: { role?: string; loja?: string | null; can_access?: boolean };
       cobranca?: { role?: string; loja?: string | null; can_access?: boolean };
       ecommercedisparo?: { role?: string; loja?: string | null; can_access?: boolean };
@@ -145,6 +157,8 @@ function buildUser(
     multipreco?: { role?: string; loja?: string | null; can_access?: boolean };
     inventario?: { role?: string; loja?: string | null; can_access?: boolean };
     onboarding?: { role?: string; loja?: string | null; can_access?: boolean };
+    primeiramov?: { role?: string; loja?: string | null; can_access?: boolean };
+    invfull?: { role?: string; loja?: string | null; can_access?: boolean };
     score?: { role?: string; loja?: string | null; can_access?: boolean };
     cobranca?: { role?: string; loja?: string | null; can_access?: boolean };
     ecommercedisparo?: { role?: string; loja?: string | null; can_access?: boolean };
@@ -175,6 +189,10 @@ function buildUser(
   const inventarioLoja = apiApps?.inventario?.loja ?? null;
   const onboardingRole = resolveRole(usuario, apiApps?.onboarding?.role ?? apiRole);
   const onboardingAccess = apiApps?.onboarding?.can_access ?? false;
+  const primeiramovRole = resolveRole(usuario, apiApps?.primeiramov?.role ?? apiRole);
+  const primeiramovAccess = apiApps?.primeiramov?.can_access ?? false;
+  const invfullRole = resolveRole(usuario, apiApps?.invfull?.role ?? apiRole);
+  const invfullAccess = apiApps?.invfull?.can_access ?? false;
   const scoreRole = resolveRole(usuario, apiApps?.score?.role ?? apiRole);
   const scoreAccess = apiApps?.score?.can_access ?? false;
   const cobrancaRole = resolveRole(usuario, apiApps?.cobranca?.role ?? apiRole);
@@ -243,6 +261,16 @@ function buildUser(
         role: onboardingRole,
         loja: null,
       },
+      primeiramov: {
+        canAccess: primeiramovAccess,
+        role: primeiramovRole,
+        loja: null,
+      },
+      invfull: {
+        canAccess: invfullAccess,
+        role: invfullRole,
+        loja: null,
+      },
       score: {
         canAccess: scoreAccess,
         role: scoreRole,
@@ -306,6 +334,10 @@ function loadFromStorage(): AuthUser | null {
     const inventarioLoja = (parsed.apps as any)?.inventario?.loja ?? null;
     const onboardingRole = (parsed.apps as any)?.onboarding?.role ?? parsed.role;
     const onboardingAccess = (parsed.apps as any)?.onboarding?.canAccess ?? false;
+    const primeiramovRole = (parsed.apps as any)?.primeiramov?.role ?? parsed.role;
+    const primeiramovAccess = (parsed.apps as any)?.primeiramov?.canAccess ?? false;
+    const invfullRole = (parsed.apps as any)?.invfull?.role ?? parsed.role;
+    const invfullAccess = (parsed.apps as any)?.invfull?.canAccess ?? false;
     const scoreRole = (parsed.apps as any)?.score?.role ?? parsed.role;
     const scoreAccess = (parsed.apps as any)?.score?.canAccess ?? false;
     const cobrancaRole = (parsed.apps as any)?.cobranca?.role ?? parsed.role;
@@ -372,6 +404,16 @@ function loadFromStorage(): AuthUser | null {
         onboarding: {
           canAccess: onboardingAccess,
           role: onboardingRole,
+          loja: null,
+        },
+        primeiramov: {
+          canAccess: primeiramovAccess,
+          role: primeiramovRole,
+          loja: null,
+        },
+        invfull: {
+          canAccess: invfullAccess,
+          role: invfullRole,
           loja: null,
         },
         score: {
@@ -461,6 +503,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       multipreco?: { role?: string; loja?: string | null; can_access?: boolean };
       inventario?: { role?: string; loja?: string | null; can_access?: boolean };
       onboarding?: { role?: string; loja?: string | null; can_access?: boolean };
+      primeiramov?: { role?: string; loja?: string | null; can_access?: boolean };
+      invfull?: { role?: string; loja?: string | null; can_access?: boolean };
       score?: { role?: string; loja?: string | null; can_access?: boolean };
       cobranca?: { role?: string; loja?: string | null; can_access?: boolean };
       ecommercedisparo?: { role?: string; loja?: string | null; can_access?: boolean };

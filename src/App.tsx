@@ -28,6 +28,8 @@ import ComissaoGestor from "./pages/comissao/Gestor.tsx";
 import ComissaoSimulacao from "./pages/comissao/Simulacao.tsx";
 import ComissaoConfiguracao from "./pages/comissao/Configuracao.tsx";
 import { ComissaoErrorBoundary } from "./pages/comissao/ComissaoErrorBoundary.tsx";
+import PrimeiraMovimentacao from "./pages/PrimeiraMovimentacao.tsx";
+import InventarioFullApi from "./pages/InventarioFullApi.tsx";
 import React from "react";
 
 const queryClient = new QueryClient();
@@ -173,6 +175,22 @@ function ComissaoRoute({ children }: { children: React.ReactNode }) {
   return <ComissaoErrorBoundary>{children}</ComissaoErrorBoundary>;
 }
 
+function PrimeiraMovRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.canAccessHub) return <Navigate to="/login" replace />;
+  if (!user.apps.primeiramov.canAccess) return <Navigate to="/hub" replace />;
+  return <>{children}</>;
+}
+
+function InventarioFullRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.canAccessHub) return <Navigate to="/login" replace />;
+  if (!user.apps.invfull?.canAccess) return <Navigate to="/hub" replace />;
+  return <>{children}</>;
+}
+
 function AdminManagerRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
@@ -213,6 +231,8 @@ const App = () => (
             <Route path="/comissao/gestor" element={<ComissaoRoute><ComissaoGestor /></ComissaoRoute>} />
             <Route path="/comissao/simulacao" element={<ComissaoRoute><ComissaoSimulacao /></ComissaoRoute>} />
             <Route path="/comissao/configuracao" element={<ComissaoRoute><ComissaoConfiguracao /></ComissaoRoute>} />
+            <Route path="/primeira-movimentacao" element={<PrimeiraMovRoute><PrimeiraMovimentacao /></PrimeiraMovRoute>} />
+            <Route path="/inventario-full-api" element={<InventarioFullRoute><InventarioFullApi /></InventarioFullRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

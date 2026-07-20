@@ -118,7 +118,15 @@ io.on("connection", (socket) => {
 
 httpServer.listen(PORT, "0.0.0.0", () => {
   console.log(`[server] rodando em http://0.0.0.0:${PORT}`);
-  startStockSnapshotJob().catch((err) => console.error("[stock-snapshot] Erro ao iniciar:", err));
-  startMultiPrecoJob();
-  startCobrancaJob();
+  // Jobs agendados só sobem quando ENABLE_JOBS=true (produção). Em homologação
+  // a variável fica ausente para evitar crons duplicados (disparo de WhatsApp,
+  // sincronização de preços, etc.) contra os sistemas de produção.
+  if (process.env.ENABLE_JOBS === "true") {
+    startStockSnapshotJob().catch((err) => console.error("[stock-snapshot] Erro ao iniciar:", err));
+    startMultiPrecoJob();
+    startCobrancaJob();
+    console.log("[server] Jobs agendados ATIVOS (ENABLE_JOBS=true)");
+  } else {
+    console.log("[server] Jobs agendados DESLIGADOS (defina ENABLE_JOBS=true para ativar)");
+  }
 });

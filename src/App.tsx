@@ -28,7 +28,9 @@ import ComissaoGestor from "./pages/comissao/Gestor.tsx";
 import ComissaoSimulacao from "./pages/comissao/Simulacao.tsx";
 import ComissaoConfiguracao from "./pages/comissao/Configuracao.tsx";
 import { ComissaoErrorBoundary } from "./pages/comissao/ComissaoErrorBoundary.tsx";
+import EnvBanner from "./components/EnvBanner.tsx";
 import React from "react";
+import Prospeccao from "./pages/Prospecção.tsx";
 
 const queryClient = new QueryClient();
 
@@ -188,6 +190,7 @@ const App = () => (
       <TooltipProvider>
         <Toaster />
         <Sonner />
+        <EnvBanner />
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />
@@ -213,6 +216,7 @@ const App = () => (
             <Route path="/comissao/gestor" element={<ComissaoRoute><ComissaoGestor /></ComissaoRoute>} />
             <Route path="/comissao/simulacao" element={<ComissaoRoute><ComissaoSimulacao /></ComissaoRoute>} />
             <Route path="/comissao/configuracao" element={<ComissaoRoute><ComissaoConfiguracao /></ComissaoRoute>} />
+            <Route path="/prospeccao" element={<Prospeccao></Prospeccao>}/>
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

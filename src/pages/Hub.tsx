@@ -714,8 +714,8 @@ export default function Hub() {
                                     can_access: enabled ? u.apps.onboarding.can_access : false,
                                   },
                                   prospeccao: {
-                                    ...u.apps.prospeccao,
-                                    can_access: enabled ? u.apps.prospeccao.can_access : false,
+                                    ...(u.apps as any).prospeccao,
+                                    can_access: enabled ? ((u.apps as any).prospeccao?.can_access ?? false) : false,
                                   },
                                   score: {
                                     ...u.apps.score,
@@ -1306,7 +1306,7 @@ export default function Hub() {
                         <td className="px-4 py-3 text-center">
                           <input
                             type="checkbox"
-                            checked={u.apps.prospeccao.can_access}
+                            checked={(u.apps as any).prospeccao?.can_access ?? false}
                             onChange={async (e) => {
                               const next: AuthManagedUser = {
                                 ...u,
@@ -1328,7 +1328,7 @@ export default function Hub() {
                         <td className="px-4 py-3">
                           <div className="relative inline-block">
                             <select
-                              value={u.apps.prospeccao.role}
+                              value={(u.apps as any).prospeccao?.role ?? "viewer"}
                               onChange={async (e) => {
                                 const nextRole = e.target.value as Role;
                                 const next: AuthManagedUser = {

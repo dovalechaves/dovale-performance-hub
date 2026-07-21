@@ -122,6 +122,14 @@ function CobrancaRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function ProspeccaoRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.canAccessHub) return <Navigate to="/login" replace />;
+  if (!user.apps.prospeccao?.canAccess) return <Navigate to="/hub" replace />;
+  return <>{children}</>;
+}
+
 function EcommerceDisparoRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
@@ -234,7 +242,7 @@ const App = () => (
             <Route path="/comissao/configuracao" element={<ComissaoRoute><ComissaoConfiguracao /></ComissaoRoute>} />
             <Route path="/primeira-movimentacao" element={<PrimeiraMovRoute><PrimeiraMovimentacao /></PrimeiraMovRoute>} />
             <Route path="/inventario-full-api" element={<InventarioFullRoute><InventarioFullApi /></InventarioFullRoute>} />
-            <Route path="/prospeccao" element={<PrivateRoute><Prospeccao /></PrivateRoute>} />
+            <Route path="/prospeccao" element={<ProspeccaoRoute><Prospeccao /></ProspeccaoRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

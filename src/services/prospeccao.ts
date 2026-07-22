@@ -38,6 +38,7 @@ export interface VerificarCadastrosResponse {
 export interface CityCoverage {
   cidade: string;
   naBase: number; // clientes já existentes na base
+  ativos: number; // dos que estão na base, quantos estão ativos
   foraBase: number; // potenciais (mercado) ainda fora da base
 }
 
@@ -45,12 +46,13 @@ export interface StateCoverage {
   sigla: string;
   nome: string;
   naBase: number;
+  ativos: number;
   foraBase: number;
   cidades: CityCoverage[];
 }
 
 export interface Cobertura {
-  totais: { naBase: number; foraBase: number };
+  totais: { naBase: number; ativos: number; foraBase: number };
   states: StateCoverage[];
   statesBySigla: Record<string, StateCoverage>;
 }
@@ -102,28 +104,38 @@ export function fetchVerificarCadastros(
   );
 }
 
+// Um registro já na base é "ativo" quando a API marca situacaoInterna = "Ativo"
+// (os demais vêm como "Inativo"; registros fora da base vêm como "Sem cadastro").
+function isAtivo(reg: CadastroRegistro): boolean {
+  return (reg.situacaoInterna ?? "").trim().toLocaleLowerCase("pt-BR") === "ativo";
+}
+
 // ── Transformação: resposta da API -> cobertura por estado/cidade ────────────
 export function buildCobertura(resp: VerificarCadastrosResponse): Cobertura {
-  // Acumulador por UF -> por cidade -> { naBase, foraBase }
-  const porUf = new Map<string, { na: number; fora: number; cidades: Map<string, CityCoverage> }>();
+  // Acumulador por UF -> por cidade -> { naBase, ativos, foraBase }
+  const porUf = new Map<string, { na: number; ativos: number; fora: number; cidades: Map<string, CityCoverage> }>();
 
   const registrar = (reg: CadastroRegistro, naBase: boolean) => {
     const sigla = (reg.uf ?? "").trim().toUpperCase();
     if (!sigla || !UF_NOME[sigla]) return; // ignora UF inválida/ausente no mapa
     let uf = porUf.get(sigla);
     if (!uf) {
-      uf = { na: 0, fora: 0, cidades: new Map() };
+      uf = { na: 0, ativos: 0, fora: 0, cidades: new Map() };
       porUf.set(sigla, uf);
     }
     const cidadeNome = reg.cidade?.trim() ? tituloCidade(reg.cidade.trim()) : "Não informado";
     let cid = uf.cidades.get(cidadeNome);
     if (!cid) {
-      cid = { cidade: cidadeNome, naBase: 0, foraBase: 0 };
+      cid = { cidade: cidadeNome, naBase: 0, ativos: 0, foraBase: 0 };
       uf.cidades.set(cidadeNome, cid);
     }
     if (naBase) {
       uf.na += 1;
       cid.naBase += 1;
+      if (isAtivo(reg)) {
+        uf.ativos += 1;
+        cid.ativos += 1;
+      }
     } else {
       uf.fora += 1;
       cid.foraBase += 1;
@@ -138,6 +150,7 @@ export function buildCobertura(resp: VerificarCadastrosResponse): Cobertura {
       sigla,
       nome: UF_NOME[sigla],
       naBase: v.na,
+      ativos: v.ativos,
       foraBase: v.fora,
       cidades: [...v.cidades.values()].sort(
         (a, b) => b.naBase + b.foraBase - (a.naBase + a.foraBase),
@@ -147,9 +160,12 @@ export function buildCobertura(resp: VerificarCadastrosResponse): Cobertura {
 
   const statesBySigla = Object.fromEntries(states.map((s) => [s.sigla, s]));
 
+  // "ativos" não tem agregado próprio na API — soma-se a partir dos estados.
+  const totalAtivos = states.reduce((acc, s) => acc + s.ativos, 0);
+
   return {
-    // Cabeçalho usa os agregados oficiais da API (mais fiéis ao total do mercado).
-    totais: { naBase: resp.quantidadeComCadastro, foraBase: resp.quantidadeSemCadastro },
+    // naBase/foraBase usam os agregados oficiais da API (mais fiéis ao total do mercado).
+    totais: { naBase: resp.quantidadeComCadastro, ativos: totalAtivos, foraBase: resp.quantidadeSemCadastro },
     states,
     statesBySigla,
   };

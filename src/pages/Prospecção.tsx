@@ -1,103 +1,160 @@
-import { useState, useEffect, useMemo, useRef } from "react";
-import { ArrowLeft, Sun, Moon, Users, MapPin, Target, TrendingUp, Search, Loader2, AlertCircle, ChevronDown } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
+import {
+  ArrowLeft, Sun, Moon, Users, MapPin, Target, TrendingUp, CheckCircle2, Sparkles, Loader2, AlertCircle,
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueries } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
-import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
-import { ComposableMap, Geographies, Geography } from "react-simple-maps";
 import {
   fetchCnaes,
   fetchVerificarCadastros,
   buildCobertura,
-  coberturaPct,
-  type StateCoverage,
+  type Cobertura,
+  type CityCoverage,
 } from "@/services/prospeccao";
+import { MultiSelect, type MultiOption } from "@/components/prospeccao/MultiSelect";
+import { KpiCard } from "@/components/prospeccao/KpiCard";
+import { DonutChart } from "@/components/prospeccao/DonutChart";
+import { BrazilCoverageMap } from "@/components/prospeccao/BrazilCoverageMap";
+import { CoverageBar, CoverageLegend, pctOf } from "@/components/prospeccao/coverage";
 import logoBlue from "@/assets/logo-blue.png";
 import logoWhite from "@/assets/logo-white.png";
 
-const GEO_URL = "/br-states.json";
-
-// Escala de cor por cobertura: vermelho (baixa cobertura = oportunidade) → verde (alta)
-function corCobertura(pct: number): string {
-  if (pct < 20) return "#ef4444";
-  if (pct < 40) return "#f59e0b";
-  if (pct < 60) return "#eab308";
-  if (pct < 80) return "#84cc16";
-  return "#22c55e";
-}
-
-const LEGENDA = [
-  { label: "< 20%", cor: "#ef4444" },
-  { label: "20–40%", cor: "#f59e0b" },
-  { label: "40–60%", cor: "#eab308" },
-  { label: "60–80%", cor: "#84cc16" },
-  { label: "≥ 80%", cor: "#22c55e" },
-];
-
 const fmt = (n: number) => n.toLocaleString("pt-BR");
+
+// Estado agregado (soma dos CNAEs selecionados), com cidades unificadas.
+interface ViewState {
+  nome: string;
+  naBase: number;
+  ativos: number;
+  foraBase: number;
+  cidades: CityCoverage[];
+}
 
 export default function Prospeccao() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [dark, setDark] = useState(() => localStorage.getItem("dovale_theme") !== "light");
-  const [selected, setSelected] = useState<string | null>(null);
-  const [cnae, setCnae] = useState<string | null>(null);
-  const [hover, setHover] = useState<{ nome: string; pct: number; x: number; y: number } | null>(null);
+  const [selCnaes, setSelCnaes] = useState<string[]>([]);
+  const [selStates, setSelStates] = useState<string[]>([]);
+  const [donutHover, setDonutHover] = useState<number | null>(null);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
     localStorage.setItem("dovale_theme", dark ? "dark" : "light");
   }, [dark]);
 
-  // Lista de CNAEs (segmentos) — carregada uma vez.
+  // Ao trocar de segmentos, limpa a seleção de estados (decisão de UX do handoff).
+  useEffect(() => setSelStates([]), [selCnaes]);
+
+  // Lista de CNAEs — carregada uma vez; default = primeiro segmento.
   const { data: cnaes = [], isLoading: cnaesLoading } = useQuery({
     queryKey: ["prospeccao-cnaes"],
     queryFn: ({ signal }) => fetchCnaes(signal),
     staleTime: Infinity,
   });
+  useEffect(() => {
+    if (cnaes.length && selCnaes.length === 0) setSelCnaes([cnaes[0]]);
+  }, [cnaes, selCnaes.length]);
 
-  // Cobertura do segmento selecionado.
-  const {
-    data: cobertura,
-    isFetching,
-    isError,
-    error,
-  } = useQuery({
-    queryKey: ["prospeccao-cobertura", cnae],
-    queryFn: async ({ signal }) => buildCobertura(await fetchVerificarCadastros(cnae!, signal)),
-    enabled: !!cnae,
-    staleTime: 5 * 60 * 1000,
+  // Uma query por CNAE selecionado; agregamos os resultados numa visão só.
+  const coberturaQueries = useQueries({
+    queries: selCnaes.map((cnae) => ({
+      queryKey: ["prospeccao-cobertura", cnae],
+      queryFn: async ({ signal }: { signal?: AbortSignal }) =>
+        buildCobertura(await fetchVerificarCadastros(cnae, signal)),
+      staleTime: 5 * 60 * 1000,
+    })),
   });
 
-  // Ao trocar de CNAE, limpa a seleção de estado.
-  useEffect(() => setSelected(null), [cnae]);
+  const isFetching = coberturaQueries.some((q) => q.isFetching);
+  const isError = coberturaQueries.some((q) => q.isError);
+  const coberturas = coberturaQueries.map((q) => q.data).filter(Boolean) as Cobertura[];
 
-  const states = cobertura?.states ?? [];
-  const statesBySigla = cobertura?.statesBySigla ?? {};
-  const totais = cobertura?.totais ?? { naBase: 0, foraBase: 0 };
+  const cnaeOptions: MultiOption[] = useMemo(() => cnaes.map((c) => ({ value: c, label: c })), [cnaes]);
 
-  const coberturaGeral = coberturaPct(totais.naBase, totais.foraBase);
+  // Agrega cobertura de TODOS os segmentos selecionados numa visão única por UF.
+  const view = useMemo(() => {
+    const st: Record<string, ViewState & { _c: Map<string, CityCoverage> }> = {};
+    coberturas.forEach((cob) => {
+      cob.states.forEach((s) => {
+        if (!st[s.sigla]) st[s.sigla] = { nome: s.nome, naBase: 0, ativos: 0, foraBase: 0, cidades: [], _c: new Map() };
+        const acc = st[s.sigla];
+        acc.naBase += s.naBase;
+        acc.ativos += s.ativos;
+        acc.foraBase += s.foraBase;
+        s.cidades.forEach((ci) => {
+          const cur = acc._c.get(ci.cidade) ?? { cidade: ci.cidade, naBase: 0, ativos: 0, foraBase: 0 };
+          cur.naBase += ci.naBase;
+          cur.ativos += ci.ativos;
+          cur.foraBase += ci.foraBase;
+          acc._c.set(ci.cidade, cur);
+        });
+      });
+    });
+    const out: Record<string, ViewState> = {};
+    Object.entries(st).forEach(([sg, s]) => {
+      out[sg] = {
+        nome: s.nome,
+        naBase: s.naBase,
+        ativos: s.ativos,
+        foraBase: s.foraBase,
+        cidades: [...s._c.values()].sort((a, b) => b.naBase + b.foraBase - (a.naBase + a.foraBase)),
+      };
+    });
+    return out;
+  }, [coberturas]);
+
+  const hasData = selCnaes.length > 0 && Object.keys(view).length > 0;
+  const ufOptions: MultiOption[] = useMemo(
+    () =>
+      Object.entries(view)
+        .map(([sg, s]) => ({ value: sg, label: s.nome, hint: sg }))
+        .sort((a, b) => a.label.localeCompare(b.label, "pt-BR")),
+    [view],
+  );
+  const toggleState = (sg: string) =>
+    setSelStates((p) => (p.includes(sg) ? p.filter((x) => x !== sg) : [...p, sg]));
+
+  // KPIs + donut são escopados aos estados selecionados (ou todos, se nenhum).
+  const scoped = selStates.length
+    ? Object.entries(view).filter(([sg]) => selStates.includes(sg))
+    : Object.entries(view);
+  const totais = scoped.reduce(
+    (a, [, s]) => ({ naBase: a.naBase + s.naBase, ativos: a.ativos + s.ativos, foraBase: a.foraBase + s.foraBase }),
+    { naBase: 0, ativos: 0, foraBase: 0 },
+  );
+  const coberturaGeral = pctOf(totais.naBase, totais.foraBase);
+  const estado = selStates.length === 1 ? view[selStates[0]] : null;
+
+  const inativosBase = Math.max(0, totais.naBase - totais.ativos);
+  const pctAtiva = pctOf(totais.ativos, inativosBase); // % da base que está ativa
   const pieData = [
-    { name: "Na base", value: totais.naBase, cor: "#22c55e" },
-    { name: "Fora da base", value: totais.foraBase, cor: "#94a3b8" },
+    { name: "Ativos na base", value: totais.ativos, color: "#22c55e" },
+    { name: "Inativos na base", value: inativosBase, color: "hsl(145 48% 72%)" },
+    { name: "Fora da base", value: totais.foraBase, color: "hsl(var(--muted-foreground))" },
   ];
 
-  const estado: StateCoverage | null = selected ? statesBySigla[selected] ?? null : null;
-
-  // ranking de estados por menor cobertura (maior oportunidade) para destaque
   const oportunidades = useMemo(
     () =>
-      [...states]
-        .sort((a, b) => coberturaPct(a.naBase, a.foraBase) - coberturaPct(b.naBase, b.foraBase))
-        .slice(0, 5),
-    [states],
+      Object.entries(view)
+        .map(([sg, s]) => ({ sg, ...s, pct: pctOf(s.naBase, s.foraBase) }))
+        .sort((a, b) => a.pct - b.pct)
+        .slice(0, 6),
+    [view],
   );
 
-  const temDados = !!cobertura && states.length > 0;
+  const mapData = useMemo(
+    () => Object.fromEntries(Object.entries(view).map(([sg, s]) => [sg, { nome: s.nome, naBase: s.naBase, foraBase: s.foraBase }])),
+    [view],
+  );
+
+  const tituloEstado =
+    selStates.length === 1 ? ` — ${view[selStates[0]]?.nome}` : selStates.length > 1 ? ` — ${selStates.length} estados` : "";
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      {/* Header */}
+      {/* Header padrão Dovale */}
       <header className="border-b border-border bg-gradient-card shrink-0">
         <div className="container mx-auto px-6 py-4 flex items-center gap-4">
           <button onClick={() => navigate("/hub")} className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors">
@@ -126,370 +183,180 @@ export default function Prospeccao() {
       </header>
 
       <main className="flex-1 overflow-y-auto">
-        <div className="container mx-auto max-w-7xl px-4 py-8 space-y-6">
-          {/* Seletor de CNAE */}
-          <div className="glass-card rounded-xl p-4 border border-border bg-card flex flex-col sm:flex-row sm:items-center gap-3">
-            <div className="flex items-center gap-2 shrink-0">
-              <Target className="w-4 h-4 text-primary" />
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Segmento (CNAE)
-              </span>
+        <div className="container mx-auto max-w-[1200px] px-5 pt-7 pb-12 flex flex-col gap-5">
+          {/* Filtros — z-40 para o popover ficar acima dos cards seguintes (stacking do glass) */}
+          <div className="glass-card rounded-xl p-4 relative z-40">
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-2 shrink-0">
+                <Target className="w-4 h-4 text-primary" />
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Segmento (CNAE)</span>
+              </div>
+              <MultiSelect
+                className="flex-1 min-w-[220px]"
+                options={cnaeOptions}
+                values={selCnaes}
+                onChange={setSelCnaes}
+                placeholder={cnaesLoading ? "Carregando segmentos…" : "Selecione segmentos (CNAE)…"}
+                manyLabel="segmentos"
+                searchPlaceholder="Buscar segmento…"
+                disabled={cnaesLoading}
+              />
+              <div className="flex items-center gap-2 shrink-0">
+                <MapPin className="w-4 h-4 text-primary" />
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Estado</span>
+              </div>
+              <MultiSelect
+                className="w-[220px]"
+                options={ufOptions}
+                values={selStates}
+                onChange={setSelStates}
+                placeholder="Todos os estados"
+                manyLabel="estados"
+                searchPlaceholder="Buscar estado…"
+                disabled={!hasData}
+              />
+              {isFetching && (
+                <span className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> carregando…
+                </span>
+              )}
             </div>
-            <CnaeSelect
-              options={cnaes}
-              value={cnae}
-              loading={cnaesLoading}
-              onChange={setCnae}
-            />
-            {isFetching && cnae && (
-              <span className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
-                <Loader2 className="w-3.5 h-3.5 animate-spin" /> carregando cobertura…
-              </span>
-            )}
           </div>
 
           {isError && (
-            <div className="glass-card rounded-xl p-4 border border-destructive/40 bg-destructive/5 flex items-center gap-2 text-sm text-destructive">
+            <div className="glass-card rounded-xl p-4 border-destructive/40 bg-destructive/5 flex items-center gap-2 text-sm text-destructive">
               <AlertCircle className="w-4 h-4 shrink-0" />
-              Erro ao carregar dados da ApiDovale: {(error as Error)?.message ?? "desconhecido"}
+              Erro ao carregar dados da ApiDovale. Verifique a conexão e tente novamente.
             </div>
           )}
 
-          {/* Estado vazio: nenhum CNAE selecionado ainda */}
-          {!cnae && !isError && (
-            <div className="glass-card rounded-xl p-12 border border-border bg-card text-center">
-              <Target className="w-8 h-8 text-primary/40 mx-auto mb-3" />
-              <p className="text-sm font-semibold text-foreground">Selecione um segmento para começar</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                Escolha um CNAE acima para ver a cobertura de base por estado e cidade.
-              </p>
+          {!selCnaes.length ? (
+            <div className="glass-card rounded-xl p-12 text-center">
+              <Target className="w-7 h-7 text-primary mx-auto mb-2.5" />
+              <p className="text-sm font-bold text-foreground">Selecione ao menos um segmento</p>
+              <p className="text-[12.5px] text-muted-foreground mt-1.5">Escolha um ou mais CNAEs acima para ver a cobertura da base.</p>
             </div>
-          )}
-
-          {/* Sem resultados para o CNAE escolhido */}
-          {cnae && !isFetching && !isError && !temDados && (
-            <div className="glass-card rounded-xl p-12 border border-border bg-card text-center">
-              <MapPin className="w-8 h-8 text-muted-foreground/40 mx-auto mb-3" />
-              <p className="text-sm font-semibold text-foreground">Nenhum cadastro encontrado</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                A ApiDovale não retornou registros para este segmento.
-              </p>
+          ) : !hasData && isFetching ? (
+            <div className="glass-card rounded-xl p-12 text-center">
+              <Loader2 className="w-7 h-7 text-primary mx-auto mb-2.5 animate-spin" />
+              <p className="text-sm font-bold text-foreground">Carregando cobertura…</p>
+              <p className="text-[12.5px] text-muted-foreground mt-1.5">Consultando a ApiDovale para os segmentos selecionados.</p>
             </div>
-          )}
-
-          {/* Dashboard */}
-          {cnae && !isError && (temDados || isFetching) && (
+          ) : !hasData ? (
+            <div className="glass-card rounded-xl p-12 text-center">
+              <MapPin className="w-7 h-7 text-muted-foreground/50 mx-auto mb-2.5" />
+              <p className="text-sm font-bold text-foreground">Nenhum cadastro encontrado</p>
+              <p className="text-[12.5px] text-muted-foreground mt-1.5">A ApiDovale não retornou registros para os segmentos selecionados.</p>
+            </div>
+          ) : (
             <>
               {/* KPIs */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <KpiCard icon={<Users className="w-5 h-5" />} label="Clientes na base" value={fmt(totais.naBase)} tone="emerald" />
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+                <KpiCard icon={<Users className="w-5 h-5" />} label="Clientes na base" value={fmt(totais.naBase)} tone="success" />
+                <KpiCard icon={<CheckCircle2 className="w-5 h-5" />} label="Clientes ativos" value={fmt(totais.ativos)} tone="gold" trend={`${pctAtiva}% da base`} />
                 <KpiCard icon={<Target className="w-5 h-5" />} label="Fora da base (potencial)" value={fmt(totais.foraBase)} tone="slate" />
-                <KpiCard icon={<TrendingUp className="w-5 h-5" />} label="Cobertura geral" value={`${coberturaGeral}%`} tone="blue" />
-                <KpiCard icon={<MapPin className="w-5 h-5" />} label="Estados" value={String(states.length)} tone="violet" />
+                <KpiCard icon={<TrendingUp className="w-5 h-5" />} label="Cobertura geral" value={`${coberturaGeral}%`} tone="primary" />
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Pizza */}
-                <div className="glass-card rounded-xl p-6 border border-border bg-card">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                    % de clientes na base
-                  </h3>
-                  <div className="relative h-56">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie data={pieData} dataKey="value" nameKey="name" innerRadius={60} outerRadius={90} paddingAngle={2} stroke="none">
-                          {pieData.map((d) => (
-                            <Cell key={d.name} fill={d.cor} />
-                          ))}
-                        </Pie>
-                      </PieChart>
-                    </ResponsiveContainer>
-                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                      <span className="text-3xl font-bold text-foreground">{coberturaGeral}%</span>
-                      <span className="text-[10px] uppercase tracking-widest text-muted-foreground">na base</span>
-                    </div>
+              {/* Donut + Mapa */}
+              <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-5 items-stretch">
+                <div className="glass-card rounded-xl p-5 flex flex-col">
+                  <h3 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Composição da base e do mercado</h3>
+                  <div className="flex-1 flex items-center justify-center py-2.5">
+                    <DonutChart size={220} data={pieData} centerValue={`${coberturaGeral}%`} centerLabel="na base" activeIndex={donutHover} onHover={setDonutHover} />
                   </div>
-                  <div className="mt-2 space-y-1">
-                    {pieData.map((d) => (
-                      <div key={d.name} className="flex items-center justify-between text-xs">
+                  <div className="text-center text-[12.5px] text-muted-foreground -mt-0.5 mb-2.5">
+                    <b className="text-[hsl(145_55%_38%)] font-bold">{pctAtiva}%</b> da base está ativa
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {pieData.map((d, i) => (
+                      <div
+                        key={d.name}
+                        onMouseEnter={() => setDonutHover(i)}
+                        onMouseLeave={() => setDonutHover(null)}
+                        className={`flex items-center justify-between text-[13px] px-2 py-1.5 rounded-sm transition-colors ${donutHover === i ? "bg-muted" : ""}`}
+                      >
                         <span className="flex items-center gap-2 text-muted-foreground">
-                          <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: d.cor }} />
+                          <span className="w-2.5 h-2.5 rounded-[3px] inline-block" style={{ background: d.color }} />
                           {d.name}
                         </span>
-                        <span className="font-mono text-foreground">{fmt(d.value)}</span>
+                        <span className="font-mono text-xs text-foreground">{fmt(d.value)}</span>
                       </div>
                     ))}
                   </div>
                 </div>
 
-                {/* Mapa */}
-                <div className="glass-card rounded-xl p-4 border border-border bg-card lg:col-span-2">
-                  <div className="flex items-center justify-between mb-1">
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      Cobertura por estado {selected && `— ${statesBySigla[selected]?.nome}`}
-                    </h3>
-                    {selected && (
-                      <button onClick={() => setSelected(null)} className="text-[11px] text-primary hover:underline">
-                        limpar seleção
-                      </button>
+                <div className="glass-card rounded-xl p-4 flex flex-col">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <h3 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Cobertura por estado{tituloEstado}</h3>
+                    {selStates.length > 0 && (
+                      <button onClick={() => setSelStates([])} className="text-[11px] text-primary hover:underline">limpar seleção</button>
                     )}
                   </div>
-
-                  <div className="relative">
-                    <ComposableMap
-                      projection="geoMercator"
-                      projectionConfig={{ scale: 780, center: [-54, -15] }}
-                      width={800}
-                      height={520}
-                      style={{ width: "100%", height: "auto" }}
-                    >
-                      <Geographies geography={GEO_URL}>
-                        {({ geographies }: { geographies: any[] }) =>
-                          geographies.map((geo) => {
-                            const sigla = geo.properties.sigla as string;
-                            const st = statesBySigla[sigla];
-                            const pct = st ? coberturaPct(st.naBase, st.foraBase) : 0;
-                            const semDados = !st;
-                            const isSel = selected === sigla;
-                            return (
-                              <Geography
-                                key={geo.rsmKey}
-                                geography={geo}
-                                onMouseEnter={(e) =>
-                                  setHover({ nome: st?.nome ?? sigla, pct, x: e.clientX, y: e.clientY })
-                                }
-                                onMouseMove={(e) =>
-                                  setHover((h) => (h ? { ...h, x: e.clientX, y: e.clientY } : h))
-                                }
-                                onMouseLeave={() => setHover(null)}
-                                onClick={() => st && setSelected((s) => (s === sigla ? null : sigla))}
-                                style={{
-                                  default: {
-                                    fill: semDados ? "#cbd5e1" : corCobertura(pct),
-                                    stroke: "#0f172a",
-                                    strokeWidth: isSel ? 1.5 : 0.5,
-                                    opacity: selected && !isSel ? 0.45 : semDados ? 0.4 : 0.9,
-                                    outline: "none",
-                                    cursor: st ? "pointer" : "default",
-                                  },
-                                  hover: { fill: semDados ? "#cbd5e1" : corCobertura(pct), opacity: 1, outline: "none", cursor: st ? "pointer" : "default" },
-                                  pressed: { fill: semDados ? "#cbd5e1" : corCobertura(pct), outline: "none" },
-                                }}
-                              />
-                            );
-                          })
-                        }
-                      </Geographies>
-                    </ComposableMap>
-
-                    {hover && (
-                      <div
-                        className="fixed z-50 pointer-events-none rounded-md border border-border bg-popover px-2.5 py-1.5 text-xs shadow-lg"
-                        style={{ left: hover.x + 12, top: hover.y + 12 }}
-                      >
-                        <div className="font-semibold text-foreground">{hover.nome}</div>
-                        <div className="text-muted-foreground">
-                          cobertura <span className="font-mono" style={{ color: corCobertura(hover.pct) }}>{hover.pct}%</span>
-                        </div>
-                      </div>
-                    )}
+                  <div className="flex-1 flex items-center">
+                    <BrazilCoverageMap data={mapData} selected={selStates} onSelect={toggleState} width={720} height={520} />
                   </div>
-
-                  {/* Legenda */}
-                  <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
-                    <span className="text-[10px] uppercase tracking-widest text-muted-foreground">Cobertura:</span>
-                    {LEGENDA.map((l) => (
-                      <span key={l.label} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                        <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: l.cor }} />
-                        {l.label}
-                      </span>
-                    ))}
+                  <div className="mt-2">
+                    <CoverageLegend />
                   </div>
                 </div>
               </div>
 
-              {/* Drill de cidade / oportunidades */}
-              <div className="glass-card rounded-xl p-6 border border-border bg-card">
+              {/* Drill / oportunidades — 3 modos */}
+              <div className="glass-card rounded-xl p-5">
                 {estado ? (
-                  <>
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-sm font-semibold text-foreground">
-                        {estado.nome} — cobertura por cidade
-                      </h3>
-                      <span className="text-xs text-muted-foreground">
-                        {fmt(estado.naBase)} na base · {fmt(estado.foraBase)} fora · {coberturaPct(estado.naBase, estado.foraBase)}%
+                  <div>
+                    <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                      <div className="flex items-center gap-2.5">
+                        <h3 className="text-[15px] font-bold text-foreground">{estado.nome} — base por cidade</h3>
+                        <span className="text-[11px] rounded-full border border-border px-2 py-0.5 text-muted-foreground">{estado.cidades.length} cidades</span>
+                        <span className="text-[11px] rounded-full bg-success text-success-foreground px-2 py-0.5 font-semibold">{pctOf(estado.ativos, estado.naBase - estado.ativos)}% ativos</span>
+                      </div>
+                      <span className="text-xs text-muted-foreground font-mono">
+                        {fmt(estado.naBase)} na base · {fmt(estado.ativos)} ativos · {fmt(estado.foraBase)} fora
                       </span>
                     </div>
-                    <div className="space-y-3 max-h-[28rem] overflow-y-auto pr-1">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3.5 max-h-[30rem] overflow-y-auto pr-1">
                       {estado.cidades.map((c) => {
-                        const pct = coberturaPct(c.naBase, c.foraBase);
-                        return (
-                          <div key={c.cidade}>
-                            <div className="flex items-center justify-between text-xs mb-1">
-                              <span className="text-foreground">{c.cidade}</span>
-                              <span className="text-muted-foreground font-mono">
-                                {fmt(c.naBase)} / {fmt(c.naBase + c.foraBase)} · {pct}%
-                              </span>
-                            </div>
-                            <div className="h-2.5 w-full rounded-full bg-muted overflow-hidden">
-                              <div className="h-full rounded-full" style={{ width: `${pct}%`, background: corCobertura(pct) }} />
-                            </div>
-                          </div>
-                        );
+                        const p = pctOf(c.naBase, c.foraBase);
+                        return <CoverageBar key={c.cidade} label={c.cidade} pct={p} meta={`${fmt(c.ativos)} ativos / ${fmt(c.naBase)} na base · ${p}%`} />;
                       })}
                     </div>
-                  </>
+                  </div>
+                ) : selStates.length > 1 ? (
+                  <div>
+                    <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                      <h3 className="text-[15px] font-bold text-foreground">{selStates.length} estados selecionados</h3>
+                      <span className="text-xs text-muted-foreground font-mono">{fmt(totais.naBase)} na base · {fmt(totais.ativos)} ativos · {coberturaGeral}%</span>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3.5">
+                      {selStates.map((sg) => {
+                        const s = view[sg];
+                        if (!s) return null;
+                        const p = pctOf(s.naBase, s.foraBase);
+                        return <CoverageBar key={sg} label={s.nome} pct={p} meta={`${fmt(s.ativos)} ativos / ${fmt(s.naBase)} na base · ${p}%`} onClick={() => setSelStates([sg])} />;
+                      })}
+                    </div>
+                  </div>
                 ) : (
-                  <>
-                    <h3 className="text-sm font-semibold text-foreground mb-1">Maiores oportunidades</h3>
-                    <p className="text-xs text-muted-foreground mb-4">
-                      Estados com menor cobertura — clique num estado no mapa para ver as cidades.
-                    </p>
-                    <div className="space-y-3">
-                      {oportunidades.map((s) => {
-                        const pct = coberturaPct(s.naBase, s.foraBase);
-                        return (
-                          <button
-                            key={s.sigla}
-                            onClick={() => setSelected(s.sigla)}
-                            className="w-full text-left"
-                          >
-                            <div className="flex items-center justify-between text-xs mb-1">
-                              <span className="text-foreground">{s.nome}</span>
-                              <span className="text-muted-foreground font-mono">
-                                {fmt(s.foraBase)} fora da base · {pct}%
-                              </span>
-                            </div>
-                            <div className="h-2.5 w-full rounded-full bg-muted overflow-hidden">
-                              <div className="h-full rounded-full" style={{ width: `${pct}%`, background: corCobertura(pct) }} />
-                            </div>
-                          </button>
-                        );
-                      })}
+                  <div>
+                    <div className="flex items-center gap-2.5 mb-1">
+                      <Sparkles className="w-[18px] h-[18px] text-[hsl(75_55%_42%)]" />
+                      <h3 className="text-[15px] font-bold text-foreground">Maiores oportunidades</h3>
                     </div>
-                  </>
+                    <p className="text-[12.5px] text-muted-foreground mb-4">Estados com menor cobertura — clique num estado no mapa para ver as cidades.</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3.5">
+                      {oportunidades.map((s) => (
+                        <CoverageBar key={s.sg} label={s.nome} pct={s.pct} meta={`${fmt(s.foraBase)} fora da base · ${s.pct}%`} onClick={() => setSelStates([s.sg])} />
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
             </>
           )}
         </div>
       </main>
-    </div>
-  );
-}
-
-// ── Combobox de CNAE (busca + lista filtrada) ────────────────────────────────
-function CnaeSelect({
-  options,
-  value,
-  loading,
-  onChange,
-}: {
-  options: string[];
-  value: string | null;
-  loading: boolean;
-  onChange: (v: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState("");
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
-
-  const filtradas = useMemo(() => {
-    const t = q.trim().toLocaleLowerCase("pt-BR");
-    const base = t ? options.filter((o) => o.toLocaleLowerCase("pt-BR").includes(t)) : options;
-    return base.slice(0, 200);
-  }, [options, q]);
-
-  return (
-    <div ref={ref} className="relative flex-1 min-w-0">
-      <button
-        type="button"
-        disabled={loading}
-        onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center gap-2 rounded-lg border border-input bg-background px-3 py-2 text-sm text-left hover:border-primary/50 transition-colors disabled:opacity-60"
-      >
-        <span className={`flex-1 truncate ${value ? "text-foreground" : "text-muted-foreground"}`}>
-          {loading ? "Carregando segmentos…" : value ?? "Selecione um CNAE…"}
-        </span>
-        <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
-      </button>
-
-      {open && !loading && (
-        <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-popover shadow-xl">
-          <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-            <Search className="w-3.5 h-3.5 text-muted-foreground" />
-            <input
-              autoFocus
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Buscar segmento…"
-              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-            />
-          </div>
-          <div className="max-h-72 overflow-y-auto py-1">
-            {filtradas.length === 0 ? (
-              <p className="px-3 py-4 text-center text-xs text-muted-foreground">Nenhum segmento.</p>
-            ) : (
-              filtradas.map((o) => (
-                <button
-                  key={o}
-                  type="button"
-                  onClick={() => {
-                    onChange(o);
-                    setOpen(false);
-                    setQ("");
-                  }}
-                  className={`w-full truncate px-3 py-2 text-left text-sm hover:bg-primary/10 ${o === value ? "text-primary font-medium" : "text-foreground"}`}
-                >
-                  {o}
-                </button>
-              ))
-            )}
-            {options.length > filtradas.length && q.trim() === "" && (
-              <p className="px-3 py-2 text-center text-[10px] text-muted-foreground">
-                digite para buscar entre {options.length} segmentos
-              </p>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function KpiCard({
-  icon,
-  label,
-  value,
-  tone,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  tone: "emerald" | "slate" | "blue" | "violet";
-}) {
-  const tones: Record<string, string> = {
-    emerald: "text-emerald-500 bg-emerald-500/10",
-    slate: "text-slate-400 bg-slate-400/10",
-    blue: "text-blue-500 bg-blue-500/10",
-    violet: "text-violet-500 bg-violet-500/10",
-  };
-  return (
-    <div className="glass-card rounded-xl p-4 border border-border bg-card flex items-center gap-3">
-      <div className={`h-10 w-10 rounded-lg flex items-center justify-center ${tones[tone]}`}>{icon}</div>
-      <div>
-        <div className="text-xl font-bold text-foreground leading-tight">{value}</div>
-        <div className="text-[11px] text-muted-foreground">{label}</div>
-      </div>
     </div>
   );
 }

@@ -102,6 +102,14 @@ function fmtCurrency(v: number | null) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
+// Momento da última contagem do item (máximo entre os locais) — usado para a "fila" de contagem
+function itemLastCountedAt(item: Item): number | null {
+  const times = (item.contagens || [])
+    .filter((c) => c.contado_em)
+    .map((c) => new Date(c.contado_em!).getTime());
+  return times.length ? Math.max(...times) : null;
+}
+
 // ── Inline Contagem Cell ─────────────────────────────────────────────────────
 
 function ContagemCell({
@@ -221,6 +229,13 @@ export default function Inventario() {
   }, [locais]);
   const [savingContagem, setSavingContagem] = useState(false);
 
+  // Lookup de descrição do produto (preview ao digitar o código)
+  const [lookupInfo, setLookupInfo] = useState<{ codigo: string; descricao: string | null; qtd_sistema: number | null; loading: boolean; notFound: boolean } | null>(null);
+
+  // Confirmation modal (novo item a contar)
+  const [showConfirmContagem, setShowConfirmContagem] = useState(false);
+  const [confirmContagemInfo, setConfirmContagemInfo] = useState<{ codigo: string; descricao: string | null; qtd: number; localNome: string } | null>(null);
+
   // Recount confirmation modal
   const [showRecontagem, setShowRecontagem] = useState(false);
   const [recontagemInfo, setRecontagemInfo] = useState<{ item: Item; contagem: Contagem; novaQtd: number } | null>(null);
@@ -235,9 +250,9 @@ export default function Inventario() {
   const [itemSearch, setItemSearch] = useState("");
   const [itemPage, setItemPage] = useState(1);
   const [sessaoFilter, setSessaoFilter] = useState<string>("all");
-  const [itemSort, setItemSort] = useState<{ col: "diferenca" | "vlr_diferenca" | null; dir: "asc" | "desc" }>({ col: null, dir: "desc" });
+  const [itemSort, setItemSort] = useState<{ col: "diferenca" | "vlr_diferenca" | "contado_em" | null; dir: "asc" | "desc" }>({ col: null, dir: "desc" });
 
-  const toggleSort = (col: "diferenca" | "vlr_diferenca") => {
+  const toggleSort = (col: "diferenca" | "vlr_diferenca" | "contado_em") => {
     setItemSort((prev) => prev.col === col ? { col, dir: prev.dir === "desc" ? "asc" : "desc" } : { col, dir: "desc" });
     setItemPage(1);
   };
@@ -517,11 +532,70 @@ export default function Inventario() {
     finally { setSavingContagem(false); }
   };
 
+  // Busca a descrição do produto ao digitar o código (preview de conferência)
+  useEffect(() => {
+    const codigo = contagemCodigo.trim();
+    if (!codigo || !selectedSessao) { setLookupInfo(null); return; }
+
+    // Item já na sessão → usa a descrição local, sem consultar o Firebird
+    const existing = itens.find((i) => String(i.pro_codigo) === codigo);
+    if (existing) {
+      setLookupInfo({ codigo, descricao: existing.descricao, qtd_sistema: existing.qtd_sistema, loading: false, notFound: false });
+      return;
+    }
+
+    let cancelled = false;
+    setLookupInfo({ codigo, descricao: null, qtd_sistema: null, loading: true, notFound: false });
+    const t = setTimeout(async () => {
+      try {
+        const data = await apiFetch(`/produto/${encodeURIComponent(codigo)}?loja=${encodeURIComponent(selectedSessao.loja)}`);
+        if (!cancelled) setLookupInfo({ codigo, descricao: data.descricao ?? null, qtd_sistema: data.qtd_sistema ?? null, loading: false, notFound: false });
+      } catch {
+        if (!cancelled) setLookupInfo({ codigo, descricao: null, qtd_sistema: null, loading: false, notFound: true });
+      }
+    }, 400);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [contagemCodigo, selectedSessao, itens, apiFetch]);
+
   const handleInsertContagem = async () => {
     if (!selectedSessao || !contagemCodigo.trim() || !contagemLocalId || contagemQtd === "") return;
     const codigo = contagemCodigo.trim();
-    let item = itens.find((i) => String(i.pro_codigo) === codigo);
+    const existing = itens.find((i) => String(i.pro_codigo) === codigo);
 
+    // Item já contado neste local → fluxo de recontagem (confirmação própria)
+    if (existing) {
+      const contagem = existing.contagens?.find((c) => c.local_id === contagemLocalId);
+      if (contagem && contagem.qtd_contada !== null) {
+        if (!isManager) {
+          toast.error("Este item já foi contado. Somente Gerente ou Administrador pode recontar.");
+          return;
+        }
+        setRecontagemInfo({ item: existing, contagem, novaQtd: Number(contagemQtd) });
+        setShowRecontagem(true);
+        return;
+      }
+    }
+
+    // Produto não localizado no Firebird → não deixa contar às cegas
+    if (!existing && lookupInfo && lookupInfo.codigo === codigo && lookupInfo.notFound) {
+      toast.error(`Produto ${codigo} não encontrado no Firebird`);
+      return;
+    }
+
+    const descricao = existing?.descricao ?? (lookupInfo && lookupInfo.codigo === codigo ? lookupInfo.descricao : null);
+    const localNome = locais.find((l) => l.id === contagemLocalId)?.nome ?? "";
+    setConfirmContagemInfo({ codigo, descricao, qtd: Number(contagemQtd), localNome });
+    setShowConfirmContagem(true);
+  };
+
+  // Confirma e grava a contagem (cria o item na sessão se ainda não existir)
+  const confirmInsertContagem = async () => {
+    if (!selectedSessao || !confirmContagemInfo || !contagemLocalId) return;
+    const { codigo, qtd } = confirmContagemInfo;
+    setShowConfirmContagem(false);
+    setConfirmContagemInfo(null);
+
+    let item = itens.find((i) => String(i.pro_codigo) === codigo);
     if (!item) {
       setSavingContagem(true);
       try {
@@ -542,18 +616,7 @@ export default function Inventario() {
     const contagem = item.contagens?.find((c) => c.local_id === contagemLocalId);
     if (!contagem) { toast.error("Contagem não encontrada para este local"); return; }
 
-    // If already counted at this local, require manager confirmation
-    if (contagem.qtd_contada !== null) {
-      if (!isManager) {
-        toast.error("Este item já foi contado. Somente Gerente ou Administrador pode recontar.");
-        return;
-      }
-      setRecontagemInfo({ item, contagem, novaQtd: Number(contagemQtd) });
-      setShowRecontagem(true);
-      return;
-    }
-
-    await saveContagem(contagem.id, Number(contagemQtd));
+    await saveContagem(contagem.id, qtd);
   };
 
   const confirmRecontagem = async () => {
@@ -659,11 +722,15 @@ export default function Inventario() {
     if (itemSort.col) {
       const sorted = [...list];
       sorted.sort((a, b) => {
-        const diffA = a.qtd_contada !== null ? a.qtd_contada - a.qtd_sistema : null;
-        const diffB = b.qtd_contada !== null ? b.qtd_contada - b.qtd_sistema : null;
         let valA: number | null, valB: number | null;
-        if (itemSort.col === "diferenca") { valA = diffA; valB = diffB; }
-        else { valA = diffA !== null && a.custo_fiscal !== null ? diffA * a.custo_fiscal : null; valB = diffB !== null && b.custo_fiscal !== null ? diffB * b.custo_fiscal : null; }
+        if (itemSort.col === "contado_em") {
+          valA = itemLastCountedAt(a); valB = itemLastCountedAt(b);
+        } else {
+          const diffA = a.qtd_contada !== null ? a.qtd_contada - a.qtd_sistema : null;
+          const diffB = b.qtd_contada !== null ? b.qtd_contada - b.qtd_sistema : null;
+          if (itemSort.col === "diferenca") { valA = diffA; valB = diffB; }
+          else { valA = diffA !== null && a.custo_fiscal !== null ? diffA * a.custo_fiscal : null; valB = diffB !== null && b.custo_fiscal !== null ? diffB * b.custo_fiscal : null; }
+        }
         if (valA === null && valB === null) return 0;
         if (valA === null) return 1;
         if (valB === null) return -1;
@@ -1084,7 +1151,8 @@ export default function Inventario() {
                       <span className="text-[10px] text-muted-foreground">{showContagem ? "▲" : "▼"}</span>
                     </div>
                     {showContagem && (
-                      <div className="flex flex-col sm:flex-row gap-2 mt-3" onClick={(e) => e.stopPropagation()}>
+                      <div className="mt-3" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex flex-col sm:flex-row gap-2">
                         <input type="text" inputMode="numeric" pattern="[0-9]*" value={contagemCodigo} onChange={(e) => setContagemCodigo(onlyDigits(e.target.value))}
                           placeholder="Código do produto"
                           className="flex-1 min-w-0 rounded-lg border border-border bg-muted px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50" />
@@ -1106,6 +1174,24 @@ export default function Inventario() {
                           className="inline-flex items-center gap-1.5 rounded-lg bg-teal-600 px-4 py-2 text-xs font-semibold text-white hover:bg-teal-700 disabled:opacity-50 transition-colors">
                           {savingContagem ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />} Salvar
                         </button>
+                      </div>
+                      {/* Preview da descrição — conferência do item */}
+                      {contagemCodigo.trim() && lookupInfo && lookupInfo.codigo === contagemCodigo.trim() && (
+                        <div className="mt-2 text-xs">
+                          {lookupInfo.loading ? (
+                            <span className="flex items-center gap-1.5 text-muted-foreground"><Loader2 className="w-3 h-3 animate-spin" /> Buscando descrição...</span>
+                          ) : lookupInfo.notFound ? (
+                            <span className="flex items-center gap-1.5 text-red-500"><XCircle className="w-3 h-3" /> Produto {contagemCodigo.trim()} não encontrado no sistema</span>
+                          ) : (
+                            <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-teal-700 dark:text-teal-400">
+                              <CheckCircle2 className="w-3 h-3 shrink-0" />
+                              <span className="font-semibold">{lookupInfo.codigo}</span>
+                              <span className="text-foreground">— {lookupInfo.descricao || "(sem descrição)"}</span>
+                              {lookupInfo.qtd_sistema !== null && <span className="text-muted-foreground">· sistema: {lookupInfo.qtd_sistema}</span>}
+                            </span>
+                          )}
+                        </div>
+                      )}
                       </div>
                     )}
                   </div>
@@ -1136,7 +1222,7 @@ export default function Inventario() {
 
                 {/* Items table */}
                 <div className="rounded-xl border border-border overflow-x-auto">
-                  <table className="w-full text-sm" style={{ minWidth: `${700 + locais.length * 100}px` }}>
+                  <table className="w-full text-sm" style={{ minWidth: `${820 + locais.length * 100}px` }}>
                     <thead>
                       <tr className="border-b border-border bg-muted/50">
                         <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Código</th>
@@ -1156,11 +1242,14 @@ export default function Inventario() {
                           Vlr Diferença {itemSort.col === "vlr_diferenca" ? (itemSort.dir === "desc" ? "▼" : "▲") : ""}
                         </th>
                         <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Contado por</th>
+                        <th className="px-4 py-3 text-right text-[10px] uppercase tracking-widest text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors" onClick={() => toggleSort("contado_em")}>
+                          Contado em {itemSort.col === "contado_em" ? (itemSort.dir === "desc" ? "▼" : "▲") : ""}
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
                       {pagedItems.length === 0 ? (
-                        <tr><td colSpan={8 + locais.length} className="px-4 py-8 text-center text-muted-foreground text-xs">Nenhum item encontrado.</td></tr>
+                        <tr><td colSpan={9 + locais.length} className="px-4 py-8 text-center text-muted-foreground text-xs">Nenhum item encontrado.</td></tr>
                       ) : pagedItems.map((item) => {
                         const diff = item.qtd_contada !== null ? item.qtd_contada - item.qtd_sistema : null;
                         const valorDiff = diff !== null && item.custo_fiscal !== null ? diff * item.custo_fiscal : null;
@@ -1195,6 +1284,9 @@ export default function Inventario() {
                                 const users = [...new Set(item.contagens?.filter((c) => c.contado_por).map((c) => c.contado_por!))];
                                 return users.length > 0 ? users.join(", ") : "—";
                               })()}
+                            </td>
+                            <td className="px-4 py-2 text-xs text-right text-muted-foreground whitespace-nowrap tabular-nums">
+                              {(() => { const t = itemLastCountedAt(item); return t ? fmtDate(new Date(t).toISOString()) : "—"; })()}
                             </td>
                           </tr>
                         );
@@ -1330,6 +1422,51 @@ export default function Inventario() {
                 onClick={confirmRecontagem}
                 className="px-4 py-2 rounded-lg text-xs font-semibold bg-orange-500 text-white hover:bg-orange-600 transition-colors">
                 Confirmar Recontagem
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmação do item a ser contado */}
+      {showConfirmContagem && confirmContagemInfo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-xl space-y-4 mx-4">
+            <div className="flex items-center gap-2 text-teal-600">
+              <PackageCheck className="w-5 h-5" />
+              <h3 className="text-sm font-bold">Confirmar contagem</h3>
+            </div>
+            <p className="text-xs text-muted-foreground">Confira se é o item certo antes de gravar:</p>
+            <div className="rounded-lg bg-muted p-4 space-y-2">
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Produto</p>
+                <p className="text-sm font-bold text-foreground font-mono">{confirmContagemInfo.codigo}</p>
+                <p className="text-sm text-foreground">{confirmContagemInfo.descricao || "(sem descrição)"}</p>
+              </div>
+              <div className="flex gap-6 pt-1">
+                {confirmContagemInfo.localNome && (
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Local</p>
+                    <p className="text-sm font-semibold text-foreground">{confirmContagemInfo.localNome}</p>
+                  </div>
+                )}
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Quantidade</p>
+                  <p className="text-sm font-bold text-teal-600">{confirmContagemInfo.qtd}</p>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={() => { setShowConfirmContagem(false); setConfirmContagemInfo(null); }}
+                className="px-4 py-2 rounded-lg text-xs font-semibold bg-secondary text-foreground hover:bg-muted transition-colors">
+                Cancelar
+              </button>
+              <button
+                onClick={confirmInsertContagem}
+                disabled={savingContagem}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50 transition-colors">
+                {savingContagem ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />} Confirmar contagem
               </button>
             </div>
           </div>

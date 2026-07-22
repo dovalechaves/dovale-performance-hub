@@ -178,43 +178,56 @@ router.get("/clientes", async (req, res) => {
     }
 
     const allEntries = Object.values(clientesMap);
+
+    // 1) Calcula métricas de todos os clientes (sem categoria ainda)
+    const computed = allEntries.map((c) => {
+      const pedidos = Array.from(c.pedidos.values()).sort(
+        (a, b) => new Date(b.data).getTime() - new Date(a.data).getTime()
+      );
+      const ultima = pedidos[0] ?? null;
+      const valorTotal = pedidos.reduce((acc, p) => acc + p.valor, 0);
+      const ticketMedio = pedidos.length > 0 ? valorTotal / pedidos.length : 0;
+      const diasSemComprar = ultima?.data
+        ? Math.floor((Date.now() - new Date(ultima.data).getTime()) / 86400000)
+        : 9999;
+
+      const topProdutos = Object.entries(c.produtos)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([n]) => n);
+
+      return {
+        id: c.id,
+        nome: c.nome,
+        telefone: c.telefone,
+        cidade: c.cidade,
+        produtoFavorito: topProdutos.length > 0 ? topProdutos.join(", ") : "Diversos",
+        ultimaCompra: ultima?.data ? new Date(ultima.data).toISOString() : new Date().toISOString(),
+        valorUltimaCompra: ultima?.valor ?? 0,
+        ticketMedio,
+        frequenciaMensal: pedidos.length >= 3 && diasSemComprar <= 30,
+        repId: c.repId,
+      };
+    });
+
+    // 2) Ranking percentil por ticket médio (relativo à base carregada).
+    //    Do maior ticket para o menor:
+    //      A = top 20% (100–80%) | B = 20–40% | C = 40–70% | D = 30% inferior
+    computed.sort((a, b) => b.ticketMedio - a.ticketMedio);
+    const total = computed.length;
+    const withCategoria = computed.map((c, idx) => {
+      const frac = total > 0 ? idx / total : 0; // 0 = maior ticket médio
+      const categoria = frac < 0.20 ? "A" : frac < 0.40 ? "B" : frac < 0.70 ? "C" : "D";
+      return { ...c, categoria };
+    });
+
+    // 3) Envia em lotes
     const BATCH_SIZE = 150;
-
-    for (let i = 0; i < allEntries.length; i += BATCH_SIZE) {
-      const batch = allEntries.slice(i, i + BATCH_SIZE).map((c) => {
-        const pedidos = Array.from(c.pedidos.values()).sort(
-          (a, b) => new Date(b.data).getTime() - new Date(a.data).getTime()
-        );
-        const ultima = pedidos[0] ?? null;
-        const valorTotal = pedidos.reduce((acc, p) => acc + p.valor, 0);
-        const ticketMedio = pedidos.length > 0 ? valorTotal / pedidos.length : 0;
-        const diasSemComprar = ultima?.data
-          ? Math.floor((Date.now() - new Date(ultima.data).getTime()) / 86400000)
-          : 9999;
-
-        const topProdutos = Object.entries(c.produtos)
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 3)
-          .map(([n]) => n);
-
-        return {
-          id: c.id,
-          nome: c.nome,
-          telefone: c.telefone,
-          cidade: c.cidade,
-          categoria: ticketMedio > 800 ? "A" : ticketMedio > 500 ? "B" : ticketMedio > 300 ? "C" : "D",
-          produtoFavorito: topProdutos.length > 0 ? topProdutos.join(", ") : "Diversos",
-          ultimaCompra: ultima?.data ? new Date(ultima.data).toISOString() : new Date().toISOString(),
-          valorUltimaCompra: ultima?.valor ?? 0,
-          ticketMedio,
-          frequenciaMensal: pedidos.length >= 3 && diasSemComprar <= 30,
-          repId: c.repId,
-        };
-      });
-      send("chunk", batch);
+    for (let i = 0; i < withCategoria.length; i += BATCH_SIZE) {
+      send("chunk", withCategoria.slice(i, i + BATCH_SIZE));
     }
 
-    send("done", { total: allEntries.length });
+    send("done", { total });
   } catch (err: any) {
     console.error("[sales-compass] /clientes:", err.message);
     send("error", { message: err.message || "Erro ao buscar clientes." });

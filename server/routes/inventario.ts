@@ -104,6 +104,7 @@ const INVENTARIO_LOJA_LABELS: Record<string, string> = {
   fortaleza: "Fortaleza",
   uberlandia: "Uberlandia",
   goiania: "Goiania",
+  bosque: "Bosque",
 };
 
 function normalizeLoja(raw: unknown): FirebirdLoja {

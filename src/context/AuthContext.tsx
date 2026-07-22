@@ -63,6 +63,11 @@ interface AuthUser {
       role: Role;
       loja: string | null;
     };
+    prospeccao: {
+      canAccess: boolean;
+      role: Role;
+      loja: string | null;
+    };
     score: {
       canAccess: boolean;
       role: Role;
@@ -121,6 +126,7 @@ interface AuthContextValue {
       onboarding?: { role?: string; loja?: string | null; can_access?: boolean };
       primeiramov?: { role?: string; loja?: string | null; can_access?: boolean };
       invfull?: { role?: string; loja?: string | null; can_access?: boolean };
+      prospeccao?: { role?: string; loja?: string | null; can_access?: boolean };
       score?: { role?: string; loja?: string | null; can_access?: boolean };
       cobranca?: { role?: string; loja?: string | null; can_access?: boolean };
       ecommercedisparo?: { role?: string; loja?: string | null; can_access?: boolean };
@@ -159,6 +165,7 @@ function buildUser(
     onboarding?: { role?: string; loja?: string | null; can_access?: boolean };
     primeiramov?: { role?: string; loja?: string | null; can_access?: boolean };
     invfull?: { role?: string; loja?: string | null; can_access?: boolean };
+    prospeccao?: { role?: string; loja?: string | null; can_access?: boolean };
     score?: { role?: string; loja?: string | null; can_access?: boolean };
     cobranca?: { role?: string; loja?: string | null; can_access?: boolean };
     ecommercedisparo?: { role?: string; loja?: string | null; can_access?: boolean };
@@ -193,6 +200,8 @@ function buildUser(
   const primeiramovAccess = apiApps?.primeiramov?.can_access ?? false;
   const invfullRole = resolveRole(usuario, apiApps?.invfull?.role ?? apiRole);
   const invfullAccess = apiApps?.invfull?.can_access ?? false;
+  const prospeccaoRole = resolveRole(usuario, apiApps?.prospeccao?.role ?? apiRole);
+  const prospeccaoAccess = apiApps?.prospeccao?.can_access ?? false;
   const scoreRole = resolveRole(usuario, apiApps?.score?.role ?? apiRole);
   const scoreAccess = apiApps?.score?.can_access ?? false;
   const cobrancaRole = resolveRole(usuario, apiApps?.cobranca?.role ?? apiRole);
@@ -271,6 +280,11 @@ function buildUser(
         role: invfullRole,
         loja: null,
       },
+      prospeccao: {
+        canAccess: prospeccaoAccess,
+        role: prospeccaoRole,
+        loja: null,
+      },
       score: {
         canAccess: scoreAccess,
         role: scoreRole,
@@ -338,6 +352,8 @@ function loadFromStorage(): AuthUser | null {
     const primeiramovAccess = (parsed.apps as any)?.primeiramov?.canAccess ?? false;
     const invfullRole = (parsed.apps as any)?.invfull?.role ?? parsed.role;
     const invfullAccess = (parsed.apps as any)?.invfull?.canAccess ?? false;
+    const prospeccaoRole = (parsed.apps as any)?.prospeccao?.role ?? parsed.role;
+    const prospeccaoAccess = (parsed.apps as any)?.prospeccao?.canAccess ?? false;
     const scoreRole = (parsed.apps as any)?.score?.role ?? parsed.role;
     const scoreAccess = (parsed.apps as any)?.score?.canAccess ?? false;
     const cobrancaRole = (parsed.apps as any)?.cobranca?.role ?? parsed.role;
@@ -414,6 +430,11 @@ function loadFromStorage(): AuthUser | null {
         invfull: {
           canAccess: invfullAccess,
           role: invfullRole,
+          loja: null,
+        },
+        prospeccao: {
+          canAccess: prospeccaoAccess,
+          role: prospeccaoRole,
           loja: null,
         },
         score: {
@@ -505,6 +526,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       onboarding?: { role?: string; loja?: string | null; can_access?: boolean };
       primeiramov?: { role?: string; loja?: string | null; can_access?: boolean };
       invfull?: { role?: string; loja?: string | null; can_access?: boolean };
+      prospeccao?: { role?: string; loja?: string | null; can_access?: boolean };
       score?: { role?: string; loja?: string | null; can_access?: boolean };
       cobranca?: { role?: string; loja?: string | null; can_access?: boolean };
       ecommercedisparo?: { role?: string; loja?: string | null; can_access?: boolean };

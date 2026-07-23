@@ -350,14 +350,14 @@ export default function ClientesProspeccao() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground border-b border-border">
-                      <th className="font-semibold px-4 py-2.5 whitespace-nowrap">Razão social</th>
-                      <th className="font-semibold px-4 py-2.5 whitespace-nowrap">CNPJ</th>
-                      <th className="font-semibold px-4 py-2.5 whitespace-nowrap">Cidade / UF</th>
-                      <th className="font-semibold px-4 py-2.5 whitespace-nowrap">Telefone</th>
-                      <th className="font-semibold px-4 py-2.5 whitespace-nowrap">Email</th>
-                      <th className="font-semibold px-4 py-2.5 whitespace-nowrap">Na base</th>
-                      <th className="font-semibold px-4 py-2.5 whitespace-nowrap">Situação</th>
-                      <th className="font-semibold px-4 py-2.5 whitespace-nowrap">Encontrado por</th>
+                      <th className="font-semibold px-3 py-2.5 whitespace-nowrap">Razão social</th>
+                      <th className="font-semibold px-3 py-2.5 whitespace-nowrap">CNPJ</th>
+                      <th className="font-semibold px-3 py-2.5 whitespace-nowrap">Cidade / UF</th>
+                      <th className="font-semibold px-3 py-2.5 whitespace-nowrap">Telefone</th>
+                      <th className="font-semibold px-3 py-2.5 whitespace-nowrap">Email</th>
+                      <th className="font-semibold px-3 py-2.5 whitespace-nowrap">Na base</th>
+                      <th className="font-semibold px-3 py-2.5 whitespace-nowrap">Situação</th>
+                      <th className="font-semibold px-3 py-2.5 whitespace-nowrap">Encontrado por</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -374,34 +374,34 @@ export default function ClientesProspeccao() {
                       const ativo = c.situacao.toLocaleLowerCase("pt-BR") === "ativo";
                       return (
                         <tr key={`${c.cnpj}-${i}`} className="border-b border-border/60 hover:bg-muted/40 transition-colors">
-                          <td className="px-4 py-2.5 text-foreground font-medium max-w-[200px] truncate" title={c.razao}>{c.razao || DASH}</td>
-                          <td className="px-4 py-2.5 text-muted-foreground font-mono text-xs whitespace-nowrap">{c.cnpj || DASH}</td>
-                          <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap">
+                          <td className="px-3 py-2.5 text-foreground font-medium max-w-[150px] truncate" title={c.razao}>{c.razao || DASH}</td>
+                          <td className="px-3 py-2.5 text-muted-foreground font-mono text-xs whitespace-nowrap">{c.cnpj || DASH}</td>
+                          <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">
                             {c.cidade || DASH}{c.uf ? <span className="text-muted-foreground/60"> / {c.uf}</span> : null}
                           </td>
-                          <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap">
+                          <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">
                             {c.telefone ? (
                               <a href={`tel:${c.telefone}`} className="hover:text-primary">{formatTelefone(c.telefone)}</a>
                             ) : DASH}
                           </td>
-                          <td className="px-4 py-2.5 max-w-[300px] truncate">
+                          <td className="px-3 py-2.5 max-w-[230px] truncate">
                             {c.email ? (
                               <a href={`mailto:${c.email}`} className="text-primary hover:underline" title={c.email}>{c.email}</a>
                             ) : <span className="text-muted-foreground/50">{DASH}</span>}
                           </td>
-                          <td className="px-4 py-2.5 whitespace-nowrap">
+                          <td className="px-3 py-2.5 whitespace-nowrap">
                             <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${c.naBase ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>
                               {c.naBase ? "Sim" : "Não"}
                             </span>
                           </td>
-                          <td className="px-4 py-2.5 whitespace-nowrap">
+                          <td className="px-3 py-2.5 whitespace-nowrap">
                             {c.naBase ? (
                               <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${ativo ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>
                                 {c.situacao}
                               </span>
                             ) : <span className="text-muted-foreground/50">{DASH}</span>}
                           </td>
-                          <td className="px-4 py-2.5 whitespace-nowrap">
+                          <td className="px-3 py-2.5 whitespace-nowrap">
                             {F && Icon ? (
                               <span className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground">
                                 <Icon className="w-3.5 h-3.5" style={{ color: F.color }} />

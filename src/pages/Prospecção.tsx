@@ -1,16 +1,22 @@
 import { useState, useEffect, useMemo } from "react";
 import {
   ArrowLeft, Sun, Moon, Users, MapPin, Target, TrendingUp, CheckCircle2, Sparkles, Loader2, AlertCircle,
+  Building2, MapPinned, Phone, HelpCircle,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueries } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
 import {
   fetchCnaes,
   fetchVerificarCadastros,
   buildCobertura,
+  mergeFormas,
+  somaFormas,
+  FORMAS_CADASTRO,
   type Cobertura,
   type CityCoverage,
+  type FormaCadastro,
+  type FormasBreakdown,
 } from "@/services/prospeccao";
 import { MultiSelect, type MultiOption } from "@/components/prospeccao/MultiSelect";
 import { KpiCard } from "@/components/prospeccao/KpiCard";
@@ -28,14 +34,28 @@ interface ViewState {
   naBase: number;
   ativos: number;
   foraBase: number;
+  formas: FormasBreakdown;
   cidades: CityCoverage[];
 }
+
+// Metadados de exibição de cada forma de vínculo (por onde o cliente foi encontrado).
+const FORMA_META: Record<FormaCadastro, { label: string; icon: typeof Building2; color: string }> = {
+  CNPJ: { label: "Por CNPJ", icon: Building2, color: "hsl(217 91% 60%)" },
+  CEP: { label: "Por CEP", icon: MapPinned, color: "hsl(75 55% 42%)" },
+  Telefone: { label: "Por Telefone", icon: Phone, color: "hsl(262 83% 66%)" },
+  Outro: { label: "Outros", icon: HelpCircle, color: "hsl(var(--muted-foreground))" },
+};
 
 export default function Prospeccao() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const [params] = useSearchParams();
   const [dark, setDark] = useState(() => localStorage.getItem("dovale_theme") !== "light");
-  const [selCnaes, setSelCnaes] = useState<string[]>([]);
+  // CNAEs iniciais podem vir da URL (?cnae=a,b) ao voltar da tela de clientes.
+  const [selCnaes, setSelCnaes] = useState<string[]>(() => {
+    const raw = params.get("cnae");
+    return raw ? raw.split(",").map((s) => s.trim()).filter(Boolean) : [];
+  });
   const [selStates, setSelStates] = useState<string[]>([]);
   const [donutHover, setDonutHover] = useState<number | null>(null);
 
@@ -78,11 +98,12 @@ export default function Prospeccao() {
     const st: Record<string, ViewState & { _c: Map<string, CityCoverage> }> = {};
     coberturas.forEach((cob) => {
       cob.states.forEach((s) => {
-        if (!st[s.sigla]) st[s.sigla] = { nome: s.nome, naBase: 0, ativos: 0, foraBase: 0, cidades: [], _c: new Map() };
+        if (!st[s.sigla]) st[s.sigla] = { nome: s.nome, naBase: 0, ativos: 0, foraBase: 0, formas: { CNPJ: 0, CEP: 0, Telefone: 0, Outro: 0 }, cidades: [], _c: new Map() };
         const acc = st[s.sigla];
         acc.naBase += s.naBase;
         acc.ativos += s.ativos;
         acc.foraBase += s.foraBase;
+        mergeFormas(acc.formas, s.formas);
         s.cidades.forEach((ci) => {
           const cur = acc._c.get(ci.cidade) ?? { cidade: ci.cidade, naBase: 0, ativos: 0, foraBase: 0 };
           cur.naBase += ci.naBase;
@@ -99,6 +120,7 @@ export default function Prospeccao() {
         naBase: s.naBase,
         ativos: s.ativos,
         foraBase: s.foraBase,
+        formas: s.formas,
         cidades: [...s._c.values()].sort((a, b) => b.naBase + b.foraBase - (a.naBase + a.foraBase)),
       };
     });
@@ -121,10 +143,21 @@ export default function Prospeccao() {
     ? Object.entries(view).filter(([sg]) => selStates.includes(sg))
     : Object.entries(view);
   const totais = scoped.reduce(
-    (a, [, s]) => ({ naBase: a.naBase + s.naBase, ativos: a.ativos + s.ativos, foraBase: a.foraBase + s.foraBase }),
-    { naBase: 0, ativos: 0, foraBase: 0 },
+    (a, [, s]) => {
+      mergeFormas(a.formas, s.formas);
+      return { naBase: a.naBase + s.naBase, ativos: a.ativos + s.ativos, foraBase: a.foraBase + s.foraBase, formas: a.formas };
+    },
+    { naBase: 0, ativos: 0, foraBase: 0, formas: { CNPJ: 0, CEP: 0, Telefone: 0, Outro: 0 } as FormasBreakdown },
   );
   const coberturaGeral = pctOf(totais.naBase, totais.foraBase);
+
+  // Quebra "por onde o cliente foi encontrado na base": só formas com registros,
+  // ordenadas da maior para a menor. O total das formas = clientes na base.
+  const totalFormas = somaFormas(totais.formas);
+  const formasView = FORMAS_CADASTRO
+    .map((k) => ({ key: k, ...FORMA_META[k], value: totais.formas[k] }))
+    .filter((f) => f.value > 0)
+    .sort((a, b) => b.value - a.value);
   const estado = selStates.length === 1 ? view[selStates[0]] : null;
 
   const inativosBase = Math.max(0, totais.naBase - totais.ativos);
@@ -174,7 +207,14 @@ export default function Prospeccao() {
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2">
-            {user && <span className="text-xs text-muted-foreground hidden sm:inline">{user.displayName}</span>}
+            <button
+              onClick={() => navigate(`/prospeccao/clientes${selCnaes.length ? `?cnae=${encodeURIComponent(selCnaes.join(","))}${selStates.length ? `&uf=${encodeURIComponent(selStates.join(","))}` : ""}` : ""}`)}
+              className="flex items-center gap-1.5 text-xs px-3 h-8 rounded-lg bg-secondary text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              title="Ver lista de clientes na base"
+            >
+              <Users className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Clientes</span>
+            </button>
+            {user && <span className="text-xs text-muted-foreground hidden md:inline">{user.displayName}</span>}
             <button onClick={() => setDark((d) => !d)} className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-primary/10 transition-colors">
               {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
@@ -257,6 +297,42 @@ export default function Prospeccao() {
                 <KpiCard icon={<Target className="w-5 h-5" />} label="Fora da base (potencial)" value={fmt(totais.foraBase)} tone="slate" />
                 <KpiCard icon={<TrendingUp className="w-5 h-5" />} label="Cobertura geral" value={`${coberturaGeral}%`} tone="primary" />
               </div>
+
+              {/* Como o cliente foi encontrado na base (CNPJ / CEP / Telefone) */}
+              {totalFormas > 0 && (
+                <div className="glass-card rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <Users className="w-4 h-4 text-primary" />
+                      <h3 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                        Por onde o cliente foi encontrado na base{tituloEstado}
+                      </h3>
+                    </div>
+                    <span className="text-xs text-muted-foreground font-mono">{fmt(totalFormas)} vínculos</span>
+                  </div>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    {formasView.map((f) => {
+                      const pct = totalFormas ? Math.round((f.value / totalFormas) * 100) : 0;
+                      const Icon = f.icon;
+                      return (
+                        <div key={f.key} className="rounded-lg border border-border bg-secondary/40 p-3">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="w-7 h-7 rounded-md flex items-center justify-center shrink-0" style={{ background: `color-mix(in srgb, ${f.color} 16%, transparent)`, color: f.color }}>
+                              <Icon className="w-4 h-4" />
+                            </span>
+                            <span className="text-[12px] font-semibold text-foreground">{f.label}</span>
+                            <span className="ml-auto text-[11px] text-muted-foreground font-mono">{pct}%</span>
+                          </div>
+                          <div className="text-xl font-bold text-foreground tabular-nums">{fmt(f.value)}</div>
+                          <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
+                            <div className="h-full rounded-full" style={{ width: `${pct}%`, background: f.color }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Donut + Mapa */}
               <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-5 items-stretch">

@@ -29,7 +29,7 @@ const FORMA_META: Record<FormaCadastro, { label: string; icon: typeof Building2;
   Outro: { label: "Outro", icon: HelpCircle, color: "hsl(var(--muted-foreground))" },
 };
 
-// Linha da tabela — um cliente que está na base (comCadastro).
+// Linha da tabela — um registro do mercado (na base ou fora dela).
 interface ClienteRow {
   cnpj: string;
   razao: string;
@@ -37,12 +37,15 @@ interface ClienteRow {
   uf: string;
   telefone: string;
   email: string;
-  situacao: string; // "Ativo" | "Inativo" | …
-  forma: FormaCadastro;
+  naBase: boolean; // se o cliente já existe na base interna (comCadastro)
+  situacao: string; // "Ativo" | "Inativo" | … (só faz sentido para quem está na base)
+  forma: FormaCadastro | null; // por onde foi encontrado; null quando fora da base
   cnae: string;
 }
 
 const PAGE_SIZES = [25, 50, 100];
+
+type BaseFiltro = "ambos" | "na" | "fora";
 
 // Deixa o telefone bruto ("5551999215808") um pouco mais legível, sem arriscar
 // mangear números fora do padrão (mantém o valor original se não casar).
@@ -54,7 +57,7 @@ function formatTelefone(raw: string): string {
   return raw;
 }
 
-function toRow(r: CadastroRegistro): ClienteRow {
+function toRow(r: CadastroRegistro, naBase: boolean): ClienteRow {
   return {
     cnpj: r.cnpj ?? "",
     razao: (r.razao ?? "").trim(),
@@ -62,8 +65,9 @@ function toRow(r: CadastroRegistro): ClienteRow {
     uf: (r.uf ?? "").trim().toUpperCase(),
     telefone: (r.telefone ?? "").trim(),
     email: (r.email ?? "").trim(),
-    situacao: (r.situacaoInterna ?? "").trim() || "—",
-    forma: normalizaForma(r.formaCadastro),
+    naBase,
+    situacao: (r.situacaoInterna ?? "").trim() || (naBase ? "—" : "Sem cadastro"),
+    forma: naBase ? normalizaForma(r.formaCadastro) : null,
     cnae: (r.cnae ?? "").trim(),
   };
 }
@@ -86,6 +90,7 @@ export default function ClientesProspeccao() {
 
   const [selCnaes, setSelCnaes] = useState<string[]>(initialCnaes);
   const [selUfs, setSelUfs] = useState<string[]>(initialUfs);
+  const [baseFiltro, setBaseFiltro] = useState<BaseFiltro>("ambos");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
@@ -119,16 +124,20 @@ export default function ClientesProspeccao() {
 
   const cnaeOptions: MultiOption[] = useMemo(() => cnaes.map((c) => ({ value: c, label: c })), [cnaes]);
 
-  // Só os que estão na base (comCadastro), unificados pelos CNAEs selecionados e
-  // deduplicados por CNPJ (o mesmo cliente pode casar em mais de um segmento).
+  // Todos os registros do mercado (na base + fora), unificados pelos CNAEs
+  // selecionados e deduplicados por CNPJ (o mesmo cliente pode casar em mais de
+  // um segmento). Em caso de conflito, quem está na base prevalece.
   const clientes = useMemo(() => {
     const porCnpj = new Map<string, ClienteRow>();
+    const add = (r: CadastroRegistro, naBase: boolean) => {
+      const row = toRow(r, naBase);
+      const key = row.cnpj || `${row.razao}|${row.telefone}`;
+      const atual = porCnpj.get(key);
+      if (!atual || (!atual.naBase && row.naBase)) porCnpj.set(key, row);
+    };
     registroQueries.forEach((q) => {
-      (q.data?.comCadastro ?? []).forEach((r) => {
-        const row = toRow(r);
-        const key = row.cnpj || `${row.razao}|${row.telefone}`;
-        if (!porCnpj.has(key)) porCnpj.set(key, row);
-      });
+      (q.data?.comCadastro ?? []).forEach((r) => add(r, true));
+      (q.data?.semCadastro ?? []).forEach((r) => add(r, false));
     });
     return [...porCnpj.values()].sort((a, b) => a.razao.localeCompare(b.razao, "pt-BR"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -140,10 +149,12 @@ export default function ClientesProspeccao() {
     return [...set].sort().map((uf) => ({ value: uf, label: uf, hint: uf }));
   }, [clientes]);
 
-  // Filtro por estado + busca textual.
+  // Filtro por base (na/fora/ambos) + estado + busca textual.
   const filtered = useMemo(() => {
     const q = search.trim().toLocaleLowerCase("pt-BR");
     return clientes.filter((c) => {
+      if (baseFiltro === "na" && !c.naBase) return false;
+      if (baseFiltro === "fora" && c.naBase) return false;
       if (selUfs.length && !selUfs.includes(c.uf)) return false;
       if (!q) return true;
       return (
@@ -154,10 +165,10 @@ export default function ClientesProspeccao() {
         c.email.toLowerCase().includes(q)
       );
     });
-  }, [clientes, selUfs, search]);
+  }, [clientes, baseFiltro, selUfs, search]);
 
   // Reseta paginação quando o conjunto muda.
-  useEffect(() => setPage(1), [selCnaes, selUfs, search, pageSize]);
+  useEffect(() => setPage(1), [selCnaes, selUfs, baseFiltro, search, pageSize]);
 
   const total = filtered.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -166,14 +177,16 @@ export default function ClientesProspeccao() {
   const pageRows = filtered.slice(start, start + pageSize);
 
   const comEmail = useMemo(() => filtered.filter((c) => c.email).length, [filtered]);
+  const naBaseCount = useMemo(() => filtered.filter((c) => c.naBase).length, [filtered]);
 
   const exportXlsx = () => {
-    const headers = ["Razão social", "CNPJ", "Cidade", "UF", "Telefone", "Email", "Situação", "Encontrado por", "Segmento (CNAE)"];
+    const headers = ["Razão social", "CNPJ", "Cidade", "UF", "Telefone", "Email", "Na base", "Situação", "Encontrado por", "Segmento (CNAE)"];
     const rows = filtered.map((c) => [
-      c.razao, c.cnpj, c.cidade, c.uf, c.telefone, c.email, c.situacao, FORMA_META[c.forma].label, c.cnae,
+      c.razao, c.cnpj, c.cidade, c.uf, c.telefone, c.email, c.naBase ? "Sim" : "Não",
+      c.naBase ? c.situacao : "", c.forma ? FORMA_META[c.forma].label : "", c.cnae,
     ]);
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-    ws["!cols"] = [{ wch: 42 }, { wch: 20 }, { wch: 22 }, { wch: 5 }, { wch: 18 }, { wch: 32 }, { wch: 12 }, { wch: 14 }, { wch: 30 }];
+    ws["!cols"] = [{ wch: 42 }, { wch: 20 }, { wch: 22 }, { wch: 5 }, { wch: 18 }, { wch: 32 }, { wch: 8 }, { wch: 12 }, { wch: 14 }, { wch: 30 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Clientes");
     XLSX.writeFile(wb, `clientes_prospeccao_${total}.xlsx`);
@@ -200,7 +213,7 @@ export default function ClientesProspeccao() {
           <div className="flex items-center gap-2">
             <Users className="w-5 h-5 text-primary" />
             <div>
-              <h1 className="text-sm font-bold text-foreground tracking-tight">CLIENTES NA BASE</h1>
+              <h1 className="text-sm font-bold text-foreground tracking-tight">CLIENTES</h1>
               <p className="text-[10px] text-muted-foreground">Detalhes e contatos por segmento</p>
             </div>
           </div>
@@ -268,7 +281,7 @@ export default function ClientesProspeccao() {
             <div className="glass-card rounded-xl p-12 text-center">
               <Target className="w-7 h-7 text-primary mx-auto mb-2.5" />
               <p className="text-sm font-bold text-foreground">Selecione ao menos um segmento</p>
-              <p className="text-[12.5px] text-muted-foreground mt-1.5">Escolha um ou mais CNAEs acima para listar os clientes na base.</p>
+              <p className="text-[12.5px] text-muted-foreground mt-1.5">Escolha um ou mais CNAEs acima para listar os clientes.</p>
             </div>
           ) : !clientes.length && isFetching ? (
             <div className="glass-card rounded-xl p-12 text-center">
@@ -278,8 +291,8 @@ export default function ClientesProspeccao() {
           ) : !clientes.length ? (
             <div className="glass-card rounded-xl p-12 text-center">
               <Users className="w-7 h-7 text-muted-foreground/50 mx-auto mb-2.5" />
-              <p className="text-sm font-bold text-foreground">Nenhum cliente na base</p>
-              <p className="text-[12.5px] text-muted-foreground mt-1.5">A ApiDovale não retornou clientes cadastrados para os segmentos selecionados.</p>
+              <p className="text-sm font-bold text-foreground">Nenhum cliente encontrado</p>
+              <p className="text-[12.5px] text-muted-foreground mt-1.5">A ApiDovale não retornou registros para os segmentos selecionados.</p>
             </div>
           ) : (
             <div className="glass-card rounded-xl overflow-hidden">
@@ -294,8 +307,24 @@ export default function ClientesProspeccao() {
                     className="w-full h-9 pl-9 pr-3 rounded-lg bg-secondary/60 border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
                   />
                 </div>
+                {/* Filtro na base / fora da base / ambos */}
+                <div className="flex items-center rounded-lg border border-border bg-secondary/40 p-0.5 shrink-0">
+                  {([
+                    { k: "ambos", label: "Todos" },
+                    { k: "na", label: "Na base" },
+                    { k: "fora", label: "Fora da base" },
+                  ] as { k: BaseFiltro; label: string }[]).map((opt) => (
+                    <button
+                      key={opt.k}
+                      onClick={() => setBaseFiltro(opt.k)}
+                      className={`text-[12px] font-medium px-2.5 h-8 rounded-md transition-colors ${baseFiltro === opt.k ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
                 <span className="text-xs text-muted-foreground font-mono shrink-0">
-                  {fmt(total)} clientes · {fmt(comEmail)} com email
+                  {fmt(total)} clientes · {fmt(naBaseCount)} na base · {fmt(comEmail)} com email
                 </span>
                 <div className="flex items-center gap-1.5 shrink-0">
                   <span className="text-[11px] text-muted-foreground">por página</span>
@@ -326,14 +355,22 @@ export default function ClientesProspeccao() {
                       <th className="font-semibold px-4 py-2.5">Cidade / UF</th>
                       <th className="font-semibold px-4 py-2.5">Telefone</th>
                       <th className="font-semibold px-4 py-2.5">Email</th>
+                      <th className="font-semibold px-4 py-2.5">Na base</th>
                       <th className="font-semibold px-4 py-2.5">Situação</th>
                       <th className="font-semibold px-4 py-2.5">Encontrado por</th>
                     </tr>
                   </thead>
                   <tbody>
+                    {!total && (
+                      <tr>
+                        <td colSpan={8} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                          Nenhum cliente para o filtro atual.
+                        </td>
+                      </tr>
+                    )}
                     {pageRows.map((c, i) => {
-                      const F = FORMA_META[c.forma];
-                      const Icon = F.icon;
+                      const F = c.forma ? FORMA_META[c.forma] : null;
+                      const Icon = F?.icon;
                       const ativo = c.situacao.toLocaleLowerCase("pt-BR") === "ativo";
                       return (
                         <tr key={`${c.cnpj}-${i}`} className="border-b border-border/60 hover:bg-muted/40 transition-colors">
@@ -353,15 +390,24 @@ export default function ClientesProspeccao() {
                             ) : <span className="text-muted-foreground/50">{DASH}</span>}
                           </td>
                           <td className="px-4 py-2.5 whitespace-nowrap">
-                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${ativo ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>
-                              {c.situacao}
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${c.naBase ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>
+                              {c.naBase ? "Sim" : "Não"}
                             </span>
                           </td>
                           <td className="px-4 py-2.5 whitespace-nowrap">
-                            <span className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground">
-                              <Icon className="w-3.5 h-3.5" style={{ color: F.color }} />
-                              {F.label}
-                            </span>
+                            {c.naBase ? (
+                              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${ativo ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>
+                                {c.situacao}
+                              </span>
+                            ) : <span className="text-muted-foreground/50">{DASH}</span>}
+                          </td>
+                          <td className="px-4 py-2.5 whitespace-nowrap">
+                            {F && Icon ? (
+                              <span className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground">
+                                <Icon className="w-3.5 h-3.5" style={{ color: F.color }} />
+                                {F.label}
+                              </span>
+                            ) : <span className="text-muted-foreground/50">{DASH}</span>}
                           </td>
                         </tr>
                       );

@@ -31,6 +31,7 @@ import { ComissaoErrorBoundary } from "./pages/comissao/ComissaoErrorBoundary.ts
 import PrimeiraMovimentacao from "./pages/PrimeiraMovimentacao.tsx";
 import InventarioFullApi from "./pages/InventarioFullApi.tsx";
 import Prospeccao from "./pages/Prospecção.tsx";
+import ClientesProspeccao from "./pages/ClientesProspeccao.tsx";
 import React from "react";
 
 const queryClient = new QueryClient();
@@ -243,6 +244,7 @@ const App = () => (
             <Route path="/primeira-movimentacao" element={<PrimeiraMovRoute><PrimeiraMovimentacao /></PrimeiraMovRoute>} />
             <Route path="/inventario-full-api" element={<InventarioFullRoute><InventarioFullApi /></InventarioFullRoute>} />
             <Route path="/prospeccao" element={<ProspeccaoRoute><Prospeccao /></ProspeccaoRoute>} />
+            <Route path="/prospeccao/clientes" element={<ProspeccaoRoute><ClientesProspeccao /></ProspeccaoRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

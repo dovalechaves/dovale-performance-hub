@@ -3,7 +3,7 @@ import {
   ArrowLeft, Sun, Moon, Users, MapPin, Target, TrendingUp, CheckCircle2, Sparkles, Loader2, AlertCircle,
   Building2, MapPinned, Phone, HelpCircle,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueries } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -49,8 +49,13 @@ const FORMA_META: Record<FormaCadastro, { label: string; icon: typeof Building2;
 export default function Prospeccao() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const [params] = useSearchParams();
   const [dark, setDark] = useState(() => localStorage.getItem("dovale_theme") !== "light");
-  const [selCnaes, setSelCnaes] = useState<string[]>([]);
+  // CNAEs iniciais podem vir da URL (?cnae=a,b) ao voltar da tela de clientes.
+  const [selCnaes, setSelCnaes] = useState<string[]>(() => {
+    const raw = params.get("cnae");
+    return raw ? raw.split(",").map((s) => s.trim()).filter(Boolean) : [];
+  });
   const [selStates, setSelStates] = useState<string[]>([]);
   const [donutHover, setDonutHover] = useState<number | null>(null);
 
@@ -202,7 +207,14 @@ export default function Prospeccao() {
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2">
-            {user && <span className="text-xs text-muted-foreground hidden sm:inline">{user.displayName}</span>}
+            <button
+              onClick={() => navigate(`/prospeccao/clientes${selCnaes.length ? `?cnae=${encodeURIComponent(selCnaes.join(","))}${selStates.length ? `&uf=${encodeURIComponent(selStates.join(","))}` : ""}` : ""}`)}
+              className="flex items-center gap-1.5 text-xs px-3 h-8 rounded-lg bg-secondary text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              title="Ver lista de clientes na base"
+            >
+              <Users className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Clientes</span>
+            </button>
+            {user && <span className="text-xs text-muted-foreground hidden md:inline">{user.displayName}</span>}
             <button onClick={() => setDark((d) => !d)} className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-primary/10 transition-colors">
               {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>

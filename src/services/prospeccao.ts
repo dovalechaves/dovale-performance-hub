@@ -22,6 +22,7 @@ export interface CadastroRegistro {
   cidade: string | null;
   uf: string | null;
   telefone: string | null;
+  email: string | null;
   temCadastro: boolean;
   cnae: string | null;
   // Como o registro do mercado foi casado com a base interna: "CNPJ", "CEP" ou
@@ -37,7 +38,7 @@ export type FormasBreakdown = Record<FormaCadastro, number>;
 const formasZero = (): FormasBreakdown => ({ CNPJ: 0, CEP: 0, Telefone: 0, Outro: 0 });
 
 // Normaliza o valor bruto de formaCadastro para um dos rótulos canônicos.
-function normalizaForma(raw: string | null | undefined): FormaCadastro {
+export function normalizaForma(raw: string | null | undefined): FormaCadastro {
   const v = (raw ?? "").trim().toLocaleLowerCase("pt-BR");
   if (v === "cnpj") return "CNPJ";
   if (v === "cep") return "CEP";

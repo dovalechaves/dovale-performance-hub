@@ -350,14 +350,14 @@ export default function ClientesProspeccao() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground border-b border-border">
-                      <th className="font-semibold px-4 py-2.5">Razão social</th>
-                      <th className="font-semibold px-4 py-2.5">CNPJ</th>
-                      <th className="font-semibold px-4 py-2.5">Cidade / UF</th>
-                      <th className="font-semibold px-4 py-2.5">Telefone</th>
-                      <th className="font-semibold px-4 py-2.5">Email</th>
-                      <th className="font-semibold px-4 py-2.5">Na base</th>
-                      <th className="font-semibold px-4 py-2.5">Situação</th>
-                      <th className="font-semibold px-4 py-2.5">Encontrado por</th>
+                      <th className="font-semibold px-4 py-2.5 whitespace-nowrap">Razão social</th>
+                      <th className="font-semibold px-4 py-2.5 whitespace-nowrap">CNPJ</th>
+                      <th className="font-semibold px-4 py-2.5 whitespace-nowrap">Cidade / UF</th>
+                      <th className="font-semibold px-4 py-2.5 whitespace-nowrap">Telefone</th>
+                      <th className="font-semibold px-4 py-2.5 whitespace-nowrap">Email</th>
+                      <th className="font-semibold px-4 py-2.5 whitespace-nowrap">Na base</th>
+                      <th className="font-semibold px-4 py-2.5 whitespace-nowrap">Situação</th>
+                      <th className="font-semibold px-4 py-2.5 whitespace-nowrap">Encontrado por</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -374,7 +374,7 @@ export default function ClientesProspeccao() {
                       const ativo = c.situacao.toLocaleLowerCase("pt-BR") === "ativo";
                       return (
                         <tr key={`${c.cnpj}-${i}`} className="border-b border-border/60 hover:bg-muted/40 transition-colors">
-                          <td className="px-4 py-2.5 text-foreground font-medium max-w-[280px] truncate" title={c.razao}>{c.razao || DASH}</td>
+                          <td className="px-4 py-2.5 text-foreground font-medium max-w-[200px] truncate" title={c.razao}>{c.razao || DASH}</td>
                           <td className="px-4 py-2.5 text-muted-foreground font-mono text-xs whitespace-nowrap">{c.cnpj || DASH}</td>
                           <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap">
                             {c.cidade || DASH}{c.uf ? <span className="text-muted-foreground/60"> / {c.uf}</span> : null}
@@ -384,7 +384,7 @@ export default function ClientesProspeccao() {
                               <a href={`tel:${c.telefone}`} className="hover:text-primary">{formatTelefone(c.telefone)}</a>
                             ) : DASH}
                           </td>
-                          <td className="px-4 py-2.5 max-w-[220px] truncate">
+                          <td className="px-4 py-2.5 max-w-[300px] truncate">
                             {c.email ? (
                               <a href={`mailto:${c.email}`} className="text-primary hover:underline" title={c.email}>{c.email}</a>
                             ) : <span className="text-muted-foreground/50">{DASH}</span>}

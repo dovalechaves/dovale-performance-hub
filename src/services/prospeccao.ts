@@ -24,7 +24,33 @@ export interface CadastroRegistro {
   telefone: string | null;
   temCadastro: boolean;
   cnae: string | null;
+  // Como o registro do mercado foi casado com a base interna: "CNPJ", "CEP" ou
+  // "Telefone". Só vem preenchido para quem está na base (temCadastro = true).
+  formaCadastro: string | null;
 }
+
+// Formas de vínculo (por onde o cliente foi encontrado na base interna).
+export type FormaCadastro = "CNPJ" | "CEP" | "Telefone" | "Outro";
+export const FORMAS_CADASTRO: FormaCadastro[] = ["CNPJ", "CEP", "Telefone", "Outro"];
+export type FormasBreakdown = Record<FormaCadastro, number>;
+
+const formasZero = (): FormasBreakdown => ({ CNPJ: 0, CEP: 0, Telefone: 0, Outro: 0 });
+
+// Normaliza o valor bruto de formaCadastro para um dos rótulos canônicos.
+function normalizaForma(raw: string | null | undefined): FormaCadastro {
+  const v = (raw ?? "").trim().toLocaleLowerCase("pt-BR");
+  if (v === "cnpj") return "CNPJ";
+  if (v === "cep") return "CEP";
+  if (v === "telefone" || v === "fone" || v === "tel") return "Telefone";
+  return "Outro";
+}
+
+export const somaFormas = (f: FormasBreakdown): number =>
+  FORMAS_CADASTRO.reduce((acc, k) => acc + f[k], 0);
+
+export const mergeFormas = (into: FormasBreakdown, from: FormasBreakdown): void => {
+  FORMAS_CADASTRO.forEach((k) => { into[k] += from[k]; });
+};
 
 export interface VerificarCadastrosResponse {
   total: number;
@@ -49,10 +75,11 @@ export interface StateCoverage {
   ativos: number;
   foraBase: number;
   cidades: CityCoverage[];
+  formas: FormasBreakdown; // quebra dos que estão na base por forma de vínculo
 }
 
 export interface Cobertura {
-  totais: { naBase: number; ativos: number; foraBase: number };
+  totais: { naBase: number; ativos: number; foraBase: number; formas: FormasBreakdown };
   states: StateCoverage[];
   statesBySigla: Record<string, StateCoverage>;
 }
@@ -113,14 +140,14 @@ function isAtivo(reg: CadastroRegistro): boolean {
 // ── Transformação: resposta da API -> cobertura por estado/cidade ────────────
 export function buildCobertura(resp: VerificarCadastrosResponse): Cobertura {
   // Acumulador por UF -> por cidade -> { naBase, ativos, foraBase }
-  const porUf = new Map<string, { na: number; ativos: number; fora: number; cidades: Map<string, CityCoverage> }>();
+  const porUf = new Map<string, { na: number; ativos: number; fora: number; formas: FormasBreakdown; cidades: Map<string, CityCoverage> }>();
 
   const registrar = (reg: CadastroRegistro, naBase: boolean) => {
     const sigla = (reg.uf ?? "").trim().toUpperCase();
     if (!sigla || !UF_NOME[sigla]) return; // ignora UF inválida/ausente no mapa
     let uf = porUf.get(sigla);
     if (!uf) {
-      uf = { na: 0, ativos: 0, fora: 0, cidades: new Map() };
+      uf = { na: 0, ativos: 0, fora: 0, formas: formasZero(), cidades: new Map() };
       porUf.set(sigla, uf);
     }
     const cidadeNome = reg.cidade?.trim() ? tituloCidade(reg.cidade.trim()) : "Não informado";
@@ -132,6 +159,7 @@ export function buildCobertura(resp: VerificarCadastrosResponse): Cobertura {
     if (naBase) {
       uf.na += 1;
       cid.naBase += 1;
+      uf.formas[normalizaForma(reg.formaCadastro)] += 1;
       if (isAtivo(reg)) {
         uf.ativos += 1;
         cid.ativos += 1;
@@ -152,6 +180,7 @@ export function buildCobertura(resp: VerificarCadastrosResponse): Cobertura {
       naBase: v.na,
       ativos: v.ativos,
       foraBase: v.fora,
+      formas: v.formas,
       cidades: [...v.cidades.values()].sort(
         (a, b) => b.naBase + b.foraBase - (a.naBase + a.foraBase),
       ),
@@ -160,12 +189,13 @@ export function buildCobertura(resp: VerificarCadastrosResponse): Cobertura {
 
   const statesBySigla = Object.fromEntries(states.map((s) => [s.sigla, s]));
 
-  // "ativos" não tem agregado próprio na API — soma-se a partir dos estados.
+  // "ativos" e a quebra por forma não têm agregado próprio na API — somam-se dos estados.
   const totalAtivos = states.reduce((acc, s) => acc + s.ativos, 0);
+  const totalFormas = states.reduce((acc, s) => { mergeFormas(acc, s.formas); return acc; }, formasZero());
 
   return {
     // naBase/foraBase usam os agregados oficiais da API (mais fiéis ao total do mercado).
-    totais: { naBase: resp.quantidadeComCadastro, ativos: totalAtivos, foraBase: resp.quantidadeSemCadastro },
+    totais: { naBase: resp.quantidadeComCadastro, ativos: totalAtivos, foraBase: resp.quantidadeSemCadastro, formas: totalFormas },
     states,
     statesBySigla,
   };

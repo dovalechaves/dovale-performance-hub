@@ -1,6 +1,7 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { KpiCard } from "@/components/prospeccao/KpiCard";
 import {
-  ArrowLeft, Sun, Moon, Users, Target, MapPin, Loader2, AlertCircle, Search,
+  ArrowLeft, Sun, Moon, Users, Target, MapPin, Loader2, AlertCircle, Search, TrendingUp, CheckCircle2, Sparkles,
   FileSpreadsheet, ChevronLeft, ChevronRight, Building2, MapPinned, Phone, HelpCircle,
   Store, ArrowUp, ArrowDown, ChevronsUpDown,
 } from "lucide-react";
@@ -29,7 +30,6 @@ const FORMA_META: Record<FormaCadastro, { label: string; icon: typeof Building2;
   Telefone: { label: "Telefone", icon: Phone, color: "hsl(262 83% 66%)" },
   Outro: { label: "Outro", icon: HelpCircle, color: "hsl(var(--muted-foreground))" },
 };
-
 // Linha da tabela — um registro do mercado (na base ou fora dela).
 interface ClienteRow {
   cnpj: string;
@@ -114,6 +114,7 @@ export default function ClientesProspeccao() {
 
   const [selCnaes, setSelCnaes] = useState<string[]>(initialCnaes);
   const [selUfs, setSelUfs] = useState<string[]>(initialUfs);
+  const [selCidades, setSelCidades] = useState<string[]>([]);
   const [selLojas, setSelLojas] = useState<string[]>([]);
   const [baseFiltro, setBaseFiltro] = useState<BaseFiltro>("ambos");
   const [search, setSearch] = useState("");
@@ -179,6 +180,20 @@ export default function ClientesProspeccao() {
     return [...set].sort().map((uf) => ({ value: uf, label: uf, hint: uf }));
   }, [clientes]);
 
+  // Opções de cidade — respeitam o estado selecionado (se houver) para a lista
+  // ficar gerenciável. O UF vai como hint para desambiguar cidades homônimas.
+  const cidadeOptions: MultiOption[] = useMemo(() => {
+    const map = new Map<string, string>();
+    clientes.forEach((c) => {
+      if (!c.cidade) return;
+      if (selUfs.length && !selUfs.includes(c.uf)) return;
+      if (!map.has(c.cidade)) map.set(c.cidade, c.uf);
+    });
+    return [...map.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0], "pt-BR"))
+      .map(([cidade, uf]) => ({ value: cidade, label: cidade, hint: uf }));
+  }, [clientes, selUfs]);
+
   // Opções de loja (todas as lojas presentes nos cadastros dos clientes).
   const lojaOptions: MultiOption[] = useMemo(() => {
     const set = new Set<string>();
@@ -186,14 +201,23 @@ export default function ClientesProspeccao() {
     return [...set].sort((a, b) => a.localeCompare(b, "pt-BR")).map((l) => ({ value: l, label: l }));
   }, [clientes]);
 
-  // Filtro por base (na/fora/ambos) + estado + loja + busca textual.
-  const filtered = useMemo(() => {
+  // "Na base" é relativo à loja: com loja(s) selecionada(s), estar "na base"
+  // significa ter cadastro NELA(S). Assim "Fora da base" mostra quem ainda não é
+  // cliente daquela loja (inclui quem é cliente de outra loja e quem não é cliente
+  // de nenhuma). Sem loja selecionada, usa a base global (comCadastro).
+  const naBaseDe = useCallback(
+    (c: ClienteRow) => (selLojas.length ? c.lojas.some((l) => selLojas.includes(l)) : c.naBase),
+    [selLojas],
+  );
+
+  // Escopo dos KPIs: aplica estado + cidade + loja + busca, MAS não o toggle
+  // na/fora. Assim os cards ficam fixos por loja — só mudam ao trocar
+  // loja/estado/cidade/segmento/busca, nunca ao alternar Na base / Fora da base.
+  const scoped = useMemo(() => {
     const q = search.trim().toLocaleLowerCase("pt-BR");
     return clientes.filter((c) => {
-      if (baseFiltro === "na" && !c.naBase) return false;
-      if (baseFiltro === "fora" && c.naBase) return false;
       if (selUfs.length && !selUfs.includes(c.uf)) return false;
-      if (selLojas.length && !c.lojas.some((l) => selLojas.includes(l))) return false;
+      if (selCidades.length && !selCidades.includes(c.cidade)) return false;
       if (!q) return true;
       return (
         c.razao.toLocaleLowerCase("pt-BR").includes(q) ||
@@ -203,7 +227,13 @@ export default function ClientesProspeccao() {
         c.email.toLowerCase().includes(q)
       );
     });
-  }, [clientes, baseFiltro, selUfs, selLojas, search]);
+  }, [clientes, selUfs, selCidades, search]);
+
+  // Lista da tabela: o escopo com o toggle na/fora aplicado (relativo à loja).
+  const filtered = useMemo(() => {
+    if (baseFiltro === "ambos") return scoped;
+    return scoped.filter((c) => (baseFiltro === "na" ? naBaseDe(c) : !naBaseDe(c)));
+  }, [scoped, baseFiltro, naBaseDe]);
 
   // Ordenação (clicando nos cabeçalhos). Datas ISO ordenam lexicograficamente.
   const sorted = useMemo(() => {
@@ -224,7 +254,7 @@ export default function ClientesProspeccao() {
   }, [filtered, sortKey, sortDir]);
 
   // Reseta paginação quando o conjunto muda.
-  useEffect(() => setPage(1), [selCnaes, selUfs, selLojas, baseFiltro, search, pageSize]);
+  useEffect(() => setPage(1), [selCnaes, selUfs, selCidades, selLojas, baseFiltro, search, pageSize]);
 
   const total = sorted.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -232,19 +262,31 @@ export default function ClientesProspeccao() {
   const start = (pageSafe - 1) * pageSize;
   const pageRows = sorted.slice(start, start + pageSize);
 
-  const comEmail = useMemo(() => filtered.filter((c) => c.email).length, [filtered]);
-  const naBaseCount = useMemo(() => filtered.filter((c) => c.naBase).length, [filtered]);
+  // KPIs sobre o escopo (sem o toggle na/fora): fixos por loja/estado/cidade/busca.
+  const comEmail = useMemo(() => scoped.filter((c) => c.email).length, [scoped]);
+  const naBaseCount = useMemo(() => scoped.filter((c) => naBaseDe(c)).length, [scoped, naBaseDe]);
+  const ativosCount = useMemo(
+    () => scoped.filter((c) => naBaseDe(c) && c.situacao.toLocaleLowerCase("pt-BR") === "ativo").length,
+    [scoped, naBaseDe],
+  );
+  const scopedTotal = scoped.length;
+  const foraCount = scopedTotal - naBaseCount;
+  const coberturaGeral = scopedTotal > 0 ? Math.round((naBaseCount / scopedTotal) * 100) : 0;
+  const pctAtiva = naBaseCount > 0 ? Math.round((ativosCount / naBaseCount) * 100) : 0;
 
   const exportXlsx = () => {
     const headers = ["Razão social", "CNPJ", "Cidade", "UF", "Telefone", "Email", "Na base", "Situação", "Encontrado por", "Lojas com cadastro", "Última compra", "Valor última compra", "Segmento (CNAE)"];
-    const rows = sorted.map((c) => [
-      c.razao, c.cnpj, c.cidade, c.uf, c.telefone, c.email, c.naBase ? "Sim" : "Não",
-      c.naBase ? c.situacao : "", c.forma ? FORMA_META[c.forma].label : "",
+    const rows = sorted.map((c) => {
+      const naBase = naBaseDe(c); // relativo à(s) loja(s) selecionada(s), igual à tabela
+      return [
+      c.razao, c.cnpj, c.cidade, c.uf, c.telefone, c.email, naBase ? "Sim" : "Não",
+      naBase ? c.situacao : "", c.forma ? FORMA_META[c.forma].label : "",
       c.lojas.join(", "),
       c.dataUltimaCompra ? formatData(c.dataUltimaCompra) : "",
       c.valorUltimaCompra ?? "",
       c.cnae,
-    ]);
+      ];
+    });
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
     ws["!cols"] = [{ wch: 42 }, { wch: 20 }, { wch: 22 }, { wch: 5 }, { wch: 18 }, { wch: 32 }, { wch: 8 }, { wch: 12 }, { wch: 14 }, { wch: 18 }, { wch: 14 }, { wch: 18 }, { wch: 30 }];
     const wb = XLSX.utils.book_new();
@@ -323,6 +365,20 @@ export default function ClientesProspeccao() {
                 disabled={!clientes.length}
               />
               <div className="flex items-center gap-2 shrink-0">
+                <MapPinned className="w-4 h-4 text-primary" />
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Cidade</span>
+              </div>
+              <MultiSelect
+                className="w-[200px]"
+                options={cidadeOptions}
+                values={selCidades}
+                onChange={setSelCidades}
+                placeholder="Todas as cidades"
+                manyLabel="cidades"
+                searchPlaceholder="Buscar cidade…"
+                disabled={!cidadeOptions.length}
+              />
+              <div className="flex items-center gap-2 shrink-0">
                 <Store className="w-4 h-4 text-primary" />
                 <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Loja</span>
               </div>
@@ -369,7 +425,16 @@ export default function ClientesProspeccao() {
               <p className="text-[12.5px] text-muted-foreground mt-1.5">A ApiDovale não retornou registros para os segmentos selecionados.</p>
             </div>
           ) : (
-            <div className="glass-card rounded-xl overflow-hidden">
+            <>
+              {/* KPIs — refletem os filtros ativos (base / estado / loja / busca) */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+                <KpiCard icon={<Users className="w-5 h-5" />} label="Total Clientes Buscados" value={`${naBaseCount + foraCount}`} tone="primary" />
+                <KpiCard icon={<Users className="w-5 h-5" />} label="Clientes na base" value={fmt(naBaseCount)} tone="success" />
+                <KpiCard icon={<CheckCircle2 className="w-5 h-5" />} label="Clientes ativos" value={fmt(ativosCount)} tone="gold" trend={`${pctAtiva}% da base`} />
+                <KpiCard icon={<Target className="w-5 h-5" />} label="Fora da base (potencial)" value={fmt(foraCount)} tone="slate" />
+              </div>
+
+              <div className="glass-card rounded-xl overflow-hidden">
               {/* Barra de ações: busca, contagem, tamanho de página, export */}
               <div className="flex items-center gap-3 flex-wrap p-4 border-b border-border">
                 <div className="relative flex-1 min-w-[220px]">
@@ -398,7 +463,7 @@ export default function ClientesProspeccao() {
                   ))}
                 </div>
                 <span className="text-xs text-muted-foreground font-mono shrink-0">
-                  {fmt(total)} clientes · {fmt(naBaseCount)} na base · {fmt(comEmail)} com email
+                  {fmt(total)} clientes · {fmt(naBaseCount)} na base
                 </span>
                 <div className="flex items-center gap-1.5 shrink-0">
                   <span className="text-[11px] text-muted-foreground">por página</span>
@@ -459,6 +524,9 @@ export default function ClientesProspeccao() {
                       const F = c.forma ? FORMA_META[c.forma] : null;
                       const Icon = F?.icon;
                       const ativo = c.situacao.toLocaleLowerCase("pt-BR") === "ativo";
+                      // "Na base" é relativo à(s) loja(s) selecionada(s): com Santana
+                      // filtrada, quem só tem cadastro em MG/Sjc aparece como "Não".
+                      const naBase = naBaseDe(c);
                       return (
                         <tr key={`${c.cnpj}-${i}`} className="border-b border-border/60 hover:bg-muted/40 transition-colors">
                           <td className="px-3 py-2.5 text-foreground font-medium max-w-[280px] truncate" title={c.razao}>{c.razao || DASH}</td>
@@ -477,12 +545,12 @@ export default function ClientesProspeccao() {
                             ) : <span className="text-muted-foreground/50">{DASH}</span>}
                           </td>
                           <td className="px-3 py-2.5 whitespace-nowrap">
-                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${c.naBase ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>
-                              {c.naBase ? "Sim" : "Não"}
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${naBase ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>
+                              {naBase ? "Sim" : "Não"}
                             </span>
                           </td>
                           <td className="px-3 py-2.5 whitespace-nowrap">
-                            {c.naBase ? (
+                            {naBase ? (
                               <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${ativo ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>
                                 {c.situacao}
                               </span>
@@ -539,7 +607,8 @@ export default function ClientesProspeccao() {
                   </button>
                 </div>
               </div>
-            </div>
+              </div>
+            </>
           )}
         </div>
       </main>

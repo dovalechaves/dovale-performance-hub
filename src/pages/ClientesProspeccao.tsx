@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import {
   ArrowLeft, Sun, Moon, Users, Target, MapPin, Loader2, AlertCircle, Search,
   FileSpreadsheet, ChevronLeft, ChevronRight, Building2, MapPinned, Phone, HelpCircle,
+  Store, ArrowUp, ArrowDown, ChevronsUpDown,
 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueries } from "@tanstack/react-query";
@@ -41,11 +42,31 @@ interface ClienteRow {
   situacao: string; // "Ativo" | "Inativo" | … (só faz sentido para quem está na base)
   forma: FormaCadastro | null; // por onde foi encontrado; null quando fora da base
   cnae: string;
+  lojas: string[]; // lojas onde o cliente tem cadastro (ex.: ["MG", "Sjc"])
+  dataUltimaCompra: string | null; // ISO
+  valorUltimaCompra: number | null;
 }
 
 const PAGE_SIZES = [25, 50, 100];
 
 type BaseFiltro = "ambos" | "na" | "fora";
+type SortKey = "razao" | "cidade" | "naBase" | "situacao" | "lojas" | "ultimaCompra" | "valor";
+type SortDir = "asc" | "desc";
+
+// Seta de ordenação no cabeçalho.
+function SortArrow({ active, dir }: { active: boolean; dir: SortDir }) {
+  if (!active) return <ChevronsUpDown className="w-3 h-3 opacity-30" />;
+  return dir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />;
+}
+
+const moeda = (n: number) => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+// "2022-07-18T00:00:00" -> "18/07/2022" (sem depender de fuso).
+function formatData(iso: string | null): string {
+  if (!iso) return DASH;
+  const m = iso.slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
+}
 
 // Deixa o telefone bruto ("5551999215808") um pouco mais legível, sem arriscar
 // mangear números fora do padrão (mantém o valor original se não casar).
@@ -69,6 +90,9 @@ function toRow(r: CadastroRegistro, naBase: boolean): ClienteRow {
     situacao: (r.situacaoInterna ?? "").trim() || (naBase ? "—" : "Sem cadastro"),
     forma: naBase ? normalizaForma(r.formaCadastro) : null,
     cnae: (r.cnae ?? "").trim(),
+    lojas: naBase ? (r.lojasComCadastro ?? []).map((l) => l.trim()).filter(Boolean) : [],
+    dataUltimaCompra: naBase ? r.dataUltimaCompra ?? null : null,
+    valorUltimaCompra: naBase ? r.valorUltimaCompra ?? null : null,
   };
 }
 
@@ -90,10 +114,18 @@ export default function ClientesProspeccao() {
 
   const [selCnaes, setSelCnaes] = useState<string[]>(initialCnaes);
   const [selUfs, setSelUfs] = useState<string[]>(initialUfs);
+  const [selLojas, setSelLojas] = useState<string[]>([]);
   const [baseFiltro, setBaseFiltro] = useState<BaseFiltro>("ambos");
   const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("razao");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
+
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(key); setSortDir("asc"); }
+  };
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
@@ -149,13 +181,21 @@ export default function ClientesProspeccao() {
     return [...set].sort().map((uf) => ({ value: uf, label: uf, hint: uf }));
   }, [clientes]);
 
-  // Filtro por base (na/fora/ambos) + estado + busca textual.
+  // Opções de loja (todas as lojas presentes nos cadastros dos clientes).
+  const lojaOptions: MultiOption[] = useMemo(() => {
+    const set = new Set<string>();
+    clientes.forEach((c) => c.lojas.forEach((l) => set.add(l)));
+    return [...set].sort((a, b) => a.localeCompare(b, "pt-BR")).map((l) => ({ value: l, label: l }));
+  }, [clientes]);
+
+  // Filtro por base (na/fora/ambos) + estado + loja + busca textual.
   const filtered = useMemo(() => {
     const q = search.trim().toLocaleLowerCase("pt-BR");
     return clientes.filter((c) => {
       if (baseFiltro === "na" && !c.naBase) return false;
       if (baseFiltro === "fora" && c.naBase) return false;
       if (selUfs.length && !selUfs.includes(c.uf)) return false;
+      if (selLojas.length && !c.lojas.some((l) => selLojas.includes(l))) return false;
       if (!q) return true;
       return (
         c.razao.toLocaleLowerCase("pt-BR").includes(q) ||
@@ -165,28 +205,50 @@ export default function ClientesProspeccao() {
         c.email.toLowerCase().includes(q)
       );
     });
-  }, [clientes, baseFiltro, selUfs, search]);
+  }, [clientes, baseFiltro, selUfs, selLojas, search]);
+
+  // Ordenação (clicando nos cabeçalhos). Datas ISO ordenam lexicograficamente.
+  const sorted = useMemo(() => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    const cmp = (a: ClienteRow, b: ClienteRow): number => {
+      switch (sortKey) {
+        case "razao": return a.razao.localeCompare(b.razao, "pt-BR");
+        case "cidade": return `${a.cidade}${a.uf}`.localeCompare(`${b.cidade}${b.uf}`, "pt-BR");
+        case "naBase": return (a.naBase ? 1 : 0) - (b.naBase ? 1 : 0);
+        case "situacao": return a.situacao.localeCompare(b.situacao, "pt-BR");
+        case "lojas": return a.lojas.join(",").localeCompare(b.lojas.join(","), "pt-BR");
+        case "ultimaCompra": return (a.dataUltimaCompra ?? "").localeCompare(b.dataUltimaCompra ?? "");
+        case "valor": return (a.valorUltimaCompra ?? -1) - (b.valorUltimaCompra ?? -1);
+        default: return 0;
+      }
+    };
+    return [...filtered].sort((a, b) => dir * cmp(a, b) || a.razao.localeCompare(b.razao, "pt-BR"));
+  }, [filtered, sortKey, sortDir]);
 
   // Reseta paginação quando o conjunto muda.
-  useEffect(() => setPage(1), [selCnaes, selUfs, baseFiltro, search, pageSize]);
+  useEffect(() => setPage(1), [selCnaes, selUfs, selLojas, baseFiltro, search, pageSize]);
 
-  const total = filtered.length;
+  const total = sorted.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const pageSafe = Math.min(page, totalPages);
   const start = (pageSafe - 1) * pageSize;
-  const pageRows = filtered.slice(start, start + pageSize);
+  const pageRows = sorted.slice(start, start + pageSize);
 
   const comEmail = useMemo(() => filtered.filter((c) => c.email).length, [filtered]);
   const naBaseCount = useMemo(() => filtered.filter((c) => c.naBase).length, [filtered]);
 
   const exportXlsx = () => {
-    const headers = ["Razão social", "CNPJ", "Cidade", "UF", "Telefone", "Email", "Na base", "Situação", "Encontrado por", "Segmento (CNAE)"];
-    const rows = filtered.map((c) => [
+    const headers = ["Razão social", "CNPJ", "Cidade", "UF", "Telefone", "Email", "Na base", "Situação", "Encontrado por", "Lojas com cadastro", "Última compra", "Valor última compra", "Segmento (CNAE)"];
+    const rows = sorted.map((c) => [
       c.razao, c.cnpj, c.cidade, c.uf, c.telefone, c.email, c.naBase ? "Sim" : "Não",
-      c.naBase ? c.situacao : "", c.forma ? FORMA_META[c.forma].label : "", c.cnae,
+      c.naBase ? c.situacao : "", c.forma ? FORMA_META[c.forma].label : "",
+      c.lojas.join(", "),
+      c.dataUltimaCompra ? formatData(c.dataUltimaCompra) : "",
+      c.valorUltimaCompra ?? "",
+      c.cnae,
     ]);
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-    ws["!cols"] = [{ wch: 42 }, { wch: 20 }, { wch: 22 }, { wch: 5 }, { wch: 18 }, { wch: 32 }, { wch: 8 }, { wch: 12 }, { wch: 14 }, { wch: 30 }];
+    ws["!cols"] = [{ wch: 42 }, { wch: 20 }, { wch: 22 }, { wch: 5 }, { wch: 18 }, { wch: 32 }, { wch: 8 }, { wch: 12 }, { wch: 14 }, { wch: 18 }, { wch: 14 }, { wch: 18 }, { wch: 30 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Clientes");
     XLSX.writeFile(wb, `clientes_prospeccao_${total}.xlsx`);
@@ -253,7 +315,7 @@ export default function ClientesProspeccao() {
                 <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Estado</span>
               </div>
               <MultiSelect
-                className="w-[200px]"
+                className="w-[180px]"
                 options={ufOptions}
                 values={selUfs}
                 onChange={setSelUfs}
@@ -261,6 +323,20 @@ export default function ClientesProspeccao() {
                 manyLabel="estados"
                 searchPlaceholder="Buscar estado…"
                 disabled={!clientes.length}
+              />
+              <div className="flex items-center gap-2 shrink-0">
+                <Store className="w-4 h-4 text-primary" />
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Loja</span>
+              </div>
+              <MultiSelect
+                className="w-[180px]"
+                options={lojaOptions}
+                values={selLojas}
+                onChange={setSelLojas}
+                placeholder="Todas as lojas"
+                manyLabel="lojas"
+                searchPlaceholder="Buscar loja…"
+                disabled={!lojaOptions.length}
               />
               {isFetching && (
                 <span className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
@@ -350,20 +426,33 @@ export default function ClientesProspeccao() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground border-b border-border">
-                      <th className="font-semibold px-3 py-2.5 whitespace-nowrap">Razão social</th>
-                      <th className="font-semibold px-3 py-2.5 whitespace-nowrap">CNPJ</th>
-                      <th className="font-semibold px-3 py-2.5 whitespace-nowrap">Cidade / UF</th>
-                      <th className="font-semibold px-3 py-2.5 whitespace-nowrap">Telefone</th>
-                      <th className="font-semibold px-3 py-2.5 whitespace-nowrap">Email</th>
-                      <th className="font-semibold px-3 py-2.5 whitespace-nowrap">Na base</th>
-                      <th className="font-semibold px-3 py-2.5 whitespace-nowrap">Situação</th>
-                      <th className="font-semibold px-3 py-2.5 whitespace-nowrap">Encontrado por</th>
+                      {([
+                        { key: "razao" as const, label: "Razão social", sortable: true },
+                        { key: null, label: "CNPJ", sortable: false },
+                        { key: "cidade" as const, label: "Cidade / UF", sortable: true },
+                        { key: null, label: "Telefone", sortable: false },
+                        { key: null, label: "Email", sortable: false },
+                        { key: "naBase" as const, label: "Na base", sortable: true },
+                        { key: "situacao" as const, label: "Situação", sortable: true },
+                        { key: null, label: "Encontrado por", sortable: false },
+                        { key: "lojas" as const, label: "Lojas", sortable: true },
+                        { key: "ultimaCompra" as const, label: "Última compra", sortable: true },
+                        { key: "valor" as const, label: "Valor", sortable: true },
+                      ] as { key: SortKey | null; label: string; sortable: boolean }[]).map((h, idx) => (
+                        <th key={idx} className="font-semibold px-3 py-2.5 whitespace-nowrap">
+                          {h.sortable && h.key ? (
+                            <button onClick={() => toggleSort(h.key!)} className={`inline-flex items-center gap-1 hover:text-foreground transition-colors ${sortKey === h.key ? "text-foreground" : ""}`}>
+                              {h.label} <SortArrow active={sortKey === h.key} dir={sortDir} />
+                            </button>
+                          ) : h.label}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
                     {!total && (
                       <tr>
-                        <td colSpan={8} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                        <td colSpan={11} className="px-4 py-10 text-center text-sm text-muted-foreground">
                           Nenhum cliente para o filtro atual.
                         </td>
                       </tr>
@@ -408,6 +497,19 @@ export default function ClientesProspeccao() {
                                 {F.label}
                               </span>
                             ) : <span className="text-muted-foreground/50">{DASH}</span>}
+                          </td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">
+                            {c.lojas.length ? (
+                              <span className="inline-flex items-center gap-1 flex-wrap">
+                                {c.lojas.map((l) => (
+                                  <span key={l} className="inline-flex items-center rounded-md bg-secondary text-foreground/80 px-1.5 py-0.5 text-[11px] font-medium">{l}</span>
+                                ))}
+                              </span>
+                            ) : <span className="text-muted-foreground/50">{DASH}</span>}
+                          </td>
+                          <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap tabular-nums">{formatData(c.dataUltimaCompra)}</td>
+                          <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap tabular-nums text-right">
+                            {c.valorUltimaCompra != null ? moeda(c.valorUltimaCompra) : <span className="text-muted-foreground/50">{DASH}</span>}
                           </td>
                         </tr>
                       );

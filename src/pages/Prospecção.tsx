@@ -67,15 +67,13 @@ export default function Prospeccao() {
   // Ao trocar de segmentos, limpa a seleção de estados (decisão de UX do handoff).
   useEffect(() => setSelStates([]), [selCnaes]);
 
-  // Lista de CNAEs — carregada uma vez; default = primeiro segmento.
+  // Lista de CNAEs — carregada uma vez. Nada vem pré-selecionado: sem CNAE a tela
+  // mostra só o convite para selecionar um segmento.
   const { data: cnaes = [], isLoading: cnaesLoading } = useQuery({
     queryKey: ["prospeccao-cnaes"],
     queryFn: ({ signal }) => fetchCnaes(signal),
     staleTime: Infinity,
   });
-  useEffect(() => {
-    if (cnaes.length && selCnaes.length === 0) setSelCnaes([cnaes[0]]);
-  }, [cnaes, selCnaes.length]);
 
   // Uma query por CNAE selecionado; agregamos os resultados numa visão só.
   const coberturaQueries = useQueries({

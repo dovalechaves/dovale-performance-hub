@@ -137,10 +137,8 @@ export default function ClientesProspeccao() {
     queryFn: ({ signal }) => fetchCnaes(signal),
     staleTime: Infinity,
   });
-  // Sem CNAE na URL, começa no primeiro segmento (mesmo default da cobertura).
-  useEffect(() => {
-    if (cnaes.length && selCnaes.length === 0 && initialCnaes.length === 0) setSelCnaes([cnaes[0]]);
-  }, [cnaes, selCnaes.length, initialCnaes.length]);
+  // Nada vem pré-selecionado: sem CNAE (na URL ou escolhido) a tela mostra só o
+  // convite para selecionar um segmento.
 
   // Resposta bruta por CNAE — mesma chave da cobertura não serve (lá guardamos só
   // o agregado); aqui precisamos dos registros para a tabela.
@@ -292,7 +290,7 @@ export default function ClientesProspeccao() {
       </header>
 
       <main className="flex-1 overflow-y-auto">
-        <div className="container mx-auto max-w-[1280px] px-5 pt-7 pb-12 flex flex-col gap-5">
+        <div className="w-full px-5 pt-7 pb-12 flex flex-col gap-5">
           {/* Filtros */}
           <div className="glass-card rounded-xl p-4 relative z-40">
             <div className="flex items-center gap-3 flex-wrap">
@@ -463,7 +461,7 @@ export default function ClientesProspeccao() {
                       const ativo = c.situacao.toLocaleLowerCase("pt-BR") === "ativo";
                       return (
                         <tr key={`${c.cnpj}-${i}`} className="border-b border-border/60 hover:bg-muted/40 transition-colors">
-                          <td className="px-3 py-2.5 text-foreground font-medium max-w-[150px] truncate" title={c.razao}>{c.razao || DASH}</td>
+                          <td className="px-3 py-2.5 text-foreground font-medium max-w-[280px] truncate" title={c.razao}>{c.razao || DASH}</td>
                           <td className="px-3 py-2.5 text-muted-foreground font-mono text-xs whitespace-nowrap">{c.cnpj || DASH}</td>
                           <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">
                             {c.cidade || DASH}{c.uf ? <span className="text-muted-foreground/60"> / {c.uf}</span> : null}
@@ -473,7 +471,7 @@ export default function ClientesProspeccao() {
                               <a href={`tel:${c.telefone}`} className="hover:text-primary">{formatTelefone(c.telefone)}</a>
                             ) : DASH}
                           </td>
-                          <td className="px-3 py-2.5 max-w-[230px] truncate">
+                          <td className="px-3 py-2.5 max-w-[280px] truncate">
                             {c.email ? (
                               <a href={`mailto:${c.email}`} className="text-primary hover:underline" title={c.email}>{c.email}</a>
                             ) : <span className="text-muted-foreground/50">{DASH}</span>}

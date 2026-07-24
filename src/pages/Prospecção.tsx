@@ -73,15 +73,20 @@ export default function Prospeccao() {
     queryKey: ["prospeccao-cnaes"],
     queryFn: ({ signal }) => fetchCnaes(signal),
     staleTime: Infinity,
+    gcTime: Infinity,
   });
 
   // Uma query por CNAE selecionado; agregamos os resultados numa visão só.
+  // Mesma chave/fetcher da tela de Clientes (dados brutos) — a cobertura é
+  // derivada em memória via `select`, então navegar entre as telas reaproveita
+  // o cache em vez de refazer a chamada. staleTime 10min / gcTime 30min.
   const coberturaQueries = useQueries({
     queries: selCnaes.map((cnae) => ({
-      queryKey: ["prospeccao-cobertura", cnae],
-      queryFn: async ({ signal }: { signal?: AbortSignal }) =>
-        buildCobertura(await fetchVerificarCadastros(cnae, signal)),
-      staleTime: 5 * 60 * 1000,
+      queryKey: ["prospeccao-verificar", cnae],
+      queryFn: ({ signal }: { signal?: AbortSignal }) => fetchVerificarCadastros(cnae, signal),
+      select: buildCobertura,
+      staleTime: 10 * 60 * 1000,
+      gcTime: 30 * 60 * 1000,
     })),
   });
 

@@ -137,17 +137,20 @@ export default function ClientesProspeccao() {
     queryKey: ["prospeccao-cnaes"],
     queryFn: ({ signal }) => fetchCnaes(signal),
     staleTime: Infinity,
+    gcTime: Infinity,
   });
   // Nada vem pré-selecionado: sem CNAE (na URL ou escolhido) a tela mostra só o
   // convite para selecionar um segmento.
 
-  // Resposta bruta por CNAE — mesma chave da cobertura não serve (lá guardamos só
-  // o agregado); aqui precisamos dos registros para a tabela.
+  // Resposta bruta por CNAE. Mesma chave/fetcher da tela de Cobertura (que só
+  // aplica um `select` por cima), então navegar entre as telas reaproveita o
+  // cache. staleTime 10min / gcTime 30min para o cache sobreviver à navegação.
   const registroQueries = useQueries({
     queries: selCnaes.map((cnae) => ({
       queryKey: ["prospeccao-verificar", cnae],
       queryFn: ({ signal }: { signal?: AbortSignal }) => fetchVerificarCadastros(cnae, signal),
-      staleTime: 5 * 60 * 1000,
+      staleTime: 10 * 60 * 1000,
+      gcTime: 30 * 60 * 1000,
     })),
   });
   const isFetching = registroQueries.some((q) => q.isFetching);

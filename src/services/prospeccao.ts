@@ -28,6 +28,10 @@ export interface CadastroRegistro {
   // Como o registro do mercado foi casado com a base interna: "CNPJ", "CEP" ou
   // "Telefone". Só vem preenchido para quem está na base (temCadastro = true).
   formaCadastro: string | null;
+  // Campos abaixo só vêm para quem está na base (temCadastro = true).
+  dataUltimaCompra: string | null; // ISO ("2022-07-18T00:00:00")
+  valorUltimaCompra: number | null;
+  lojasComCadastro: string[] | null; // lojas onde o cliente tem cadastro (ex.: ["MG", "Sjc"])
 }
 
 // Formas de vínculo (por onde o cliente foi encontrado na base interna).

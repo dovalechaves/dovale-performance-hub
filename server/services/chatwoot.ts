@@ -261,6 +261,29 @@ export async function sincronizarTemplates(inboxId?: number): Promise<boolean> {
   }
 }
 
+/**
+ * Garante que o template está na lista do inbox. Se não estiver, dispara o sync e
+ * faz polling — o sync do Chatwoot é assíncrono, a lista não atualiza na hora.
+ * Só templates APROVADOS na Meta entram nessa lista; para pendentes isso nunca
+ * retorna true (por isso o status na Meta deve ser checado antes).
+ */
+export async function garantirTemplateSincronizado(
+  nome: string,
+  inboxId?: number,
+  tentativas = 3,
+  intervaloMs = 3000,
+): Promise<boolean> {
+  if (await templateSincronizado(nome, inboxId)) return true;
+  console.log(`[Chatwoot] Template '${nome}' fora da lista do inbox — disparando sync...`);
+  await sincronizarTemplates(inboxId);
+  for (let t = 0; t < tentativas; t++) {
+    await sleep(intervaloMs);
+    if (await templateSincronizado(nome, inboxId)) return true;
+  }
+  console.error(`[Chatwoot] Template '${nome}' não apareceu na lista após o sync.`);
+  return false;
+}
+
 /** Verifica se um template (por nome) já está na lista sincronizada do inbox. */
 export async function templateSincronizado(nome: string, inboxId?: number): Promise<boolean> {
   const id = inboxId ?? INBOX_ID();

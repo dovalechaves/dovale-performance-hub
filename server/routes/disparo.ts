@@ -235,6 +235,7 @@ function normalizeTemplateMeta(item: any) {
   const bodyText = body?.text ?? "";
   return {
     id: item.id, name: item.name, language_code: item.language,
+    status: String(item.status ?? "").toUpperCase(),
     header_format: hf,
     requires_media: ["IMAGE", "VIDEO", "DOCUMENT"].includes(hf),
     header_text_params_count: (headerText.match(/\{\{\d+\}\}/g) ?? []).length,
@@ -242,14 +243,17 @@ function normalizeTemplateMeta(item: any) {
   };
 }
 
+// Alimenta o seletor de disparo — só templates APROVADOS, porque pendente/rejeitado
+// não pode ser disparado (nem entra na lista do Chatwoot).
 router.get("/templates", async (_req: Request, res: Response) => {
   const { data, error } = await meta.obterTemplates();
   if (!data) {
     console.error("[disparo] GET /templates erro:", error);
     return res.status(502).json({ erro: error || "Falha ao buscar templates na Meta" });
   }
-  const items = (data.data ?? []).map(normalizeTemplateMeta);
-  console.log(`[disparo] GET /templates: ${items.length} templates retornados`);
+  const todos = (data.data ?? []).map(normalizeTemplateMeta);
+  const items = todos.filter((t) => t.status === "APPROVED");
+  console.log(`[disparo] GET /templates: ${items.length} aprovados de ${todos.length} templates`);
   res.json(items);
 });
 
@@ -305,9 +309,8 @@ router.post("/templates", async (req: Request, res: Response) => {
       );
     }
 
-    // Dispara sync no Chatwoot (assíncrono) — quando o template for aprovado, já entra na lista.
-    // O disparo também re-sincroniza antes de enviar, então isso é só pra adiantar.
-    cw.sincronizarTemplates().catch(() => {});
+    // Não sincroniza o Chatwoot aqui: o template acabou de ser criado e está PENDING na
+    // Meta, e o Chatwoot só lista os APROVADOS. O sync acontece no POST /disparar.
 
     res.status(201).json({ mensagem: "Template enviado para aprovação na Meta", resultado: data });
   } catch (err: any) {
@@ -437,24 +440,10 @@ router.post("/disparar", async (req: Request, res: Response) => {
   const cfg = parseConfiguracao(cfgRaw);
   cfg.inbox_id = inbox_id;
 
-  // Valida template
-  const { data: tData } = await meta.obterTemplates();
-  if (!tData) return res.status(502).json({ erro: "Não foi possível validar os templates da Meta" });
-  const templates: any[] = (tData.data ?? []).map(normalizeTemplateMeta);
-  let tmpl = templates.find((t) => t.name === template_nome && (!cfg.language_code || t.language_code === cfg.language_code));
-  if (!tmpl) tmpl = templates.find((t) => t.name === template_nome);
-  if (tmpl) {
-    if (tmpl.requires_media && !String(cfg.media_url ?? "").trim()) {
-      return res.status(400).json({ erro: "Esse template exige mídia." });
-    }
-    if (!cfg.language_code) cfg.language_code = tmpl.language_code;
-    if (!cfg.header_format) cfg.header_format = tmpl.header_format;
-  }
-
   const supa = getSupa();
   const usuarioAtual = (req as any).usuarioLogado ?? {};
 
-  // Bloqueia se já existe disparo ativo
+  // Bloqueia se já existe disparo ativo (antes das validações externas — falha barata)
   const { data: ativos } = await supa.from("disparos").select("id, status, configuracao")
     .in("status", ["AWAITING_APPROVAL", "PROCESSING", "PAUSING", "PAUSED"])
     .limit(1);
@@ -464,6 +453,45 @@ router.post("/disparar", async (req: Request, res: Response) => {
     try { solicitante = JSON.parse(ativos[0].configuracao ?? "{}").solicitante ?? ""; } catch {}
     const porQuem = solicitante ? ` de "${solicitante}"` : "";
     return res.status(409).json({ erro: `Já existe um disparo ${lblMap[ativos[0].status] ?? ativos[0].status}${porQuem} (#${ativos[0].id}). Aguarde a conclusão ou cancele-o antes de iniciar outro.` });
+  }
+
+  // ── Gate do template ───────────────────────────────────────────────────────
+  // Roda ANTES de gravar o disparo e de notificar os aprovadores: um template que
+  // não pode ser enviado tomaria o lock de disparo ativo por até 10 min (timeout de
+  // aprovação), incomodaria os aprovadores e só falharia depois, no engine.
+  const { data: tData } = await meta.obterTemplates();
+  if (!tData) return res.status(502).json({ erro: "Não foi possível validar os templates da Meta" });
+  const templates: any[] = (tData.data ?? []).map(normalizeTemplateMeta);
+  let tmpl = templates.find((t) => t.name === template_nome && (!cfg.language_code || t.language_code === cfg.language_code));
+  if (!tmpl) tmpl = templates.find((t) => t.name === template_nome);
+
+  if (!tmpl) {
+    return res.status(400).json({
+      erro: `Template '${template_nome}' não encontrado na Meta. Ele pode ter sido excluído — atualize a lista de templates.`,
+    });
+  }
+  if (tmpl.status !== "APPROVED") {
+    const rotulo: Record<string, string> = {
+      PENDING: "pendente de aprovação", REJECTED: "rejeitado",
+      PAUSED: "pausado", DISABLED: "desabilitado", "": "sem status",
+    };
+    return res.status(400).json({
+      erro: `Template '${template_nome}' está ${rotulo[tmpl.status] ?? tmpl.status} na Meta. Só é possível disparar templates aprovados.`,
+    });
+  }
+  if (tmpl.requires_media && !String(cfg.media_url ?? "").trim()) {
+    return res.status(400).json({ erro: "Esse template exige mídia." });
+  }
+  if (!cfg.language_code) cfg.language_code = tmpl.language_code;
+  if (!cfg.header_format) cfg.header_format = tmpl.header_format;
+
+  // Aprovado na Meta não basta: sem o template na lista do inbox o Chatwoot monta o
+  // payload errado e a Meta devolve #132012. O sync do Chatwoot é assíncrono, então
+  // aqui a espera é curta — se não resolver, é transitório e o usuário tenta de novo.
+  if (!(await cw.garantirTemplateSincronizado(template_nome, inbox_id))) {
+    return res.status(409).json({
+      erro: `Template '${template_nome}' está aprovado na Meta mas ainda não foi sincronizado no Chatwoot. A sincronização é assíncrona — aguarde alguns minutos e tente novamente.`,
+    });
   }
 
   // Salva o nome do solicitante na configuração

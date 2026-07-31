@@ -297,6 +297,8 @@ export default function ClientesProspeccao() {
     XLSX.writeFile(wb, `clientes_prospeccao_${total}.xlsx`);
   };
 
+  
+
   const goCobertura = () => {
     const qs = selCnaes.length ? `?cnae=${encodeURIComponent(selCnaes.join(","))}` : "";
     navigate(`/prospeccao${qs}`);

@@ -26,6 +26,7 @@ import {
   groupBy,
   getVendedoresNomesRaw,
   invalidarCacheVinculos,
+  fontesIndisponiveis,
 } from "../services/comissao/dados-externos";
 import { queryFirebird } from "../services/comissao/firebird";
 import { queryMySQL } from "../services/comissao/mysql-ext";
@@ -582,6 +583,8 @@ router.get("/dashboard", async (req: any, res: any) => {
       total_pa_televendas,
       total_recebimentos_televendas,
       total_comissao_televendas,
+      // Bases externas fora do ar: os totais acima estão sem os dados dessas lojas
+      fontes_indisponiveis: fontesIndisponiveis().map(f => f.fonte),
     });
   } catch (error) {
     console.error('Erro ao buscar dashboard:', error);

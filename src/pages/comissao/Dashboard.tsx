@@ -15,6 +15,7 @@ import {
   BarChart2,
   Wallet,
   Award,
+  AlertTriangle,
 } from 'lucide-react';
 
 const ANO_ATUAL = new Date().getFullYear();
@@ -96,6 +97,7 @@ function ProjecaoCard({
 export default function ComissaoDashboard() {
   const api = useComissaoApi();
   const [data, setData] = useState<DashboardSummary | null>(null);
+  const [erro, setErro] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [ano, setAno] = useState(ANO_ATUAL);
   const [mes, setMes] = useState<number | null>(new Date().getMonth() + 1);
@@ -104,22 +106,28 @@ export default function ComissaoDashboard() {
 
   const fetchData = async () => {
     setLoading(true);
+    setErro(null);
     try {
       const params = new URLSearchParams({ ano: ano.toString() });
       if (mes) params.set('mes', mes.toString());
       const res = await api(`/dashboard?${params}`, { cache: 'no-store' });
       if (!res.ok) {
         setData(null);
+        setErro(
+          res.status === 504 || res.status === 524
+            ? 'O servidor demorou demais para responder. Tente novamente em alguns instantes.'
+            : `Não foi possível carregar os dados (erro ${res.status}).`
+        );
         return;
       }
       const json = await res.json();
-      setData(
-        json && Array.isArray(json.vendas_por_setor) && Array.isArray(json.top_vendedores)
-          ? json
-          : null
-      );
+      const valido = json && Array.isArray(json.vendas_por_setor) && Array.isArray(json.top_vendedores);
+      setData(valido ? json : null);
+      if (!valido) setErro('Resposta inválida do servidor.');
     } catch (e) {
       console.error(e);
+      setData(null);
+      setErro('Falha de comunicação com o servidor.');
     } finally {
       setLoading(false);
     }
@@ -214,6 +222,27 @@ export default function ComissaoDashboard() {
             </button>
           </div>
         </div>
+
+        {/* Falha de carregamento */}
+        {erro && !loading && (
+          <div className="rounded-lg px-4 py-3 text-sm flex items-center gap-2"
+            style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b' }}>
+            <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+            <span>{erro}</span>
+          </div>
+        )}
+
+        {/* Bases externas fora do ar: os totais estão incompletos */}
+        {data?.fontes_indisponiveis?.length ? (
+          <div className="rounded-lg px-4 py-3 text-sm flex items-center gap-2"
+            style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e' }}>
+            <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+            <span>
+              Dados incompletos: sem conexão com {data.fontes_indisponiveis.join(', ')}.
+              Os valores abaixo não incluem essas lojas.
+            </span>
+          </div>
+        ) : null}
 
         {/* KPI Cards */}
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">

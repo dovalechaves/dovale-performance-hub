@@ -293,12 +293,11 @@ export default function Prospeccao() {
             </div>
           ) : (
             <>
-              {/* KPIs */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
                 <KpiCard icon={<Users className="w-5 h-5" />} label="Clientes na base" value={fmt(totais.naBase)} tone="success" />
                 <KpiCard icon={<CheckCircle2 className="w-5 h-5" />} label="Clientes ativos" value={fmt(totais.ativos)} tone="gold" trend={`${pctAtiva}% da base`} />
                 <KpiCard icon={<Target className="w-5 h-5" />} label="Fora da base (potencial)" value={fmt(totais.foraBase)} tone="slate" />
-                <KpiCard icon={<TrendingUp className="w-5 h-5" />} label="Cobertura geral" value={`${coberturaGeral}%`} tone="primary" />
+                <KpiCard icon={<Users className="w-5 h-5" />} label="Total de Clientes" value={`${totais.naBase+totais.foraBase}%`} tone="primary" />
               </div>
 
               {/* Como o cliente foi encontrado na base (CNPJ / CEP / Telefone) */}

@@ -75,4 +75,6 @@ export interface DashboardSummary {
   total_pa_televendas: number;
   total_recebimentos_televendas: number;
   total_comissao_televendas: number;
+  /** Bases externas fora do ar — os totais estão sem os dados dessas lojas */
+  fontes_indisponiveis?: string[];
 }

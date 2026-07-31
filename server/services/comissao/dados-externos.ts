@@ -3,6 +3,7 @@ import { queryMySQL } from './mysql-ext';
 import { getPool } from '../../db/sqlserver';
 import sql from 'mssql';
 import { fbSJC, fbSPM, fbLockeyMG, fbLockey, fbLockeyRJ, fbLockeyBH, myLockeyRS, myNiteroi } from './db-externas';
+import { FALHA_TTL_MS, ehFalhaDeConexao } from './timeouts';
 import { SETORES_ATIVOS } from './setores';
 import { ensureDistTables } from './distribuidores-tables';
 
@@ -342,6 +343,44 @@ async function queryEPVendas(ano: number): Promise<VendaRow[]> {
   }
 }
 
+// ─── Circuit breaker por base externa ────────────────────────────────────────
+// Uma base fora do ar (ex.: Lockey BH quando a VPN cai) não pode custar o timeout de
+// conexão em toda request: depois da primeira falha de conexão ela é ignorada por
+// FALHA_TTL_MS. Falhas de consulta (base viva, query lenta) não abrem o breaker.
+
+interface Falha { fonte: string; erro: string; ts: number }
+const _falhas = new Map<string, Falha>();
+
+async function comBreaker<T>(
+  fonte: string,
+  host: string,
+  fn: () => Promise<T[]>,
+): Promise<T[]> {
+  const chave = host || fonte;
+  const falha = _falhas.get(chave);
+  if (falha && Date.now() - falha.ts < FALHA_TTL_MS) {
+    throw new Error(`${fonte} ignorada (falha recente de conexão: ${falha.erro})`);
+  }
+  try {
+    const rows = await fn();
+    _falhas.delete(chave);
+    return rows;
+  } catch (err) {
+    if (ehFalhaDeConexao(err)) {
+      _falhas.set(chave, { fonte, erro: (err as Error).message, ts: Date.now() });
+    }
+    throw new Error(`${fonte}: ${(err as Error).message}`);
+  }
+}
+
+/** Bases externas indisponíveis agora — usado para avisar na tela que faltam dados. */
+export function fontesIndisponiveis(): { fonte: string; erro: string }[] {
+  const agora = Date.now();
+  return [..._falhas.values()]
+    .filter(f => agora - f.ts < FALHA_TTL_MS)
+    .map(f => ({ fonte: f.fonte, erro: f.erro }));
+}
+
 // ─── Fetch + cache ────────────────────────────────────────────────────────────
 // O cache guarda as linhas BRUTAS (sem vínculo Distribuidores aplicado). O vínculo é
 // aplicado na leitura (getVendas/getRecebimentos), assim uma alteração no vínculo tem
@@ -355,30 +394,33 @@ function getVendasBrutas(ano: number): Promise<VendaRow[]> {
   if (inflight) return inflight;
 
   const promise = (async () => {
-    const [settled, epRows] = await Promise.all([
-      Promise.allSettled([
-        queryFirebird(fbSJC, fbVendas('SJC', ano)),
-        queryFirebird(fbSPM, fbVendas('SPM', ano)),
-        queryFirebird(fbLockeyMG, fbVendas('LOCKEY MG', ano)),
-        queryFirebird(fbLockey, fbVendasLockey(ano)),
-        queryFirebird(fbLockeyRJ, fbVendas('Rio de Janeiro', ano)),
-        queryFirebird(fbLockeyBH, fbVendas('Belo Horizonte', ano)),
-        queryMySQL(myLockeyRS, mysqlVendas('LOCKEY RS', ano)),
-        queryMySQL(myNiteroi, mysqlVendas('NITEROI', ano)),
-      ]),
-      queryEPVendas(ano),
-    ]);
+    try {
+      const [settled, epRows] = await Promise.all([
+        Promise.allSettled([
+          comBreaker('SJC', fbSJC.host, () => queryFirebird(fbSJC, fbVendas('SJC', ano))),
+          comBreaker('SPM', fbSPM.host, () => queryFirebird(fbSPM, fbVendas('SPM', ano))),
+          comBreaker('LOCKEY MG', fbLockeyMG.host, () => queryFirebird(fbLockeyMG, fbVendas('LOCKEY MG', ano))),
+          comBreaker('LOCKEY SP/FAST', fbLockey.host, () => queryFirebird(fbLockey, fbVendasLockey(ano))),
+          comBreaker('Rio de Janeiro', fbLockeyRJ.host, () => queryFirebird(fbLockeyRJ, fbVendas('Rio de Janeiro', ano))),
+          comBreaker('Belo Horizonte', fbLockeyBH.host, () => queryFirebird(fbLockeyBH, fbVendas('Belo Horizonte', ano))),
+          comBreaker('LOCKEY RS', myLockeyRS.host, () => queryMySQL(myLockeyRS, mysqlVendas('LOCKEY RS', ano))),
+          comBreaker('NITEROI', myNiteroi.host, () => queryMySQL(myNiteroi, mysqlVendas('NITEROI', ano))),
+        ]),
+        queryEPVendas(ano),
+      ]);
 
-    const raw: Record<string, unknown>[] = [];
-    settled.forEach(r => {
-      if (r.status === 'fulfilled') raw.push(...r.value);
-      else console.error('[dados-externos] vendas:', (r.reason as Error)?.message ?? r.reason);
-    });
+      const raw: Record<string, unknown>[] = [];
+      settled.forEach(r => {
+        if (r.status === 'fulfilled') raw.push(...r.value);
+        else console.error('[dados-externos] vendas:', (r.reason as Error)?.message ?? r.reason);
+      });
 
-    const rows = [...normalizeVendas(raw), ...epRows];
-    _cv.set(ano, { rows, ts: Date.now() });
-    _inFlightV.delete(ano);
-    return rows;
+      const rows = [...normalizeVendas(raw), ...epRows];
+      _cv.set(ano, { rows, ts: Date.now() });
+      return rows;
+    } finally {
+      _inFlightV.delete(ano);
+    }
   })();
 
   _inFlightV.set(ano, promise);
@@ -393,27 +435,30 @@ function getRecebimentosBrutos(ano: number): Promise<RecebRow[]> {
   if (inflight) return inflight;
 
   const promise = (async () => {
-    const settled = await Promise.allSettled([
-      queryFirebird(fbSJC, fbReceb('SJC', ano)),
-      queryFirebird(fbSPM, fbReceb('SPM', ano)),
-      queryFirebird(fbLockeyMG, fbReceb('LOCKEY MG', ano)),
-      queryFirebird(fbLockey, fbRecebLockey(ano)),
-      queryFirebird(fbLockeyRJ, fbReceb('Rio de Janeiro', ano)),
-      queryFirebird(fbLockeyBH, fbReceb('Belo Horizonte', ano)),
-      queryMySQL(myLockeyRS, mysqlReceb('LOCKEY RS', ano)),
-      queryMySQL(myNiteroi, mysqlReceb('NITEROI', ano)),
-    ]);
+    try {
+      const settled = await Promise.allSettled([
+        comBreaker('SJC', fbSJC.host, () => queryFirebird(fbSJC, fbReceb('SJC', ano))),
+        comBreaker('SPM', fbSPM.host, () => queryFirebird(fbSPM, fbReceb('SPM', ano))),
+        comBreaker('LOCKEY MG', fbLockeyMG.host, () => queryFirebird(fbLockeyMG, fbReceb('LOCKEY MG', ano))),
+        comBreaker('LOCKEY SP/FAST', fbLockey.host, () => queryFirebird(fbLockey, fbRecebLockey(ano))),
+        comBreaker('Rio de Janeiro', fbLockeyRJ.host, () => queryFirebird(fbLockeyRJ, fbReceb('Rio de Janeiro', ano))),
+        comBreaker('Belo Horizonte', fbLockeyBH.host, () => queryFirebird(fbLockeyBH, fbReceb('Belo Horizonte', ano))),
+        comBreaker('LOCKEY RS', myLockeyRS.host, () => queryMySQL(myLockeyRS, mysqlReceb('LOCKEY RS', ano))),
+        comBreaker('NITEROI', myNiteroi.host, () => queryMySQL(myNiteroi, mysqlReceb('NITEROI', ano))),
+      ]);
 
-    const raw: Record<string, unknown>[] = [];
-    settled.forEach(r => {
-      if (r.status === 'fulfilled') raw.push(...r.value);
-      else console.error('[dados-externos] recebimentos:', (r.reason as Error)?.message ?? r.reason);
-    });
+      const raw: Record<string, unknown>[] = [];
+      settled.forEach(r => {
+        if (r.status === 'fulfilled') raw.push(...r.value);
+        else console.error('[dados-externos] recebimentos:', (r.reason as Error)?.message ?? r.reason);
+      });
 
-    const rows = normalizeReceb(raw);
-    _cr.set(ano, { rows, ts: Date.now() });
-    _inFlightR.delete(ano);
-    return rows;
+      const rows = normalizeReceb(raw);
+      _cr.set(ano, { rows, ts: Date.now() });
+      return rows;
+    } finally {
+      _inFlightR.delete(ano);
+    }
   })();
 
   _inFlightR.set(ano, promise);

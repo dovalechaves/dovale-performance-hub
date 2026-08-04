@@ -368,6 +368,7 @@ function ContatoModal({ cliente, onClose, onCrm, onWhatsApp }: { cliente: Client
           <div><h3 className="font-bold">{cliente.nome}</h3><StatusBadges c={cliente} /></div>
         </div>
         <div className="space-y-2 text-sm text-muted-foreground mb-6">
+          <p><strong className="text-foreground">Código:</strong> {cliente.id}</p>
           <p><Phone className="inline h-3 w-3 mr-1" /><strong className="text-foreground">Tel:</strong> {cliente.telefone}</p>
           <p><strong className="text-foreground">Ticket médio:</strong> {moeda(cliente.ticketMedio)}</p>
           <p><strong className="text-foreground">Última compra:</strong> {moeda(cliente.valorUltimaCompra)} (há {dias} dias)</p>
@@ -397,6 +398,7 @@ function ClienteCard({ cliente, potencial, gc, onCrm }: { cliente: Cliente; pote
         <div className={`h-10 w-10 rounded-xl flex items-center justify-center font-bold shrink-0 text-sm ${cc.bg} ${cc.text}`}>{cliente.categoria}</div>
         <div className="min-w-0">
           <p className="font-semibold text-sm truncate">{cliente.nome}</p>
+          <p className="text-[10px] text-muted-foreground">Cód: {cliente.id}</p>
           <div className="mt-0.5 flex flex-wrap gap-1">
             <StatusBadges c={cliente} />
             {potencial && <span className="text-[10px] bg-primary/10 text-primary border border-primary/30 rounded-full px-1.5 py-0.5">✨ Hoje</span>}
@@ -852,6 +854,7 @@ function CategoriaView({ loja, repCodigo, repLogin, categoria, onBack }:
                         <p className="font-semibold truncate">{c.nome}</p>
                         <div className="mt-1 mb-1"><StatusBadges c={c} /></div>
                         <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+                          <span>Cód: {c.id}</span>
                           <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{c.telefone}</span>
                           <span>Há {dias} dias</span>
                           <span className="flex items-center gap-1"><ShoppingBag className="h-3 w-3" /> TM: {moeda(c.ticketMedio)}</span>
@@ -894,7 +897,10 @@ function CategoriaView({ loja, repCodigo, repLogin, categoria, onBack }:
                     </div>
                     <div className="min-w-0">
                       <p className="font-semibold truncate">{c.nome}</p>
-                      <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5"><Phone className="h-3 w-3" />{c.telefone}</p>
+                      <p className="text-xs text-muted-foreground flex items-center gap-2 mt-0.5">
+                        <span>Cód: {c.id}</span>
+                        <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{c.telefone}</span>
+                      </p>
                       <div className="mt-1"><StatusBadges c={c} /></div>
                     </div>
                   </div>
@@ -1300,7 +1306,7 @@ function GerenteView({ loja: initialLoja, repLogin, isAdmin, onSetView }:
                       <div className="flex-1 min-w-0">
                         <p className="font-bold truncate">{c.nome}</p>
                         <p className="text-[10px] text-muted-foreground mt-0.5">
-                          {c.telefone}
+                          Cód: {c.id} • {c.telefone}
                           {stats.vendedorMap[String(c.repId)] && <> • <span className="text-primary font-medium">{stats.vendedorMap[String(c.repId)]}</span></>}
                         </p>
                       </div>

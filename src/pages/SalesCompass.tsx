@@ -1362,8 +1362,8 @@ function GerenteView({ loja: initialLoja, repLogin, isAdmin, onSetView }:
 // ══════════════════════════════════════════════════════════════════════════════
 // ── VIEW: Relatórios
 // ══════════════════════════════════════════════════════════════════════════════
-function RelatoriosView({ loja: initialLoja, isAdmin, onBack }:
-  { loja: string; isAdmin: boolean; onBack: () => void }) {
+function RelatoriosView({ loja: initialLoja, isAdmin, repLogin, role, onBack }:
+  { loja: string; isAdmin: boolean; repLogin: string; role: string; onBack: () => void }) {
 
   const [loja, setLoja] = useState(initialLoja || "l3");
   const [filtroStatus, setFiltroStatus] = useState("todos");
@@ -1378,12 +1378,15 @@ function RelatoriosView({ loja: initialLoja, isAdmin, onBack }:
   });
 
   const filtrados = useMemo(() => logs.filter(l => {
+    // Viewer só vê seu próprio CRM
+    if (role === "viewer" && l.repLogin !== repLogin) return false;
+
     if (filtroStatus !== "todos" && l.status !== filtroStatus) return false;
     if (filtroInicio && new Date(l.dataFull) < new Date(filtroInicio)) return false;
     if (filtroFim && new Date(l.dataFull) > new Date(filtroFim + "T23:59:59")) return false;
     if (filtroCliente && !l.nomeCliente?.toLowerCase().includes(filtroCliente.toLowerCase())) return false;
     return true;
-  }), [logs, filtroStatus, filtroInicio, filtroFim, filtroCliente]);
+  }), [logs, filtroStatus, filtroInicio, filtroFim, filtroCliente, role, repLogin]);
 
   const exportarCSV = () => {
     const header = "Data,Loja,Vendedor,ID Cliente,Cliente,Telefone,Status,Observação\n";
@@ -1415,7 +1418,7 @@ function RelatoriosView({ loja: initialLoja, isAdmin, onBack }:
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        {isAdmin && (
+        {!["viewer"].includes(role) && (
           <div className="relative">
             <select value={loja} onChange={e=>setLoja(e.target.value)}
               className="appearance-none w-full rounded-lg border border-border bg-muted px-3 py-2 pr-7 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50">
@@ -1604,7 +1607,7 @@ export default function SalesCompass() {
         )}
         {/* ── Relatórios ──────────────────────────────────────────────── */}
         {view === "relatorios" && (
-          <RelatoriosView loja={loja} isAdmin={isAdmin}
+          <RelatoriosView loja={loja} isAdmin={isAdmin} repLogin={repLogin} role={role}
             onBack={() => setView(isAdmin ? "admin" : isGerente ? "gerente" : "rep")} />
         )}
       </main>

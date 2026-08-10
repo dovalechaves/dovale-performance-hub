@@ -177,7 +177,8 @@ import AppShell from './layout/AppShell';
 import { MESES, formatBRL } from './_shared/format';
 import { Save, CheckCircle, AlertCircle, Calendar, Users, Loader2 } from 'lucide-react';
 import { useComissaoUser as useUser, useComissaoApi } from './_shared/hooks';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { toast } from 'sonner';
 
 interface VendedorMeta {
   nome_vendedor: string;
@@ -277,8 +278,31 @@ export default function ComissaoConfiguracao() {
   // ── Metas PA ──
   const [allVendedores, setAllVendedores] = useState<string[]>([]);
   const [buscaVend, setBuscaVend] = useState('');
-  const [mesMeta, setMesMeta] = useState(new Date().getMonth() + 1);
-  const [anoMeta, setAnoMeta] = useState(new Date().getFullYear());
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [mesMeta, setMesMetaState] = useState(() => {
+    const m = parseInt(searchParams.get('mesMeta') ?? '', 10);
+    return m >= 1 && m <= 12 ? m : new Date().getMonth() + 1;
+  });
+  const [anoMeta, setAnoMetaState] = useState(() => {
+    const a = parseInt(searchParams.get('anoMeta') ?? '', 10);
+    return a >= 2000 && a <= 2100 ? a : new Date().getFullYear();
+  });
+  const setMesMeta = (m: number) => {
+    setMesMetaState(m);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('mesMeta', String(m));
+      return next;
+    }, { replace: true });
+  };
+  const setAnoMeta = (a: number) => {
+    setAnoMetaState(a);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('anoMeta', String(a));
+      return next;
+    }, { replace: true });
+  };
   const [metasMensaisEdit, setMetasMensaisEdit] = useState<Record<string, VendedorMeta>>({});
   const [savingMensais, setSavingMensais] = useState(false);
   const [savedMensais, setSavedMensais] = useState(false);
@@ -291,8 +315,30 @@ export default function ComissaoConfiguracao() {
 
   // ── Ferragens ──
   const [ferrAba, setFerrAba] = useState<'metas' | 'bonus' | 'grupo'>('metas');
-  const [ferrMesConf, setFerrMesConf] = useState(new Date().getMonth() + 1);
-  const [ferrAnoConf, setFerrAnoConf] = useState(new Date().getFullYear());
+  const [ferrMesConf, setFerrMesConfState] = useState(() => {
+    const m = parseInt(searchParams.get('ferrMes') ?? '', 10);
+    return m >= 1 && m <= 12 ? m : new Date().getMonth() + 1;
+  });
+  const [ferrAnoConf, setFerrAnoConfState] = useState(() => {
+    const a = parseInt(searchParams.get('ferrAno') ?? '', 10);
+    return a >= 2000 && a <= 2100 ? a : new Date().getFullYear();
+  });
+  const setFerrMesConf = (m: number) => {
+    setFerrMesConfState(m);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('ferrMes', String(m));
+      return next;
+    }, { replace: true });
+  };
+  const setFerrAnoConf = (a: number) => {
+    setFerrAnoConfState(a);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('ferrAno', String(a));
+      return next;
+    }, { replace: true });
+  };
   const [ferrVendedores, setFerrVendedores] = useState<string[]>([]);
   const [ferrMetasEdit, setFerrMetasEdit] = useState<Record<string, FerrVendedorMeta>>({});
   const [ferrBonusEdit, setFerrBonusEdit] = useState<Record<string, FerrVendedorBonus>>({});
@@ -308,8 +354,30 @@ export default function ComissaoConfiguracao() {
 
   // ── Distribuidores ──
   const [distAba, setDistAba] = useState<'metas' | 'bonus' | 'vinculos'>('metas');
-  const [distMesConf, setDistMesConf] = useState(new Date().getMonth() + 1);
-  const [distAnoConf, setDistAnoConf] = useState(new Date().getFullYear());
+  const [distMesConf, setDistMesConfState] = useState(() => {
+    const m = parseInt(searchParams.get('distMes') ?? '', 10);
+    return m >= 1 && m <= 12 ? m : new Date().getMonth() + 1;
+  });
+  const [distAnoConf, setDistAnoConfState] = useState(() => {
+    const a = parseInt(searchParams.get('distAno') ?? '', 10);
+    return a >= 2000 && a <= 2100 ? a : new Date().getFullYear();
+  });
+  const setDistMesConf = (m: number) => {
+    setDistMesConfState(m);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('distMes', String(m));
+      return next;
+    }, { replace: true });
+  };
+  const setDistAnoConf = (a: number) => {
+    setDistAnoConfState(a);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('distAno', String(a));
+      return next;
+    }, { replace: true });
+  };
   const [distVendedores, setDistVendedores] = useState<string[]>([]);
   const [distMetasEdit, setDistMetasEdit] = useState<Record<string, DistVendedorMeta>>({});
   const [distBonusEdit, setDistBonusEdit] = useState<Record<string, DistVendedorBonus>>({});
@@ -346,7 +414,10 @@ export default function ComissaoConfiguracao() {
       api('/vendedor-ativo')
         .then((r) => r.json())
         .then((data) => setVendedoresComStatus(Array.isArray(data) ? data : []))
-        .catch(() => {})
+        .catch((err) => {
+          console.error('[config] vendedor-ativo:', err);
+          toast.warning('Não foi possível carregar os vendedores agora. Tentando novamente em breve.');
+        })
         .finally(() => setLoadingVendAtivo(false));
       return;
     }
@@ -360,12 +431,18 @@ export default function ComissaoConfiguracao() {
     api('/bonus-config')
       .then((r) => r.json())
       .then((b) => setBonusEdit(b))
-      .catch(() => {});
+      .catch((err) => {
+        console.error('[config] bonus-config:', err);
+        toast.warning('Não foi possível carregar o bônus global agora. Tentando novamente em breve.');
+      });
     setLoadingVendAtivo(true);
     api('/vendedor-ativo')
       .then((r) => r.json())
       .then((data) => setVendedoresComStatus(Array.isArray(data) ? data : []))
-      .catch(() => {})
+      .catch((err) => {
+        console.error('[config] vendedor-ativo:', err);
+        toast.warning('Não foi possível carregar os vendedores agora. Tentando novamente em breve.');
+      })
       .finally(() => setLoadingVendAtivo(false));
   }, [api, usuario]);
 
@@ -452,7 +529,10 @@ export default function ComissaoConfiguracao() {
       const map: Record<string, VendedorMeta> = {};
       list.forEach((m) => { map[m.nome_vendedor] = m; });
       setMetasMensaisEdit(map);
-    } catch { /* silent */ }
+    } catch (err) {
+      console.error('[config] metas-mensais:', err);
+      toast.warning('As metas ainda não carregaram. Os dados exibidos podem estar desatualizados — tentando novamente em breve.');
+    }
   };
 
   const salvarMetasMensais = async () => {
@@ -474,7 +554,7 @@ export default function ComissaoConfiguracao() {
       setTimeout(() => setSavedMensais(false), 3000);
     } catch (err) {
       console.error('Erro ao salvar metas:', err);
-      alert('Erro ao salvar. Verifique o console.');
+      toast.error('Erro ao salvar metas. Tente novamente.');
     } finally {
       setSavingMensais(false);
     }
@@ -493,7 +573,7 @@ export default function ComissaoConfiguracao() {
       setTimeout(() => setSavedBonus(false), 3000);
     } catch (err) {
       console.error('Erro ao salvar bônus:', err);
-      alert('Erro ao salvar. Verifique o console.');
+      toast.error('Erro ao salvar o bônus global. Tente novamente.');
     } finally {
       setSavingBonus(false);
     }
@@ -520,7 +600,10 @@ export default function ComissaoConfiguracao() {
       } else {
         setFerrMetaGrupoEdit(FERR_META_GRUPO_VAZIO);
       }
-    } catch { /* silent */ }
+    } catch (err) {
+      console.error('[config] ferragens:', err);
+      toast.warning('Os dados de Ferragens ainda não carregaram. Tentando novamente em breve.');
+    }
     setLoadingFerr(false);
   };
 
@@ -553,7 +636,7 @@ export default function ComissaoConfiguracao() {
       if (!res.ok) throw new Error(await res.text());
       setSavedFerrMetas(true);
       setTimeout(() => setSavedFerrMetas(false), 3000);
-    } catch (err) { console.error(err); alert('Erro ao salvar metas Ferragens.'); }
+    } catch (err) { console.error(err); toast.error('Erro ao salvar metas Ferragens.'); }
     setSavingFerrMetas(false);
   };
 
@@ -565,7 +648,7 @@ export default function ComissaoConfiguracao() {
       if (!res.ok) throw new Error(await res.text());
       setSavedFerrBonus(true);
       setTimeout(() => setSavedFerrBonus(false), 3000);
-    } catch (err) { console.error(err); alert('Erro ao salvar bônus Ferragens.'); }
+    } catch (err) { console.error(err); toast.error('Erro ao salvar bônus Ferragens.'); }
     setSavingFerrBonus(false);
   };
 
@@ -577,7 +660,7 @@ export default function ComissaoConfiguracao() {
       if (!res.ok) throw new Error(await res.text());
       setSavedFerrGrupo(true);
       setTimeout(() => setSavedFerrGrupo(false), 3000);
-    } catch (err) { console.error(err); alert('Erro ao salvar meta grupo Ferragens.'); }
+    } catch (err) { console.error(err); toast.error('Erro ao salvar meta grupo Ferragens.'); }
     setSavingFerrGrupo(false);
   };
 
@@ -596,7 +679,10 @@ export default function ComissaoConfiguracao() {
       const bonusMap: Record<string, DistVendedorBonus> = {};
       if (Array.isArray(bonusRes)) bonusRes.forEach((b: DistVendedorBonus) => { bonusMap[b.nome_vendedor] = b; });
       setDistBonusEdit(bonusMap);
-    } catch { /* silent */ }
+    } catch (err) {
+      console.error('[config] distribuidores:', err);
+      toast.warning('Os dados de Distribuidores ainda não carregaram. Tentando novamente em breve.');
+    }
     setLoadingDist(false);
   };
 
@@ -624,7 +710,7 @@ export default function ComissaoConfiguracao() {
       if (!res.ok) throw new Error(await res.text());
       setSavedDistBonus(true);
       setTimeout(() => setSavedDistBonus(false), 3000);
-    } catch (err) { console.error(err); alert('Erro ao salvar bônus Distribuidores.'); }
+    } catch (err) { console.error(err); toast.error('Erro ao salvar bônus Distribuidores.'); }
     setSavingDistBonus(false);
   };
 
@@ -636,7 +722,7 @@ export default function ComissaoConfiguracao() {
       if (!res.ok) throw new Error(await res.text());
       setSavedDistMetas(true);
       setTimeout(() => setSavedDistMetas(false), 3000);
-    } catch (err) { console.error(err); alert('Erro ao salvar metas Distribuidores.'); }
+    } catch (err) { console.error(err); toast.error('Erro ao salvar metas Distribuidores.'); }
     setSavingDistMetas(false);
   };
 
@@ -655,7 +741,10 @@ export default function ComissaoConfiguracao() {
         });
       }
       setDistVinculos(map);
-    } catch { /* silent */ }
+    } catch (err) {
+      console.error('[config] vínculos:', err);
+      toast.warning('Os vínculos de Distribuidores ainda não carregaram. Tentando novamente em breve.');
+    }
     setLoadingDistVinculos(false);
   };
 
@@ -688,7 +777,7 @@ export default function ComissaoConfiguracao() {
       if (!res.ok) throw new Error(await res.text());
       setSavedDistVinculos(true);
       setTimeout(() => setSavedDistVinculos(false), 3000);
-    } catch (err) { console.error(err); alert('Erro ao salvar vínculos Distribuidores.'); }
+    } catch (err) { console.error(err); toast.error('Erro ao salvar vínculos Distribuidores.'); }
     setSavingDistVinculos(false);
   };
 

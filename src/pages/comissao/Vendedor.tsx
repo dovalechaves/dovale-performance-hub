@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import AppShell from './layout/AppShell';
 import KPICard from './ui/KPICard';
 import { formatBRL, formatNumber, MESES } from './_shared/format';
 import { DollarSign, TrendingUp, ChevronDown, Search, User } from 'lucide-react';
 import { useComissaoUser as useUser, useComissaoApi } from './_shared/hooks';
+import { toast } from 'sonner';
 import { calcularComissaoTelevendas, type MetaConfig, type BonusConfig } from './_shared/commission';
 import { calcularComissaoFerragens, type FerrMetaConfig, type FerrBonusConfig, type FerrMetaGrupoConfig, type ComissaoFerragens } from './_shared/commission-ferragens';
 import { calcularComissaoDistribuidores, type DistMetaConfig, type DistBonusConfig, type ComissaoDistribuidores } from './_shared/commission-distribuidores';
@@ -75,8 +77,32 @@ export default function ComissaoVendedor() {
   const [vendedorSel, setVendedorSel] = useState('');
   const [busca, setBusca] = useState('');
   const [aberto, setAberto] = useState(false);
-  const [ano, setAno] = useState(ANO_ATUAL);
-  const [mes, setMes] = useState<number | null>(new Date().getMonth() + 1);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [ano, setAnoState] = useState(() => {
+    const a = parseInt(searchParams.get('ano') ?? '', 10);
+    return a >= 2000 && a <= 2100 ? a : ANO_ATUAL;
+  });
+  const [mes, setMesState] = useState<number | null>(() => {
+    if (searchParams.get('mes') === '') return null;
+    const m = parseInt(searchParams.get('mes') ?? '', 10);
+    return m >= 1 && m <= 12 ? m : new Date().getMonth() + 1;
+  });
+  const setAno = (a: number) => {
+    setAnoState(a);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('ano', String(a));
+      return next;
+    }, { replace: true });
+  };
+  const setMes = (m: number | null) => {
+    setMesState(m);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('mes', m === null ? '' : String(m));
+      return next;
+    }, { replace: true });
+  };
   const [data, setData] = useState<VendedorData | null>(null);
   const [comissoes, setComissoes] = useState<ComissaoConfig[]>([]);
   const [loading, setLoading] = useState(false);
@@ -105,7 +131,10 @@ export default function ComissaoVendedor() {
     api('/config-setor')
       .then((r) => r.json())
       .then(setComissoes)
-      .catch(() => {});
+      .catch((err) => {
+        console.error('[vendedor] config-setor:', err);
+        toast.warning('A configuração do setor ainda não carregou. Tentando novamente em breve.');
+      });
   }, [api, carregarVendedores]);
 
   // Revalidação: ao voltar pra essa aba (ex: depois de mexer em Vínculos na Configuração),
@@ -128,7 +157,10 @@ export default function ComissaoVendedor() {
     api(`/vendedor/${encodeURIComponent(vendedorSel)}?${params}`, { cache: 'no-store' })
       .then((r) => r.json())
       .then(setData)
-      .catch(console.error)
+      .catch((err) => {
+        console.error(err);
+        toast.warning('Os dados desse vendedor ainda não carregaram. Os valores exibidos podem estar desatualizados — tentando novamente em breve.');
+      })
       .finally(() => setLoading(false));
   }, [api, vendedorSel, ano, mes]);
 

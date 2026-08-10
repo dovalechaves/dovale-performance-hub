@@ -31,6 +31,7 @@ import {
 import { queryFirebird } from "../services/comissao/firebird";
 import { queryMySQL } from "../services/comissao/mysql-ext";
 import { fbSJC, fbSPM, fbLockeyMG, fbLockey, myLockeyRS, myNiteroi } from "../services/comissao/db-externas";
+import { registrarVendedoresVistos, getVendedoresVistosPorSetor } from "../services/comissao/vendedores-vistos-table";
 
 const router = Router();
 
@@ -112,7 +113,21 @@ async function getVendedoresPermitidos(
     userSetores: setoresPermitidos,
     setores: setoresPermitidos,
   });
-  return new Set(vendas.map((v) => normalizarNome(v.USU_NOME)).filter(Boolean));
+
+  const vistosAgora = vendas
+    .map((v) => ({ nome: normalizarNome(v.USU_NOME), setor: v.RVS_NOME ?? "" }))
+    .filter((p) => p.nome && p.setor);
+
+  // Nunca reduz o conjunto: registra (assíncrono, sem bloquear a request) o que foi
+  // visto agora e une com o histórico persistido — assim uma falha temporária de fonte
+  // externa (ex.: VPN de uma loja fora do ar) não faz vendedores "desaparecerem" das
+  // metas/bônus do gestor de um dia para o outro.
+  registrarVendedoresVistos(ano, vistosAgora);
+  const historico = await getVendedoresVistosPorSetor(setoresPermitidos);
+
+  const permitidos = new Set(vistosAgora.map((p) => p.nome));
+  historico.forEach((nome) => permitidos.add(nome));
+  return permitidos;
 }
 
 function filtrarLinhasPorVendedor<T extends Record<string, any>>(
@@ -122,6 +137,13 @@ function filtrarLinhasPorVendedor<T extends Record<string, any>>(
 ): T[] {
   if (!permitidos) return rows;
   return rows.filter((row) => permitidos.has(normalizarNome(row[campo])));
+}
+
+// Avisa (sem bloquear) que alguma fonte externa está temporariamente fora do ar —
+// não altera o corpo da resposta, só soma um header para o frontend exibir um aviso.
+function avisarFontesIndisponiveis(res: any): void {
+  const fontes = fontesIndisponiveis();
+  if (fontes.length) res.set("X-Fontes-Indisponiveis", fontes.map((f) => f.fonte).join("|"));
 }
 
 async function garantirVendedoresDoBody(
@@ -1195,6 +1217,7 @@ router.get("/vendedor-ativo", async (req: any, res: any) => {
       "nome",
     );
 
+    avisarFontesIndisponiveis(res);
     return res.json(vendors);
   } catch (err) {
     console.error('[vendedor-ativo GET]', err);
@@ -1261,6 +1284,7 @@ router.get("/metas", async (req: any, res: any) => {
       .request()
       .query('SELECT * FROM VendedorMeta ORDER BY nome_vendedor');
     const permitidos = await getVendedoresPermitidos(usuario);
+    avisarFontesIndisponiveis(res);
     return res.json(filtrarLinhasPorVendedor(result.recordset, permitidos));
   } catch (error) {
     console.error('Erro ao buscar metas:', error);
@@ -1366,6 +1390,7 @@ router.get("/metas-mensais", async (req: any, res: any) => {
     );
     const permitidos = await getVendedoresPermitidos(usuario, ano ? parseInt(ano) : new Date().getFullYear(), SETORES_TELEVENDAS);
     res.set('Cache-Control', 'private, max-age=60, stale-while-revalidate=120');
+    avisarFontesIndisponiveis(res);
     return res.json(filtrarLinhasPorVendedor(result.recordset, permitidos));
   } catch (error) {
     console.error('Erro ao buscar metas mensais:', error);
@@ -1558,6 +1583,7 @@ router.get("/bonus-mensais", async (req: any, res: any) => {
       FROM ${TABELA_BONUS_MENSAIS} ${where} ORDER BY VENDEDOR
     `);
     const permitidos = await getVendedoresPermitidos(usuario, ano ? parseInt(ano) : new Date().getFullYear(), SETORES_TELEVENDAS);
+    avisarFontesIndisponiveis(res);
     return res.json(filtrarLinhasPorVendedor(result.recordset, permitidos));
   } catch (error) {
     console.error('Erro ao buscar bonus:', error);
@@ -1694,6 +1720,7 @@ router.get("/recebimentos-media", async (req: any, res: any) => {
 
     const media = resultados.reduce((s, r) => s + r.total, 0) / resultados.length;
 
+    avisarFontesIndisponiveis(res);
     return res.json({
       media: Math.round(media * 100) / 100,
       meses: resultados,
@@ -1993,6 +2020,7 @@ router.get("/distribuidores/config", async (req: any, res: any) => {
 
     res.set('Cache-Control', 'private, max-age=60, stale-while-revalidate=120');
     const permitidos = await getVendedoresPermitidos(usuario, ano, ["DISTRIBUIDORES"]);
+    avisarFontesIndisponiveis(res);
     return res.json({
       metas: filtrarLinhasPorVendedor(metasResult.recordset, permitidos),
       bonus: filtrarLinhasPorVendedor(bonusResult.recordset, permitidos),
@@ -2033,6 +2061,7 @@ router.get("/distribuidores/metas", async (req: any, res: any) => {
         WHERE ANO = @ano AND MES = @mes
       `);
     const permitidos = await getVendedoresPermitidos(usuario, ano, ["DISTRIBUIDORES"]);
+    avisarFontesIndisponiveis(res);
     return res.json(filtrarLinhasPorVendedor(result.recordset, permitidos));
   } catch (e) {
     console.error('[distribuidores/metas GET]', e);
@@ -2128,6 +2157,7 @@ router.get("/distribuidores/bonus", async (req: any, res: any) => {
         WHERE ANO = @ano AND MES = @mes
       `);
     const permitidos = await getVendedoresPermitidos(usuario, ano, ["DISTRIBUIDORES"]);
+    avisarFontesIndisponiveis(res);
     return res.json(filtrarLinhasPorVendedor(result.recordset, permitidos));
   } catch (e) {
     console.error('[distribuidores/bonus GET]', e);
@@ -2205,6 +2235,7 @@ router.get("/distribuidores/vinculos", async (req: any, res: any) => {
           permitidos.has(normalizarNome(row.vendedor_principal))
         )
       : result.recordset;
+    avisarFontesIndisponiveis(res);
     return res.json(rows);
   } catch (e) {
     console.error('[distribuidores/vinculos GET]', e);
@@ -2273,6 +2304,7 @@ router.get("/distribuidores/vendedores-raw", async (req: any, res: any) => {
   try {
     const vendedores = await getVendedoresNomesRaw();
     const permitidos = await getVendedoresPermitidos(usuario, undefined, ["DISTRIBUIDORES"]);
+    avisarFontesIndisponiveis(res);
     return res.json({
       vendedores: permitidos
         ? vendedores.filter((nome: string) => permitidos.has(normalizarNome(nome)))
@@ -2341,6 +2373,7 @@ router.get("/ferragens/config", async (req: any, res: any) => {
 
     res.set('Cache-Control', 'private, max-age=60, stale-while-revalidate=120');
     const permitidos = await getVendedoresPermitidos(usuario, ano, ["FERRAGENS"]);
+    avisarFontesIndisponiveis(res);
     return res.json({
       metas: filtrarLinhasPorVendedor(metasResult.recordset, permitidos),
       bonus: filtrarLinhasPorVendedor(bonusResult.recordset, permitidos),
@@ -2382,6 +2415,7 @@ router.get("/ferragens/metas", async (req: any, res: any) => {
         WHERE ANO = @ano AND MES = @mes
       `);
     const permitidos = await getVendedoresPermitidos(usuario, ano, ["FERRAGENS"]);
+    avisarFontesIndisponiveis(res);
     return res.json(filtrarLinhasPorVendedor(result.recordset, permitidos));
   } catch (e) {
     console.error('[ferragens/metas GET]', e);
@@ -2477,6 +2511,7 @@ router.get("/ferragens/bonus", async (req: any, res: any) => {
         WHERE ANO = @ano AND MES = @mes
       `);
     const permitidos = await getVendedoresPermitidos(usuario, ano, ["FERRAGENS"]);
+    avisarFontesIndisponiveis(res);
     return res.json(filtrarLinhasPorVendedor(result.recordset, permitidos));
   } catch (e) {
     console.error('[ferragens/bonus GET]', e);

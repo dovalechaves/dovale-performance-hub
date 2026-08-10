@@ -10,7 +10,8 @@ import {
 } from 'recharts';
 import { ChevronDown, Download, Filter, TrendingUp, X } from 'lucide-react';
 import { useComissaoUser as useUser, useComissaoApi } from './_shared/hooks';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { toast } from 'sonner';
 
 const ANO_ATUAL = new Date().getFullYear();
 const ANOS = [ANO_ATUAL, ANO_ATUAL - 1, ANO_ATUAL - 2];
@@ -234,8 +235,32 @@ export default function ComissaoGestor() {
   const [empresas, setEmpresas] = useState<string[]>([]);
   const [filtroSetor, setFiltroSetor] = useState('');
   const [filtroEmpresa, setFiltroEmpresa] = useState('');
-  const [ano, setAno] = useState(ANO_ATUAL);
-  const [mes, setMes] = useState<number | null>(new Date().getMonth() + 1);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [ano, setAnoState] = useState(() => {
+    const a = parseInt(searchParams.get('ano') ?? '', 10);
+    return a >= 2000 && a <= 2100 ? a : ANO_ATUAL;
+  });
+  const [mes, setMesState] = useState<number | null>(() => {
+    if (searchParams.get('mes') === '') return null;
+    const m = parseInt(searchParams.get('mes') ?? '', 10);
+    return m >= 1 && m <= 12 ? m : new Date().getMonth() + 1;
+  });
+  const setAno = (a: number) => {
+    setAnoState(a);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('ano', String(a));
+      return next;
+    }, { replace: true });
+  };
+  const setMes = (m: number | null) => {
+    setMesState(m);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('mes', m === null ? '' : String(m));
+      return next;
+    }, { replace: true });
+  };
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState('');
   const [bonusConfig, setBonusConfig] = useState<BonusConfig | null>(null);
@@ -264,7 +289,10 @@ export default function ComissaoGestor() {
     api('/bonus-config')
       .then((r) => r.json())
       .then(setBonusConfig)
-      .catch(() => {});
+      .catch((err) => {
+        console.error('[gestor] bonus-config:', err);
+        toast.warning('O bônus global ainda não carregou. Tentando novamente em breve.');
+      });
   }, []);
 
   useEffect(() => {
@@ -278,7 +306,10 @@ export default function ComissaoGestor() {
         list.forEach((m) => { map[m.nome_vendedor] = m; });
         setMetasMap(map);
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.error('[gestor] metas:', err);
+        toast.warning('As metas ainda não carregaram. Os valores exibidos podem estar desatualizados — tentando novamente em breve.');
+      });
   }, [ano, mes]);
 
   useEffect(() => {
@@ -298,6 +329,7 @@ export default function ComissaoGestor() {
       })
       .catch(err => {
         console.error('[gestor] ferragens/config:', err);
+        toast.warning('Os dados de Ferragens ainda não carregaram. Tentando novamente em breve.');
         setFerrCarregado(true);
       });
   }, [ano, mes]);
@@ -318,6 +350,7 @@ export default function ComissaoGestor() {
       })
       .catch(err => {
         console.error('[gestor] distribuidores/config:', err);
+        toast.warning('Os dados de Distribuidores ainda não carregaram. Tentando novamente em breve.');
         setDistCarregado(true);
       });
   }, [ano, mes]);
@@ -332,7 +365,10 @@ export default function ComissaoGestor() {
     api(`/vendedores?${params}`, { cache: 'no-store' })
       .then((r) => r.json())
       .then(setVendedores)
-      .catch(console.error)
+      .catch((err) => {
+        console.error(err);
+        toast.warning('A lista de vendedores ainda não atualizou. Tentando novamente em breve.');
+      })
       .finally(() => setLoading(false));
   };
 

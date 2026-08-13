@@ -155,13 +155,11 @@ function SalesCompassRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-// Relatório de Custos usa os mesmos dados do Disparo (Meta/WhatsApp + etiquetas);
-// reutiliza o acesso do app de Disparo.
 function RelatorioCustosRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
   if (!user.canAccessHub) return <Navigate to="/login" replace />;
-  if (!user.apps.disparo.canAccess) return <Navigate to="/hub" replace />;
+  if (!user.apps.relatoriocustos?.canAccess) return <Navigate to="/hub" replace />;
   return <>{children}</>;
 }
 

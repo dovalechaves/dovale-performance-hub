@@ -6,7 +6,7 @@ import { getPool } from "../db/sqlserver";
 const router = Router();
 const VALID_ROLES = ["admin", "manager", "viewer"] as const;
 const VALID_HUB_ROLES = ["admin", "viewer"] as const;
-const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento", "assistente", "multipreco", "inventario", "onboarding", "prospeccao", "primeiramov", "invfull", "score", "cobranca", "ecommercedisparo", "sugestaocompras", "salescompass", "painelcomissao"] as const;
+const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento", "assistente", "multipreco", "inventario", "onboarding", "prospeccao", "primeiramov", "invfull", "score", "cobranca", "ecommercedisparo", "sugestaocompras", "salescompass", "painelcomissao", "relatoriocustos"] as const;
 
 type Role = typeof VALID_ROLES[number];
 type HubRole = typeof VALID_HUB_ROLES[number];
@@ -230,6 +230,12 @@ function buildDefaultApps(usuario: string, localRole: unknown, localLoja: unknow
       can_access: false,
       config: { setores: [], nome_vendedor: null } as PainelComissaoConfig,
     },
+    relatoriocustos: {
+      app_key: "relatoriocustos" as AppKey,
+      role: baseRole,
+      loja: null,
+      can_access: false,
+    },
   };
 }
 
@@ -260,6 +266,7 @@ function mergeApps(
     sugestaocompras: { ...defaults.sugestaocompras },
     salescompass: { ...defaults.salescompass },
     painelcomissao: { ...defaults.painelcomissao },
+    relatoriocustos: { ...defaults.relatoriocustos },
   };
 
   for (const row of appRows) {
@@ -317,6 +324,7 @@ function normalizeAppsPayload(
     sugestaocompras: { ...defaults.sugestaocompras },
     salescompass: { ...defaults.salescompass },
     painelcomissao: { ...defaults.painelcomissao },
+    relatoriocustos: { ...defaults.relatoriocustos },
   };
 
   if (payload && typeof payload === "object") {
@@ -539,7 +547,7 @@ router.get("/users", async (req, res) => {
       pool.request().query(`
         SELECT usuario, app_key, role, loja, ativo, usu_codigo_sistema, config
         FROM dbo.USUARIOS_APPS
-        WHERE app_key IN ('dashboard', 'calculadora', 'disparo', 'fechamento', 'assistente', 'multipreco', 'inventario', 'onboarding', 'prospeccao', 'primeiramov', 'invfull', 'score', 'cobranca', 'ecommercedisparo', 'sugestaocompras', 'salescompass', 'painelcomissao')
+        WHERE app_key IN ('dashboard', 'calculadora', 'disparo', 'fechamento', 'assistente', 'multipreco', 'inventario', 'onboarding', 'prospeccao', 'primeiramov', 'invfull', 'score', 'cobranca', 'ecommercedisparo', 'sugestaocompras', 'salescompass', 'painelcomissao', 'relatoriocustos')
       `),
     ]);
 

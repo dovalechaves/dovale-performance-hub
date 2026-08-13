@@ -100,6 +100,11 @@ interface AuthUser {
       loja: string | null;
       config?: { setores: string[]; nome_vendedor: string | null } | null;
     };
+    relatoriocustos: {
+      canAccess: boolean;
+      role: Role;
+      loja: string | null;
+    };
   };
 }
 
@@ -133,6 +138,7 @@ interface AuthContextValue {
       sugestaocompras?: { role?: string; loja?: string | null; can_access?: boolean };
       salescompass?: { role?: string; loja?: string | null; can_access?: boolean; usu_codigo_sistema?: number | null };
       painelcomissao?: { role?: string; loja?: string | null; can_access?: boolean; config?: { setores: string[]; nome_vendedor: string | null } | null };
+      relatoriocustos?: { role?: string; loja?: string | null; can_access?: boolean };
     },
     hubRole?: string
   ) => void;
@@ -217,6 +223,8 @@ function buildUser(
   const painelcomissaoRole = resolveRole(usuario, apiApps?.painelcomissao?.role ?? apiRole);
   const painelcomissaoAccess = apiApps?.painelcomissao?.can_access ?? false;
   const painelcomissaoConfig = apiApps?.painelcomissao?.config ?? null;
+  const relatoriocustosRole = resolveRole(usuario, apiApps?.relatoriocustos?.role ?? apiRole);
+  const relatoriocustosAccess = apiApps?.relatoriocustos?.can_access ?? false;
 
   return {
     usuario,
@@ -317,6 +325,11 @@ function buildUser(
         loja: null,
         config: painelcomissaoConfig,
       },
+      relatoriocustos: {
+        canAccess: relatoriocustosAccess,
+        role: relatoriocustosRole,
+        loja: null,
+      },
     },
   };
 }
@@ -369,6 +382,8 @@ function loadFromStorage(): AuthUser | null {
     const painelcomissaoRole = (parsed.apps as any)?.painelcomissao?.role ?? parsed.role;
     const painelcomissaoAccess = (parsed.apps as any)?.painelcomissao?.canAccess ?? false;
     const painelcomissaoConfig = (parsed.apps as any)?.painelcomissao?.config ?? null;
+    const relatoriocustosRole = (parsed.apps as any)?.relatoriocustos?.role ?? parsed.role;
+    const relatoriocustosAccess = (parsed.apps as any)?.relatoriocustos?.canAccess ?? false;
 
     return {
       usuario: parsed.usuario,
@@ -469,6 +484,11 @@ function loadFromStorage(): AuthUser | null {
           loja: null,
           config: painelcomissaoConfig,
         },
+        relatoriocustos: {
+          canAccess: relatoriocustosAccess,
+          role: relatoriocustosRole,
+          loja: null,
+        },
       },
     };
   } catch {
@@ -533,6 +553,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       sugestaocompras?: { role?: string; loja?: string | null; can_access?: boolean };
       salescompass?: { role?: string; loja?: string | null; can_access?: boolean; usu_codigo_sistema?: number | null };
       painelcomissao?: { role?: string; loja?: string | null; can_access?: boolean; config?: { setores: string[]; nome_vendedor: string | null } | null };
+      relatoriocustos?: { role?: string; loja?: string | null; can_access?: boolean };
     },
     hubRole?: string
   ) => {

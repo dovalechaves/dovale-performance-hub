@@ -194,6 +194,12 @@ export interface AuthManagedUser {
       can_access: boolean;
       config?: { setores: string[]; nome_vendedor: string | null } | null;
     };
+    relatoriocustos: {
+      app_key: "relatoriocustos";
+      role: "admin" | "manager" | "viewer";
+      loja: string | null;
+      can_access: boolean;
+    };
   };
 }
 

@@ -161,16 +161,17 @@ router.post("/auth/hub-exchange", async (req: Request, res: Response) => {
     const result = await pool.request()
       .input("usuario", usuario.trim())
       .query(`
-        SELECT ua.ativo, ua.role AS disparo_role
+        SELECT TOP 1 ua.ativo, ua.role AS disparo_role
         FROM dbo.USUARIOS_APPS ua
         INNER JOIN dbo.USUARIOS_LOJAS ul ON LOWER(ul.usuario) = LOWER(ua.usuario)
         WHERE LOWER(ua.usuario) = LOWER(@usuario)
-          AND ua.app_key = 'disparo'
+          AND ua.app_key IN ('disparo', 'relatoriocustos')
           AND ua.ativo = 1
           AND ul.ativo = 1
+        ORDER BY CASE WHEN ua.app_key = 'disparo' THEN 0 ELSE 1 END
       `);
     if (!result.recordset.length) {
-      return res.status(403).json({ erro: "Usuário sem acesso ao Disparo" });
+      return res.status(403).json({ erro: "Usuário sem acesso ao Disparo ou ao Relatório de Custos" });
     }
     const disparoRole = result.recordset[0].disparo_role ?? "user";
     const payload = {

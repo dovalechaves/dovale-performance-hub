@@ -13,8 +13,17 @@ const NOTIFICADOS_TABLE = "DOVALE.dbo.ESTOQUE_MINIMO_NOTIFICADOS";
 
 const CW_TI_BASE = process.env.CW_TI_BASE || "https://chatwoot.dovale.online";
 const CW_TI_TOKEN = process.env.CW_TI_TOKEN || "V1WDyvj1WTWeytVyWwKy31GL";
+const CW_TI_INBOX = Number(process.env.CW_TI_INBOX || 1);
 const CW_TI_ACCOUNT = Number(process.env.CW_TI_ACCOUNT || 1);
-const ESTOQUE_MINIMO_CONVERSATION_ID = Number(process.env.ESTOQUE_MINIMO_CHATWOOT_CONVERSATION_ID || 106);
+const HUB_URL = process.env.HUB_URL || "https://hub.dovale.online";
+
+const DESTINATARIOS_WHATSAPP = (process.env.ESTOQUE_MINIMO_DESTINATARIOS || [
+  "5512981898755",
+  "5512935005923",
+  "551232121024",
+  "551232121029",
+  "551232121033",
+].join(",")).split(",").map((n) => n.trim()).filter(Boolean);
 
 export interface ProdutoAbaixoMinimo {
   codigo: string;
@@ -217,16 +226,80 @@ function formatarMensagemWhatsapp(produtos: ProdutoAbaixoMinimo[]): string {
     `- *${p.codigo}* - ${p.descricao}\n  Atual: ${p.estoqueAtual} | Mínimo: ${p.estoqueMinimo} | Faltam: ${p.diferenca}`
   );
   const rodape = produtos.length > 30 ? [`\n... e mais ${produtos.length - 30} produto(s).`] : [];
-  return [header, "", ...lines, ...rodape].join("\n");
+  const link = `\n📎 Acompanhe completo em: ${HUB_URL}/estoque-minimo`;
+  return [header, "", ...lines, ...rodape, link].join("\n");
+}
+
+function cwHeaders() {
+  return { api_access_token: CW_TI_TOKEN, "Content-Type": "application/json" };
+}
+
+async function cwBuscarContato(telefone: string): Promise<number | null> {
+  const digitos = telefone.replace(/\D/g, "");
+  const termo = digitos.slice(-9);
+  const r = await fetch(`${CW_TI_BASE}/api/v1/accounts/${CW_TI_ACCOUNT}/contacts/search?q=${termo}&page=1&per_page=10&include_contacts=true`, { headers: cwHeaders() });
+  if (!r.ok) return null;
+  const j: any = await r.json();
+  return j.payload?.[0]?.id ?? null;
+}
+
+async function cwCriarContato(telefone: string): Promise<number | null> {
+  const r = await fetch(`${CW_TI_BASE}/api/v1/accounts/${CW_TI_ACCOUNT}/contacts`, {
+    method: "POST", headers: cwHeaders(),
+    body: JSON.stringify({ inbox_id: CW_TI_INBOX, phone_number: `+${telefone}`, name: telefone }),
+  });
+  if (!r.ok) return null;
+  const j: any = await r.json();
+  return j.payload?.contact?.id ?? j.id ?? null;
+}
+
+async function cwBuscarConversaAberta(contatoId: number): Promise<number | null> {
+  const r = await fetch(`${CW_TI_BASE}/api/v1/accounts/${CW_TI_ACCOUNT}/contacts/${contatoId}/conversations`, { headers: cwHeaders() });
+  if (!r.ok) return null;
+  const j: any = await r.json();
+  const convs = j.payload || [];
+  const aberta = convs.find((c: any) => c.status === "open" && c.inbox_id === CW_TI_INBOX);
+  return aberta?.id ?? null;
+}
+
+async function cwCriarConversa(contatoId: number): Promise<number | null> {
+  const r = await fetch(`${CW_TI_BASE}/api/v1/accounts/${CW_TI_ACCOUNT}/conversations`, {
+    method: "POST", headers: cwHeaders(),
+    body: JSON.stringify({ contact_id: contatoId, inbox_id: CW_TI_INBOX, status: "open" }),
+  });
+  if (!r.ok) return null;
+  const j: any = await r.json();
+  return j.id ?? null;
+}
+
+async function cwEnviarMensagem(conversaId: number, mensagem: string): Promise<boolean> {
+  const r = await fetch(`${CW_TI_BASE}/api/v1/accounts/${CW_TI_ACCOUNT}/conversations/${conversaId}/messages`, {
+    method: "POST", headers: cwHeaders(),
+    body: JSON.stringify({ content: mensagem, message_type: "outgoing", private: false }),
+  });
+  return r.ok;
+}
+
+async function enviarWhatsappParaTelefone(telefone: string, mensagem: string): Promise<boolean> {
+  try {
+    const contatoId = (await cwBuscarContato(telefone)) ?? (await cwCriarContato(telefone));
+    if (!contatoId) { console.error(`[estoque-minimo] Não foi possível localizar/criar contato para ${telefone}.`); return false; }
+
+    const conversaId = (await cwBuscarConversaAberta(contatoId)) ?? (await cwCriarConversa(contatoId));
+    if (!conversaId) { console.error(`[estoque-minimo] Não foi possível abrir conversa para ${telefone}.`); return false; }
+
+    return await cwEnviarMensagem(conversaId, mensagem);
+  } catch (err) {
+    console.error(`[estoque-minimo] Erro ao enviar WhatsApp para ${telefone}:`, err);
+    return false;
+  }
 }
 
 async function enviarMensagemWhatsapp(mensagem: string): Promise<boolean> {
-  const response = await fetch(`${CW_TI_BASE}/api/v1/accounts/${CW_TI_ACCOUNT}/conversations/${ESTOQUE_MINIMO_CONVERSATION_ID}/messages`, {
-    method: "POST",
-    headers: { api_access_token: CW_TI_TOKEN, "Content-Type": "application/json" },
-    body: JSON.stringify({ content: mensagem, message_type: "outgoing", private: false }),
-  });
-  return response.ok;
+  const resultados = await Promise.all(
+    DESTINATARIOS_WHATSAPP.map((telefone) => enviarWhatsappParaTelefone(telefone, mensagem))
+  );
+  return resultados.some(Boolean);
 }
 
 /** Notifica no WhatsApp só os produtos que entraram abaixo do mínimo desde a última checagem, e limpa quem se recuperou. */
@@ -287,6 +360,20 @@ async function checarEstoqueMinimo(): Promise<void> {
 export async function forcarChecagemEstoqueMinimo(): Promise<ProdutoAbaixoMinimo[]> {
   await checarEstoqueMinimo();
   return cachedProdutos;
+}
+
+/** Dispara uma notificação de teste no WhatsApp com um produto simulado, sem tocar no Firebird nem no controle de já-notificados. */
+export async function enviarNotificacaoTeste(): Promise<boolean> {
+  const produtoTeste: ProdutoAbaixoMinimo = {
+    codigo: "TESTE-999",
+    descricao: "PRODUTO DE TESTE (simulado)",
+    categoria: "TESTE",
+    estoqueAtual: 5,
+    estoqueMinimo: 100,
+    diferenca: 95,
+  };
+  const mensagem = formatarMensagemWhatsapp([produtoTeste]);
+  return enviarMensagemWhatsapp(mensagem);
 }
 
 export async function startEstoqueMinimoJob() {

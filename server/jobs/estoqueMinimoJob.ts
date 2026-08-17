@@ -198,7 +198,7 @@ export async function startEstoqueMinimoJob() {
   // Não espera a primeira checagem no Firebird — a tela já serve o último resultado salvo.
   checarEstoqueMinimo().catch((err) => console.error("[estoque-minimo] Falha na checagem inicial:", err));
 
-  cron.schedule("*/15 * * * *", checarEstoqueMinimo, { timezone: TIMEZONE });
+  cron.schedule("0 7,12 * * 1-5", checarEstoqueMinimo, { timezone: TIMEZONE });
 
-  console.log(`[estoque-minimo] Cron ativo — a cada 15 minutos (${TIMEZONE}).`);
+  console.log(`[estoque-minimo] Cron ativo — seg a sex às 7h e 12h (${TIMEZONE}).`);
 }

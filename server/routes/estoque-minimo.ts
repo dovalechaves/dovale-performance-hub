@@ -3,7 +3,7 @@ import { forcarChecagemEstoqueMinimo, getEstoqueMinimoProdutos, getEstoqueMinimo
 
 const router = Router();
 
-/** GET /api/estoque-minimo/produtos — lista cacheada (atualizada pelo cron a cada 15min) */
+/** GET /api/estoque-minimo/produtos — lista cacheada (atualizada pelo cron seg-sex às 7h e 12h) */
 router.get("/produtos", (_req, res) => {
   res.json(getEstoqueMinimoProdutos());
 });

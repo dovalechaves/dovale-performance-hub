@@ -105,6 +105,11 @@ interface AuthUser {
       role: Role;
       loja: string | null;
     };
+    estoqueminimo: {
+      canAccess: boolean;
+      role: Role;
+      loja: string | null;
+    };
   };
 }
 
@@ -139,6 +144,7 @@ interface AuthContextValue {
       salescompass?: { role?: string; loja?: string | null; can_access?: boolean; usu_codigo_sistema?: number | null };
       painelcomissao?: { role?: string; loja?: string | null; can_access?: boolean; config?: { setores: string[]; nome_vendedor: string | null } | null };
       relatoriocustos?: { role?: string; loja?: string | null; can_access?: boolean };
+      estoqueminimo?: { role?: string; loja?: string | null; can_access?: boolean };
     },
     hubRole?: string
   ) => void;
@@ -178,6 +184,8 @@ function buildUser(
     sugestaocompras?: { role?: string; loja?: string | null; can_access?: boolean };
     salescompass?: { role?: string; loja?: string | null; can_access?: boolean; usu_codigo_sistema?: number | null };
     painelcomissao?: { role?: string; loja?: string | null; can_access?: boolean; config?: { setores: string[]; nome_vendedor: string | null } | null };
+    relatoriocustos?: { role?: string; loja?: string | null; can_access?: boolean };
+    estoqueminimo?: { role?: string; loja?: string | null; can_access?: boolean };
   },
   apiHubRole?: string
 ): AuthUser {
@@ -225,6 +233,8 @@ function buildUser(
   const painelcomissaoConfig = apiApps?.painelcomissao?.config ?? null;
   const relatoriocustosRole = resolveRole(usuario, apiApps?.relatoriocustos?.role ?? apiRole);
   const relatoriocustosAccess = apiApps?.relatoriocustos?.can_access ?? false;
+  const estoqueminimoRole = resolveRole(usuario, apiApps?.estoqueminimo?.role ?? apiRole);
+  const estoqueminimoAccess = apiApps?.estoqueminimo?.can_access ?? false;
 
   return {
     usuario,
@@ -330,6 +340,11 @@ function buildUser(
         role: relatoriocustosRole,
         loja: null,
       },
+      estoqueminimo: {
+        canAccess: estoqueminimoAccess,
+        role: estoqueminimoRole,
+        loja: null,
+      },
     },
   };
 }
@@ -384,6 +399,8 @@ function loadFromStorage(): AuthUser | null {
     const painelcomissaoConfig = (parsed.apps as any)?.painelcomissao?.config ?? null;
     const relatoriocustosRole = (parsed.apps as any)?.relatoriocustos?.role ?? parsed.role;
     const relatoriocustosAccess = (parsed.apps as any)?.relatoriocustos?.canAccess ?? false;
+    const estoqueminimoRole = (parsed.apps as any)?.estoqueminimo?.role ?? parsed.role;
+    const estoqueminimoAccess = (parsed.apps as any)?.estoqueminimo?.canAccess ?? false;
 
     return {
       usuario: parsed.usuario,
@@ -489,6 +506,11 @@ function loadFromStorage(): AuthUser | null {
           role: relatoriocustosRole,
           loja: null,
         },
+        estoqueminimo: {
+          canAccess: estoqueminimoAccess,
+          role: estoqueminimoRole,
+          loja: null,
+        },
       },
     };
   } catch {
@@ -554,6 +576,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       salescompass?: { role?: string; loja?: string | null; can_access?: boolean; usu_codigo_sistema?: number | null };
       painelcomissao?: { role?: string; loja?: string | null; can_access?: boolean; config?: { setores: string[]; nome_vendedor: string | null } | null };
       relatoriocustos?: { role?: string; loja?: string | null; can_access?: boolean };
+      estoqueminimo?: { role?: string; loja?: string | null; can_access?: boolean };
     },
     hubRole?: string
   ) => {

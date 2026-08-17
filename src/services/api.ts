@@ -200,6 +200,12 @@ export interface AuthManagedUser {
       loja: string | null;
       can_access: boolean;
     };
+    estoqueminimo: {
+      app_key: "estoqueminimo";
+      role: "admin" | "manager" | "viewer";
+      loja: string | null;
+      can_access: boolean;
+    };
   };
 }
 

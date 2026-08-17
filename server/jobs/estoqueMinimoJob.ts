@@ -9,6 +9,12 @@ const FILIAL_ID = 1;
 
 const PRODUTOS_TABLE = "DOVALE.dbo.ESTOQUE_MINIMO_PRODUTOS";
 const STATUS_TABLE = "DOVALE.dbo.ESTOQUE_MINIMO_STATUS";
+const NOTIFICADOS_TABLE = "DOVALE.dbo.ESTOQUE_MINIMO_NOTIFICADOS";
+
+const CW_TI_BASE = process.env.CW_TI_BASE || "https://chatwoot.dovale.online";
+const CW_TI_TOKEN = process.env.CW_TI_TOKEN || "V1WDyvj1WTWeytVyWwKy31GL";
+const CW_TI_ACCOUNT = Number(process.env.CW_TI_ACCOUNT || 1);
+const ESTOQUE_MINIMO_CONVERSATION_ID = Number(process.env.ESTOQUE_MINIMO_CHATWOOT_CONVERSATION_ID || 106);
 
 export interface ProdutoAbaixoMinimo {
   codigo: string;
@@ -156,6 +162,95 @@ async function persistirProdutos(produtos: ProdutoAbaixoMinimo[]): Promise<void>
   }
 }
 
+// ── Notificação WhatsApp (só produtos novos abaixo do mínimo) ──────────────
+async function ensureNotificadosTable(): Promise<void> {
+  const pool = await getPool();
+  await pool.request().query(`
+    IF OBJECT_ID('dbo.ESTOQUE_MINIMO_NOTIFICADOS', 'U') IS NULL
+    BEGIN
+      CREATE TABLE dbo.ESTOQUE_MINIMO_NOTIFICADOS (
+        pro_codigo VARCHAR(50) NOT NULL PRIMARY KEY,
+        notificado_em DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+      );
+      -- Semeia com o backlog já existente na primeira vez, pra não disparar
+      -- WhatsApp para os produtos que já estavam abaixo do mínimo antes desse recurso existir.
+      INSERT INTO dbo.ESTOQUE_MINIMO_NOTIFICADOS (pro_codigo)
+      SELECT pro_codigo FROM ${PRODUTOS_TABLE};
+    END
+  `);
+}
+
+async function getCodigosJaNotificados(): Promise<Set<string>> {
+  await ensureNotificadosTable();
+  const pool = await getPool();
+  const result = await pool.request().query(`SELECT pro_codigo FROM ${NOTIFICADOS_TABLE}`);
+  return new Set(result.recordset.map((r: { pro_codigo: string }) => String(r.pro_codigo).trim()));
+}
+
+async function registrarNotificados(codigos: string[]): Promise<void> {
+  if (codigos.length === 0) return;
+  const pool = await getPool();
+  for (const codigo of codigos) {
+    await pool.request()
+      .input("codigo", mssql.VarChar(50), codigo)
+      .query(`
+        IF NOT EXISTS (SELECT 1 FROM ${NOTIFICADOS_TABLE} WHERE pro_codigo = @codigo)
+        BEGIN
+          INSERT INTO ${NOTIFICADOS_TABLE} (pro_codigo) VALUES (@codigo)
+        END
+      `);
+  }
+}
+
+async function limparRecuperados(codigos: string[]): Promise<void> {
+  if (codigos.length === 0) return;
+  const pool = await getPool();
+  const placeholders = codigos.map((_, i) => `@codigo${i}`).join(", ");
+  const request = pool.request();
+  codigos.forEach((codigo, i) => request.input(`codigo${i}`, mssql.VarChar(50), codigo));
+  await request.query(`DELETE FROM ${NOTIFICADOS_TABLE} WHERE pro_codigo IN (${placeholders})`);
+}
+
+function formatarMensagemWhatsapp(produtos: ProdutoAbaixoMinimo[]): string {
+  const header = `⚠️ *${produtos.length} produto(s) NOVO(S) abaixo do estoque mínimo (SJC):*`;
+  const lines = produtos.slice(0, 30).map((p) =>
+    `- *${p.codigo}* - ${p.descricao}\n  Atual: ${p.estoqueAtual} | Mínimo: ${p.estoqueMinimo} | Faltam: ${p.diferenca}`
+  );
+  const rodape = produtos.length > 30 ? [`\n... e mais ${produtos.length - 30} produto(s).`] : [];
+  return [header, "", ...lines, ...rodape].join("\n");
+}
+
+async function enviarMensagemWhatsapp(mensagem: string): Promise<boolean> {
+  const response = await fetch(`${CW_TI_BASE}/api/v1/accounts/${CW_TI_ACCOUNT}/conversations/${ESTOQUE_MINIMO_CONVERSATION_ID}/messages`, {
+    method: "POST",
+    headers: { api_access_token: CW_TI_TOKEN, "Content-Type": "application/json" },
+    body: JSON.stringify({ content: mensagem, message_type: "outgoing", private: false }),
+  });
+  return response.ok;
+}
+
+/** Notifica no WhatsApp só os produtos que entraram abaixo do mínimo desde a última checagem, e limpa quem se recuperou. */
+async function notificarNovosAbaixoDoMinimo(produtosAtuais: ProdutoAbaixoMinimo[]): Promise<void> {
+  const codigosAtuais = new Set(produtosAtuais.map((p) => p.codigo));
+  const jaNotificados = await getCodigosJaNotificados();
+
+  const novos = produtosAtuais.filter((p) => !jaNotificados.has(p.codigo));
+  const recuperados = [...jaNotificados].filter((codigo) => !codigosAtuais.has(codigo));
+
+  if (novos.length > 0) {
+    const mensagem = formatarMensagemWhatsapp(novos);
+    const enviado = await enviarMensagemWhatsapp(mensagem);
+    if (enviado) {
+      await registrarNotificados(novos.map((p) => p.codigo));
+      console.log(`[estoque-minimo] ${novos.length} produto(s) novo(s) notificado(s) no WhatsApp.`);
+    } else {
+      console.error("[estoque-minimo] Falha ao enviar notificação no WhatsApp.");
+    }
+  }
+
+  await limparRecuperados(recuperados);
+}
+
 async function persistirStatus(status: EstoqueMinimoStatus): Promise<void> {
   const pool = await getPool();
   await pool.request()
@@ -178,6 +273,9 @@ async function checarEstoqueMinimo(): Promise<void> {
 
     await persistirProdutos(produtos);
     await persistirStatus(cachedStatus);
+    await notificarNovosAbaixoDoMinimo(produtos).catch((err) =>
+      console.error("[estoque-minimo] Falha ao processar notificação WhatsApp:", err)
+    );
   } catch (err: any) {
     cachedStatus = { ...cachedStatus, lastCheckedAt: new Date().toISOString(), lastError: err.message || String(err) };
     console.error("[estoque-minimo] Falha ao verificar estoque mínimo:", err);

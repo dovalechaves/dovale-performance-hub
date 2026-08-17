@@ -23,11 +23,13 @@ import salesCompassRouter from "./routes/sales-compass";
 import relatorioCustosRouter from "./routes/relatorio-custos";
 import comissaoRouter from "./routes/comissao";
 import productFirstMovementRouter from "./routes/product-first-movement";
+import estoqueMinimoRouter from "./routes/estoque-minimo";
 import { startSyncJob } from "./jobs/syncJob";
 import { startStockSnapshotJob, runStockSnapshotManual, getStockSnapshotStatus } from "./jobs/stockSnapshotJob";
 import { startMultiPrecoJob } from "./jobs/multiPrecoJob";
 import { startCobrancaJob } from "./jobs/cobrancaJob";
 import { startProductFirstMovementJob } from "./jobs/productFirstMovementJob";
+import { startEstoqueMinimoJob } from "./jobs/estoqueMinimoJob";
 import { setupSwagger } from "./swagger";
 
 const app = express();
@@ -64,6 +66,7 @@ app.use("/api/sales-compass",     salesCompassRouter);
 app.use("/api/relatorio-custos",  relatorioCustosRouter);
 app.use("/api/comissao",          comissaoRouter);
 app.use("/api/product-first-movement", productFirstMovementRouter);
+app.use("/api/estoque-minimo",    estoqueMinimoRouter);
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
@@ -128,4 +131,5 @@ httpServer.listen(PORT, "0.0.0.0", () => {
   startMultiPrecoJob();
   startCobrancaJob();
   startProductFirstMovementJob().catch((err) => console.error("[product-first-movement] Erro ao iniciar:", err));
+  startEstoqueMinimoJob().catch((err) => console.error("[estoque-minimo] Erro ao iniciar:", err));
 });

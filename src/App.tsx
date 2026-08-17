@@ -32,6 +32,7 @@ import PrimeiraMovimentacao from "./pages/PrimeiraMovimentacao.tsx";
 import InventarioFullApi from "./pages/InventarioFullApi.tsx";
 import Prospeccao from "./pages/Prospecção.tsx";
 import ClientesProspeccao from "./pages/ClientesProspeccao.tsx";
+import EstoqueMinimo from "./pages/EstoqueMinimo.tsx";
 import React from "react";
 
 const queryClient = new QueryClient();
@@ -163,6 +164,14 @@ function RelatorioCustosRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function EstoqueMinimoRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.canAccessHub) return <Navigate to="/login" replace />;
+  if (!user.apps.estoqueminimo?.canAccess) return <Navigate to="/hub" replace />;
+  return <>{children}</>;
+}
+
 function ComissaoRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const location = useLocation();
@@ -234,6 +243,7 @@ const App = () => (
             <Route path="/sugestao-compras" element={<SugestaoComprasRoute><SugestaoCompras /></SugestaoComprasRoute>} />
             <Route path="/sales-compass" element={<SalesCompassRoute><SalesCompass /></SalesCompassRoute>} />
             <Route path="/relatorio-custos" element={<RelatorioCustosRoute><RelatorioCustos /></RelatorioCustosRoute>} />
+            <Route path="/estoque-minimo" element={<EstoqueMinimoRoute><EstoqueMinimo /></EstoqueMinimoRoute>} />
             <Route path="/comissao" element={<ComissaoRoute><ComissaoDashboard /></ComissaoRoute>} />
             <Route path="/comissao/vendedor" element={<ComissaoRoute><ComissaoVendedor /></ComissaoRoute>} />
             <Route path="/comissao/gestor" element={<ComissaoRoute><ComissaoGestor /></ComissaoRoute>} />

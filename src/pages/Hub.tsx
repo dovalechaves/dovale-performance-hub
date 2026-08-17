@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import { BarChart3, Calculator, LogOut, Sun, Moon, Users, RefreshCw, Loader2, ChevronDown, Settings2, Send, Archive, Bot, Database, ClipboardList, UserPlus, PackageSearch, ShieldCheck, BellRing, ShoppingCart, Sparkles, Compass, TrendingDown, Coins, Search, X } from "lucide-react";
+import { BarChart3, Calculator, LogOut, Sun, Moon, Users, RefreshCw, Loader2, ChevronDown, Settings2, Send, Archive, Bot, Database, ClipboardList, UserPlus, PackageSearch, ShieldCheck, BellRing, ShoppingCart, Sparkles, Compass, TrendingDown, Coins, Search, X, AlertTriangle } from "lucide-react";
 import logoBlue from "@/assets/logo-blue.png";
 import logoWhite from "@/assets/logo-white.png";
 import { API_BASE, LOJAS, getAuthUsers, updateAuthUserRole, type AuthManagedUser } from "@/services/api";
@@ -161,6 +161,13 @@ const APPS: AppCard[] = [
     route: "/prospeccao",
     color: "from-teal-500/20 to-cyan-600/10 border-teal-500/30 hover:border-teal-500/60",
   },
+  {
+    title: "Estoque Mínimo",
+    description: "Alerta de produtos da base SJC com saldo abaixo do estoque mínimo cadastrado no Microsys.",
+    icon: <AlertTriangle className="w-8 h-8" />,
+    route: "/estoque-minimo",
+    color: "from-amber-500/20 to-red-600/10 border-amber-500/30 hover:border-amber-500/60",
+  },
 ];
 
 const APP_BY_ROUTE: Record<string, keyof AuthManagedUser["apps"]> = {
@@ -182,6 +189,7 @@ const APP_BY_ROUTE: Record<string, keyof AuthManagedUser["apps"]> = {
   "/primeira-movimentacao": "primeiramov",
   "/inventario-full-api": "invfull",
   "/prospeccao": "prospeccao",
+  "/estoque-minimo": "estoqueminimo",
 };
 
 // ─── Rep Selector (Sales Compass) ────────────────────────────────────────────
@@ -304,11 +312,20 @@ export default function Hub() {
     role: "viewer", setores: [], nome_vendedor: "",
   });
   const [openingPainel, setOpeningPainel] = useState(false);
+  const [estoqueMinimoCount, setEstoqueMinimoCount] = useState(0);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
     localStorage.setItem("dovale_theme", dark ? "dark" : "light");
   }, [dark]);
+
+  useEffect(() => {
+    if (!user?.apps.estoqueminimo?.canAccess) return;
+    fetch(`${API_BASE}/estoque-minimo/status`)
+      .then((r) => r.json())
+      .then((data: { count?: number }) => setEstoqueMinimoCount(data.count ?? 0))
+      .catch(() => {});
+  }, [user?.apps.estoqueminimo?.canAccess]);
 
   const isAdmin = user?.hubRole === "admin";
   const firstFromUser = user?.usuario.split(".")[0] ?? "";
@@ -535,8 +552,13 @@ export default function Hub() {
               <button
                 key={app.route}
                 onClick={() => openApp(app)}
-                className={`text-left p-6 rounded-2xl border bg-gradient-to-br ${app.color} transition-all duration-200 hover:scale-[1.02] hover:shadow-lg group`}
+                className={`relative text-left p-6 rounded-2xl border bg-gradient-to-br ${app.color} transition-all duration-200 hover:scale-[1.02] hover:shadow-lg group`}
               >
+                {app.route === "/estoque-minimo" && estoqueMinimoCount > 0 && (
+                  <span className="absolute top-3 right-3 inline-flex items-center justify-center min-w-[1.5rem] h-6 px-1.5 rounded-full bg-destructive text-destructive-foreground text-xs font-semibold">
+                    {estoqueMinimoCount}
+                  </span>
+                )}
                 <div className="text-primary mb-4 group-hover:scale-110 transition-transform duration-200">
                   {app.icon}
                 </div>
@@ -636,6 +658,8 @@ export default function Hub() {
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Cobr.</th>
                     <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Rel. Custos</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Rel.C.</th>
+                    <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Est. Mínimo</th>
+                    <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Est.Min.</th>
                     <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Ecommerce</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role EC</th>
                     <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Sug. Compras</th>
@@ -657,7 +681,7 @@ export default function Hub() {
                 <tbody>
                   {usersLoading ? (
                     <tr>
-                      <td colSpan={46} className="px-4 py-8 text-center text-muted-foreground">
+                      <td colSpan={48} className="px-4 py-8 text-center text-muted-foreground">
                         <Loader2 className="w-5 h-5 animate-spin mx-auto" />
                       </td>
                     </tr>
@@ -730,6 +754,10 @@ export default function Hub() {
                                   relatoriocustos: {
                                     ...(u.apps as any).relatoriocustos,
                                     can_access: enabled ? ((u.apps as any).relatoriocustos?.can_access ?? false) : false,
+                                  },
+                                  estoqueminimo: {
+                                    ...(u.apps as any).estoqueminimo,
+                                    can_access: enabled ? ((u.apps as any).estoqueminimo?.can_access ?? false) : false,
                                   },
                                   ecommercedisparo: {
                                     ...u.apps.ecommercedisparo,
@@ -1502,6 +1530,63 @@ export default function Hub() {
                                       app_key: "relatoriocustos",
                                       loja: null,
                                       can_access: u.apps.relatoriocustos?.can_access ?? false,
+                                      role: nextRole,
+                                    },
+                                  } as any,
+                                };
+                                updateManagedUser(u.usuario, () => next);
+                                await persistUser(next);
+                              }}
+                              disabled={savingUser === u.usuario || !u.can_access_hub}
+                              className="appearance-none rounded-lg border border-border bg-muted px-3 py-1.5 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40"
+                            >
+                              {(Object.keys(ROLE_LABELS) as Role[]).map((r) => (
+                                <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                              ))}
+                            </select>
+                            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={u.apps.estoqueminimo?.can_access ?? false}
+                            onChange={async (e) => {
+                              const next: AuthManagedUser = {
+                                ...u,
+                                apps: {
+                                  ...u.apps,
+                                  estoqueminimo: {
+                                    ...(u.apps as any).estoqueminimo,
+                                    app_key: "estoqueminimo",
+                                    role: u.apps.estoqueminimo?.role ?? "viewer",
+                                    loja: null,
+                                    can_access: e.target.checked,
+                                  },
+                                } as any,
+                              };
+                              updateManagedUser(u.usuario, () => next);
+                              await persistUser(next);
+                            }}
+                            disabled={savingUser === u.usuario || !u.can_access_hub}
+                            className="h-4 w-4 rounded border-border bg-muted text-primary focus:ring-primary/50 disabled:opacity-40"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="relative inline-block">
+                            <select
+                              value={u.apps.estoqueminimo?.role ?? "viewer"}
+                              onChange={async (e) => {
+                                const nextRole = e.target.value as Role;
+                                const next: AuthManagedUser = {
+                                  ...u,
+                                  apps: {
+                                    ...u.apps,
+                                    estoqueminimo: {
+                                      ...(u.apps as any).estoqueminimo,
+                                      app_key: "estoqueminimo",
+                                      loja: null,
+                                      can_access: u.apps.estoqueminimo?.can_access ?? false,
                                       role: nextRole,
                                     },
                                   } as any,

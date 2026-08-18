@@ -225,6 +225,7 @@ interface DistVendedorMeta {
   meta1_valor: number; meta1_percentual: number;
   meta2_valor: number; meta2_percentual: number;
   meta3_valor: number; meta3_percentual: number;
+  meta4_valor: number; meta4_percentual: number;
   metadesafio_valor: number; metadesafio_percentual: number;
   percentual_sem_meta: number;
 }
@@ -234,6 +235,7 @@ interface DistVendedorBonus {
   bonus1_valor: number;
   bonus2_valor: number;
   bonus3_valor: number;
+  bonus4_valor: number;
   bonusdesafio_valor: number;
 }
 
@@ -687,10 +689,10 @@ export default function ComissaoConfiguracao() {
   };
 
   const getDistMeta = (nome: string): DistVendedorMeta =>
-    distMetasEdit[nome] || { nome_vendedor: nome, meta1_valor: 0, meta1_percentual: 0, meta2_valor: 0, meta2_percentual: 0, meta3_valor: 0, meta3_percentual: 0, metadesafio_valor: 0, metadesafio_percentual: 0, percentual_sem_meta: 0 };
+    distMetasEdit[nome] || { nome_vendedor: nome, meta1_valor: 0, meta1_percentual: 0, meta2_valor: 0, meta2_percentual: 0, meta3_valor: 0, meta3_percentual: 0, meta4_valor: 0, meta4_percentual: 0, metadesafio_valor: 0, metadesafio_percentual: 0, percentual_sem_meta: 0 };
 
   const getDistBonus = (nome: string): DistVendedorBonus =>
-    distBonusEdit[nome] || { nome_vendedor: nome, bonus1_valor: 0, bonus2_valor: 0, bonus3_valor: 0, bonusdesafio_valor: 0 };
+    distBonusEdit[nome] || { nome_vendedor: nome, bonus1_valor: 0, bonus2_valor: 0, bonus3_valor: 0, bonus4_valor: 0, bonusdesafio_valor: 0 };
 
   const updateDistMeta = (nome: string, field: keyof Omit<DistVendedorMeta, 'nome_vendedor'>, value: number) => {
     setSavedDistMetas(false);
@@ -1513,21 +1515,21 @@ export default function ComissaoConfiguracao() {
                 </div>
                 <div className="overflow-x-auto">
                   <div className="grid px-5 py-2 text-xs font-semibold uppercase tracking-wider"
-                    style={{ gridTemplateColumns: '220px repeat(4, 200px) 120px', minWidth: 1200, borderBottom: '1px solid #f1f5f9', background: '#f8fafc', color: '#64748b' }}>
+                    style={{ gridTemplateColumns: '220px repeat(5, 200px) 120px', minWidth: 1400, borderBottom: '1px solid #f1f5f9', background: '#f8fafc', color: '#64748b' }}>
                     <span>Vendedor</span>
-                    {['Meta 1', 'Meta 2', 'Meta 3', 'Meta Desafio'].map((l, i) => (
+                    {['Meta 1', 'Meta 2', 'Meta 3', 'Meta 4', 'Meta Desafio'].map((l, i) => (
                       <span key={i} className="text-center px-3 py-1 rounded-full mx-2"
-                        style={{ background: ['#dbeafe','#d1fae5','#fef3c7','#e9d5ff'][i], color: ['#1e40af','#065f46','#92400e','#6b21a8'][i] }}>{l}</span>
+                        style={{ background: ['#dbeafe','#d1fae5','#fef3c7','#fee2d5','#e9d5ff'][i], color: ['#1e40af','#065f46','#92400e','#9a3412','#6b21a8'][i] }}>{l}</span>
                     ))}
                     <span className="text-center px-2 py-1 rounded-full" style={{ background: '#fee2e2', color: '#991b1b' }}>% Sem Meta</span>
                   </div>
-                  <div className="divide-y" style={{ borderColor: '#f1f5f9', minWidth: 1200 }}>
+                  <div className="divide-y" style={{ borderColor: '#f1f5f9', minWidth: 1400 }}>
                     {distVendedores.filter(v => !distBuscaVend || v.toLowerCase().includes(distBuscaVend.toLowerCase())).map((v) => {
                       const m = getDistMeta(v);
                       const temConf = !!distMetasEdit[v];
                       return (
                         <div key={v} className="grid items-center px-5 py-3"
-                          style={{ gridTemplateColumns: '220px repeat(4, 200px) 120px' }}
+                          style={{ gridTemplateColumns: '220px repeat(5, 200px) 120px' }}
                           onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = '#f8fafc')}
                           onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = '')}>
                           <div className="flex items-center gap-2 pr-3">
@@ -1538,6 +1540,7 @@ export default function ComissaoConfiguracao() {
                             { vf: 'meta1_valor' as const, pf: 'meta1_percentual' as const, bg: '#eff6ff', border: '#bfdbfe' },
                             { vf: 'meta2_valor' as const, pf: 'meta2_percentual' as const, bg: '#f0fdf4', border: '#bbf7d0' },
                             { vf: 'meta3_valor' as const, pf: 'meta3_percentual' as const, bg: '#fffbeb', border: '#fde68a' },
+                            { vf: 'meta4_valor' as const, pf: 'meta4_percentual' as const, bg: '#fff7ed', border: '#fed7aa' },
                             { vf: 'metadesafio_valor' as const, pf: 'metadesafio_percentual' as const, bg: '#fdf4ff', border: '#e9d5ff' },
                           ]).map(({ vf, pf, bg, border }) => (
                             <div key={vf} className="flex items-center gap-1 mx-2 px-2 py-1.5 rounded-lg"
@@ -1608,19 +1611,19 @@ export default function ComissaoConfiguracao() {
                   </div>
                   <div className="overflow-x-auto">
                     <div className="grid px-5 py-2 text-xs font-semibold uppercase tracking-wider"
-                      style={{ gridTemplateColumns: '220px repeat(4, 160px)', minWidth: 860, borderBottom: '1px solid #f1f5f9', background: '#f8fafc', color: '#64748b' }}>
+                      style={{ gridTemplateColumns: '220px repeat(5, 160px)', minWidth: 1020, borderBottom: '1px solid #f1f5f9', background: '#f8fafc', color: '#64748b' }}>
                       <span>Vendedor</span>
-                      {['Bônus 1', 'Bônus 2', 'Bônus 3', 'Bônus Desafio'].map((l, i) => (
+                      {['Bônus 1', 'Bônus 2', 'Bônus 3', 'Bônus 4', 'Bônus Desafio'].map((l, i) => (
                         <span key={i} className="text-center px-3 py-1 rounded-full mx-2"
-                          style={{ background: ['#dbeafe','#d1fae5','#fef3c7','#e9d5ff'][i], color: ['#1e40af','#065f46','#92400e','#6b21a8'][i] }}>{l}</span>
+                          style={{ background: ['#dbeafe','#d1fae5','#fef3c7','#fee2d5','#e9d5ff'][i], color: ['#1e40af','#065f46','#92400e','#9a3412','#6b21a8'][i] }}>{l}</span>
                       ))}
                     </div>
-                    <div className="divide-y" style={{ borderColor: '#f1f5f9', minWidth: 860 }}>
+                    <div className="divide-y" style={{ borderColor: '#f1f5f9', minWidth: 1020 }}>
                       {distVendedores.filter(v => !distBuscaVend || v.toLowerCase().includes(distBuscaVend.toLowerCase())).map((v) => {
                         const b = getDistBonus(v);
                         return (
                           <div key={v} className="grid items-center px-5 py-3"
-                            style={{ gridTemplateColumns: '220px repeat(4, 160px)' }}
+                            style={{ gridTemplateColumns: '220px repeat(5, 160px)' }}
                             onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = '#f8fafc')}
                             onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = '')}>
                             <span className="text-sm font-medium pr-3" style={{ color: '#0a1628' }}>{v}</span>
@@ -1628,6 +1631,7 @@ export default function ComissaoConfiguracao() {
                               { f: 'bonus1_valor' as const, bg: '#eff6ff', border: '#bfdbfe' },
                               { f: 'bonus2_valor' as const, bg: '#f0fdf4', border: '#bbf7d0' },
                               { f: 'bonus3_valor' as const, bg: '#fffbeb', border: '#fde68a' },
+                              { f: 'bonus4_valor' as const, bg: '#fff7ed', border: '#fed7aa' },
                               { f: 'bonusdesafio_valor' as const, bg: '#fdf4ff', border: '#e9d5ff' },
                             ]).map(({ f, bg, border }) => (
                               <div key={f} className="flex items-center gap-1 mx-2 px-2 py-1.5 rounded-lg"

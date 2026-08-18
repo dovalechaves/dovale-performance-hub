@@ -547,6 +547,7 @@ export default function ComissaoSimulacao() {
         { label: 'Meta 1', valor: distMetaConf.meta1_valor, pct: distMetaConf.meta1_percentual },
         { label: 'Meta 2', valor: distMetaConf.meta2_valor, pct: distMetaConf.meta2_percentual },
         { label: 'Meta 3', valor: distMetaConf.meta3_valor, pct: distMetaConf.meta3_percentual },
+        { label: 'Meta 4', valor: distMetaConf.meta4_valor, pct: distMetaConf.meta4_percentual },
         { label: 'Meta Desafio', valor: distMetaConf.metadesafio_valor, pct: distMetaConf.metadesafio_percentual },
       ].filter((m) => m.valor > 0)
     : [];
@@ -1229,10 +1230,10 @@ export default function ComissaoSimulacao() {
                       <div className="space-y-2">
                         {distMetasVisiveis.map((m, i) => (
                           <div key={i} className="flex justify-between items-center py-1.5 px-3 rounded-lg text-sm"
-                            style={{ background: ['#eff6ff','#f0fdf4','#fffbeb','#fdf4ff'][i] }}>
-                            <span className="font-medium" style={{ color: ['#1e40af','#065f46','#92400e','#6b21a8'][i] }}>{m.label}</span>
+                            style={{ background: ['#eff6ff','#f0fdf4','#fffbeb','#fff7ed','#fdf4ff'][i] }}>
+                            <span className="font-medium" style={{ color: ['#1e40af','#065f46','#92400e','#9a3412','#6b21a8'][i] }}>{m.label}</span>
                             <span style={{ color: '#64748b' }}>{formatBRL(m.valor)}</span>
-                            <span className="font-bold" style={{ color: ['#1e40af','#065f46','#92400e','#6b21a8'][i] }}>{m.pct}%</span>
+                            <span className="font-bold" style={{ color: ['#1e40af','#065f46','#92400e','#9a3412','#6b21a8'][i] }}>{m.pct}%</span>
                           </div>
                         ))}
                         {(distMetaConf?.percentual_sem_meta ?? 0) > 0 && (
@@ -1255,10 +1256,11 @@ export default function ComissaoSimulacao() {
                             { label: 'Bônus 1', valor: distBonusConf.bonus1_valor },
                             { label: 'Bônus 2', valor: distBonusConf.bonus2_valor },
                             { label: 'Bônus 3', valor: distBonusConf.bonus3_valor },
+                            { label: 'Bônus 4', valor: distBonusConf.bonus4_valor },
                             { label: 'Bônus Desafio', valor: distBonusConf.bonusdesafio_valor },
                           ].filter(b => b.valor > 0).map((b, i) => (
                             <div key={i} className="flex justify-between items-center py-1.5 px-3 rounded-lg text-sm"
-                              style={{ background: ['#eff6ff','#f0fdf4','#fffbeb','#fdf4ff'][i] }}>
+                              style={{ background: ['#eff6ff','#f0fdf4','#fffbeb','#fff7ed','#fdf4ff'][i] }}>
                               <span className="font-medium" style={{ color: '#64748b' }}>{b.label}</span>
                               <span className="font-bold" style={{ color: '#00205C' }}>{formatBRL(b.valor)}</span>
                             </div>

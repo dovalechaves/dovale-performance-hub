@@ -240,7 +240,7 @@ export default function ComissaoVendedor() {
     : [];
   const cfv = isFerragens && mes ? data?.comissao_ferragens ?? null : null;
 
-  // Distribuidores — mesmas faixas de meta do Ferragens (4 níveis: M1, M2, M3, Desafio)
+  // Distribuidores — mesmas faixas de meta do Ferragens + Meta 4 (5 níveis: M1, M2, M3, M4, Desafio)
   const distMeta = data?.dist_meta ?? null;
   const distBonus = data?.dist_bonus ?? null;
   const distFaixas: { label: string; valor: number; percentual: number }[] = distMeta
@@ -248,6 +248,7 @@ export default function ComissaoVendedor() {
         { label: 'Meta 1', valor: distMeta.meta1_valor, percentual: distMeta.meta1_percentual },
         { label: 'Meta 2', valor: distMeta.meta2_valor, percentual: distMeta.meta2_percentual },
         { label: 'Meta 3', valor: distMeta.meta3_valor, percentual: distMeta.meta3_percentual },
+        { label: 'Meta 4', valor: distMeta.meta4_valor, percentual: distMeta.meta4_percentual },
         { label: 'Meta Desafio', valor: distMeta.metadesafio_valor, percentual: distMeta.metadesafio_percentual },
       ].filter(f => f.valor > 0)
     : [];

@@ -213,6 +213,7 @@ interface DistVendedorMeta {
   meta1_valor: number; meta1_percentual: number;
   meta2_valor: number; meta2_percentual: number;
   meta3_valor: number; meta3_percentual: number;
+  meta4_valor: number; meta4_percentual: number;
   metadesafio_valor: number; metadesafio_percentual: number;
   percentual_sem_meta: number;
 }
@@ -222,6 +223,7 @@ interface DistVendedorBonus {
   bonus1_valor: number;
   bonus2_valor: number;
   bonus3_valor: number;
+  bonus4_valor: number;
   bonusdesafio_valor: number;
 }
 
@@ -456,6 +458,7 @@ export default function ComissaoGestor() {
       meta1_valor: Number(mRec.meta1_valor), meta1_percentual: Number(mRec.meta1_percentual),
       meta2_valor: Number(mRec.meta2_valor), meta2_percentual: Number(mRec.meta2_percentual),
       meta3_valor: Number(mRec.meta3_valor), meta3_percentual: Number(mRec.meta3_percentual),
+      meta4_valor: Number(mRec.meta4_valor), meta4_percentual: Number(mRec.meta4_percentual),
       metadesafio_valor: Number(mRec.metadesafio_valor), metadesafio_percentual: Number(mRec.metadesafio_percentual),
       percentual_sem_meta: Number(mRec.percentual_sem_meta ?? 0),
     };
@@ -463,6 +466,7 @@ export default function ComissaoGestor() {
       bonus1_valor: Number(bRec.bonus1_valor),
       bonus2_valor: Number(bRec.bonus2_valor),
       bonus3_valor: Number(bRec.bonus3_valor),
+      bonus4_valor: Number(bRec.bonus4_valor),
       bonusdesafio_valor: Number(bRec.bonusdesafio_valor),
     } : null;
     return calcularComissaoDistribuidores(v.total_vendas, v.total_recebido, metaCfg, bonusCfg);
@@ -824,7 +828,7 @@ export default function ComissaoGestor() {
                     const temMetaCadastrada = isFerragens
                       ? !!(mFerr && (mFerr.meta1_valor > 0 || mFerr.meta2_valor > 0 || mFerr.meta3_valor > 0 || mFerr.metadesafio_valor > 0))
                       : isDist
-                        ? !!(mDist && (mDist.meta1_valor > 0 || mDist.meta2_valor > 0 || mDist.meta3_valor > 0 || mDist.metadesafio_valor > 0))
+                        ? !!(mDist && (mDist.meta1_valor > 0 || mDist.meta2_valor > 0 || mDist.meta3_valor > 0 || mDist.meta4_valor > 0 || mDist.metadesafio_valor > 0))
                         : !!(mTV && (mTV.meta1_valor > 0 || mTV.meta2_valor > 0 || mTV.meta3_valor > 0));
                     const metaLabel = isFerragens ? cferr?.meta_atingida?.label : isDist ? cdist?.meta_atingida?.label : v.is_televendas ? ctv?.meta_atingida?.label : f?.atingida?.label;
                     const metaValor = isFerragens ? cferr?.meta_atingida?.valor : isDist ? cdist?.meta_atingida?.valor : v.is_televendas ? ctv?.meta_atingida?.valor : f?.atingida?.valor;

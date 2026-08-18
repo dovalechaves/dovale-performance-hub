@@ -1038,6 +1038,7 @@ router.get("/vendedor/:nome", async (req: any, res: any) => {
             .query(`SELECT META1_VALOR as meta1_valor, META1_PERCENTUAL as meta1_percentual,
                            META2_VALOR as meta2_valor, META2_PERCENTUAL as meta2_percentual,
                            META3_VALOR as meta3_valor, META3_PERCENTUAL as meta3_percentual,
+                           META4_VALOR as meta4_valor, META4_PERCENTUAL as meta4_percentual,
                            METADESAFIO_VALOR as metadesafio_valor, METADESAFIO_PERCENTUAL as metadesafio_percentual,
                            PERCENTUAL_SEM_META as percentual_sem_meta
                     FROM [TI-PAINELCOMISSAO_DISTRIBUIDORES_METAS]
@@ -1048,7 +1049,8 @@ router.get("/vendedor/:nome", async (req: any, res: any) => {
             .input('da', sql.Int, ano)
             .input('dm', sql.Int, parseInt(mes))
             .query(`SELECT BONUS1_VALOR as bonus1_valor, BONUS2_VALOR as bonus2_valor,
-                           BONUS3_VALOR as bonus3_valor, BONUSDESAFIO_VALOR as bonusdesafio_valor
+                           BONUS3_VALOR as bonus3_valor, BONUS4_VALOR as bonus4_valor,
+                           BONUSDESAFIO_VALOR as bonusdesafio_valor
                     FROM [TI-PAINELCOMISSAO_DISTRIBUIDORES_BONUS]
                     WHERE VENDEDOR=@dv AND ANO=@da AND MES=@dm`)
             .catch(() => ({ recordset: [] as Array<Record<string, unknown>> })),
@@ -2001,6 +2003,7 @@ router.get("/distribuidores/config", async (req: any, res: any) => {
                  META1_VALOR as meta1_valor, META1_PERCENTUAL as meta1_percentual,
                  META2_VALOR as meta2_valor, META2_PERCENTUAL as meta2_percentual,
                  META3_VALOR as meta3_valor, META3_PERCENTUAL as meta3_percentual,
+                 META4_VALOR as meta4_valor, META4_PERCENTUAL as meta4_percentual,
                  METADESAFIO_VALOR as metadesafio_valor, METADESAFIO_PERCENTUAL as metadesafio_percentual,
                  PERCENTUAL_SEM_META as percentual_sem_meta
           FROM [TI-PAINELCOMISSAO_DISTRIBUIDORES_METAS]
@@ -2012,7 +2015,8 @@ router.get("/distribuidores/config", async (req: any, res: any) => {
         .query(`
           SELECT VENDEDOR as nome_vendedor,
                  BONUS1_VALOR as bonus1_valor, BONUS2_VALOR as bonus2_valor,
-                 BONUS3_VALOR as bonus3_valor, BONUSDESAFIO_VALOR as bonusdesafio_valor
+                 BONUS3_VALOR as bonus3_valor, BONUS4_VALOR as bonus4_valor,
+                 BONUSDESAFIO_VALOR as bonusdesafio_valor
           FROM [TI-PAINELCOMISSAO_DISTRIBUIDORES_BONUS]
           WHERE ANO = @ano AND MES = @mes
         `),
@@ -2055,6 +2059,7 @@ router.get("/distribuidores/metas", async (req: any, res: any) => {
                META1_VALOR as meta1_valor, META1_PERCENTUAL as meta1_percentual,
                META2_VALOR as meta2_valor, META2_PERCENTUAL as meta2_percentual,
                META3_VALOR as meta3_valor, META3_PERCENTUAL as meta3_percentual,
+               META4_VALOR as meta4_valor, META4_PERCENTUAL as meta4_percentual,
                METADESAFIO_VALOR as metadesafio_valor, METADESAFIO_PERCENTUAL as metadesafio_percentual,
                PERCENTUAL_SEM_META as percentual_sem_meta
         FROM [TI-PAINELCOMISSAO_DISTRIBUIDORES_METAS]
@@ -2082,6 +2087,7 @@ router.put("/distribuidores/metas", async (req: any, res: any) => {
     meta1_valor: number; meta1_percentual: number;
     meta2_valor: number; meta2_percentual: number;
     meta3_valor: number; meta3_percentual: number;
+    meta4_valor: number; meta4_percentual: number;
     metadesafio_valor: number; metadesafio_percentual: number;
     percentual_sem_meta: number;
   }> = req.body;
@@ -2105,6 +2111,8 @@ router.put("/distribuidores/metas", async (req: any, res: any) => {
         .input('m2p', sql.Float, row.meta2_percentual || 0)
         .input('m3v', sql.Float, row.meta3_valor || 0)
         .input('m3p', sql.Float, row.meta3_percentual || 0)
+        .input('m4v', sql.Float, row.meta4_valor || 0)
+        .input('m4p', sql.Float, row.meta4_percentual || 0)
         .input('mdv', sql.Float, row.metadesafio_valor || 0)
         .input('mdp', sql.Float, row.metadesafio_percentual || 0)
         .input('psm', sql.Float, row.percentual_sem_meta || 0)
@@ -2115,12 +2123,13 @@ router.put("/distribuidores/metas", async (req: any, res: any) => {
             META1_VALOR=@m1v, META1_PERCENTUAL=@m1p,
             META2_VALOR=@m2v, META2_PERCENTUAL=@m2p,
             META3_VALOR=@m3v, META3_PERCENTUAL=@m3p,
+            META4_VALOR=@m4v, META4_PERCENTUAL=@m4p,
             METADESAFIO_VALOR=@mdv, METADESAFIO_PERCENTUAL=@mdp,
             PERCENTUAL_SEM_META=@psm
           WHEN NOT MATCHED THEN INSERT
             (VENDEDOR,ANO,MES,META1_VALOR,META1_PERCENTUAL,META2_VALOR,META2_PERCENTUAL,
-             META3_VALOR,META3_PERCENTUAL,METADESAFIO_VALOR,METADESAFIO_PERCENTUAL,PERCENTUAL_SEM_META)
-          VALUES(@vend,@ano,@mes,@m1v,@m1p,@m2v,@m2p,@m3v,@m3p,@mdv,@mdp,@psm);
+             META3_VALOR,META3_PERCENTUAL,META4_VALOR,META4_PERCENTUAL,METADESAFIO_VALOR,METADESAFIO_PERCENTUAL,PERCENTUAL_SEM_META)
+          VALUES(@vend,@ano,@mes,@m1v,@m1p,@m2v,@m2p,@m3v,@m3p,@m4v,@m4p,@mdv,@mdp,@psm);
         `);
     }
     return res.json({ ok: true });
@@ -2152,7 +2161,8 @@ router.get("/distribuidores/bonus", async (req: any, res: any) => {
       .query(`
         SELECT VENDEDOR as nome_vendedor,
                BONUS1_VALOR as bonus1_valor, BONUS2_VALOR as bonus2_valor,
-               BONUS3_VALOR as bonus3_valor, BONUSDESAFIO_VALOR as bonusdesafio_valor
+               BONUS3_VALOR as bonus3_valor, BONUS4_VALOR as bonus4_valor,
+               BONUSDESAFIO_VALOR as bonusdesafio_valor
         FROM [TI-PAINELCOMISSAO_DISTRIBUIDORES_BONUS]
         WHERE ANO = @ano AND MES = @mes
       `);
@@ -2175,7 +2185,7 @@ router.put("/distribuidores/bonus", async (req: any, res: any) => {
 
   const body: Array<{
     nome_vendedor: string; ano: number; mes: number;
-    bonus1_valor: number; bonus2_valor: number; bonus3_valor: number; bonusdesafio_valor: number;
+    bonus1_valor: number; bonus2_valor: number; bonus3_valor: number; bonus4_valor: number; bonusdesafio_valor: number;
   }> = req.body;
   if (!exigirSetor(usuario, res, "DISTRIBUIDORES")) return;
 
@@ -2194,13 +2204,14 @@ router.put("/distribuidores/bonus", async (req: any, res: any) => {
         .input('b1', sql.Float, row.bonus1_valor || 0)
         .input('b2', sql.Float, row.bonus2_valor || 0)
         .input('b3', sql.Float, row.bonus3_valor || 0)
+        .input('b4', sql.Float, row.bonus4_valor || 0)
         .input('bd', sql.Float, row.bonusdesafio_valor || 0)
         .query(`
           MERGE [TI-PAINELCOMISSAO_DISTRIBUIDORES_BONUS] AS t
           USING (SELECT @vend AS V, @ano AS A, @mes AS M) AS s ON t.VENDEDOR=s.V AND t.ANO=s.A AND t.MES=s.M
-          WHEN MATCHED THEN UPDATE SET BONUS1_VALOR=@b1,BONUS2_VALOR=@b2,BONUS3_VALOR=@b3,BONUSDESAFIO_VALOR=@bd
-          WHEN NOT MATCHED THEN INSERT (VENDEDOR,ANO,MES,BONUS1_VALOR,BONUS2_VALOR,BONUS3_VALOR,BONUSDESAFIO_VALOR)
-          VALUES(@vend,@ano,@mes,@b1,@b2,@b3,@bd);
+          WHEN MATCHED THEN UPDATE SET BONUS1_VALOR=@b1,BONUS2_VALOR=@b2,BONUS3_VALOR=@b3,BONUS4_VALOR=@b4,BONUSDESAFIO_VALOR=@bd
+          WHEN NOT MATCHED THEN INSERT (VENDEDOR,ANO,MES,BONUS1_VALOR,BONUS2_VALOR,BONUS3_VALOR,BONUS4_VALOR,BONUSDESAFIO_VALOR)
+          VALUES(@vend,@ano,@mes,@b1,@b2,@b3,@b4,@bd);
         `);
     }
     return res.json({ ok: true });

@@ -122,26 +122,6 @@ export default function ComissaoDashboard() {
       }
       const json = await res.json();
       const valido = json && Array.isArray(json.vendas_por_setor) && Array.isArray(json.top_vendedores);
-      if (valido) {
-        // MOCK TEMPORÁRIO para apresentação ao setor de Distribuidores — REMOVER após a demo
-        const MOCK_VENDA = 250000;
-        json.total_vendas += MOCK_VENDA;
-        json.total_vendas_mes += MOCK_VENDA;
-        json.total_vendedores += 1;
-        const setorDist = json.vendas_por_setor.find((s: { setor: string }) => s.setor === 'DISTRIBUIDORES');
-        if (setorDist) {
-          setorDist.total_vendas += MOCK_VENDA;
-          setorDist.total_registros += 1;
-        } else {
-          json.total_setores += 1;
-          json.vendas_por_setor.push({ setor: 'DISTRIBUIDORES', total_vendas: MOCK_VENDA, total_qtde: 0, total_registros: 1 });
-        }
-        json.top_vendedores.push({
-          vendedor: 'WILLIAN TI', setor: 'DISTRIBUIDORES', empresa: 'MOCK',
-          total_vendas: MOCK_VENDA, total_qtde: 0, total_registros: 1,
-        });
-        json.top_vendedores.sort((a: { total_vendas: number }, b: { total_vendas: number }) => b.total_vendas - a.total_vendas);
-      }
       setData(valido ? json : null);
       if (!valido) setErro('Resposta inválida do servidor.');
     } catch (e) {

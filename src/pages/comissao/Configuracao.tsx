@@ -674,10 +674,7 @@ export default function ComissaoConfiguracao() {
         api(`/distribuidores/metas?ano=${ano}&mes=${mes}`).then(r => r.json()),
         api(`/distribuidores/bonus?ano=${ano}&mes=${mes}`).then(r => r.json()),
       ]);
-      // MOCK TEMPORÁRIO para apresentação ao setor de Distribuidores — REMOVER após a demo
-      const distComMock = [...(vendRes.vendedores || [])];
-      if (!distComMock.includes('WILLIAN TI')) distComMock.push('WILLIAN TI');
-      setDistVendedores(distComMock);
+      setDistVendedores(vendRes.vendedores || []);
       const metasMap: Record<string, DistVendedorMeta> = {};
       if (Array.isArray(metasRes)) metasRes.forEach((m: DistVendedorMeta) => { metasMap[m.nome_vendedor] = m; });
       setDistMetasEdit(metasMap);

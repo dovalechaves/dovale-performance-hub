@@ -116,8 +116,6 @@ export default function ComissaoVendedor() {
       .then((r) => r.json())
       .then((d) => {
         const lista: string[] = d.vendedores || [];
-        // MOCK TEMPORÁRIO para apresentação ao setor de Distribuidores — REMOVER após a demo
-        if (!lista.includes('WILLIAN TI')) lista.push('WILLIAN TI');
         setVendedores(lista);
         setVendedorSel((atual) => {
           if (atual && lista.includes(atual)) return atual;
@@ -153,44 +151,6 @@ export default function ComissaoVendedor() {
 
   useEffect(() => {
     if (!vendedorSel) return;
-
-    // MOCK TEMPORÁRIO para apresentação ao setor de Distribuidores — REMOVER após a demo
-    // Vendas/recebido são fixos (250k/200k); meta e bônus vêm da config real salva em
-    // Configuração → Distribuidores para "WILLIAN TI", se existir.
-    if (vendedorSel === 'WILLIAN TI') {
-      setLoading(true);
-      const params = new URLSearchParams({ ano: ano.toString() });
-      if (mes) params.set('mes', mes.toString());
-      Promise.all([
-        api(`/distribuidores/metas?${params}`).then((r) => r.json()),
-        api(`/distribuidores/bonus?${params}`).then((r) => r.json()),
-      ]).then(([metasRes, bonusRes]) => {
-        const distMeta: (DistMetaConfig & { nome_vendedor: string }) | null = Array.isArray(metasRes)
-          ? metasRes.find((m: DistMetaConfig & { nome_vendedor: string }) => m.nome_vendedor === 'WILLIAN TI') ?? null
-          : null;
-        const distBonus: (DistBonusConfig & { nome_vendedor: string }) | null = Array.isArray(bonusRes)
-          ? bonusRes.find((b: DistBonusConfig & { nome_vendedor: string }) => b.nome_vendedor === 'WILLIAN TI') ?? null
-          : null;
-        setData({
-          resumo: [{ vendedor: 'WILLIAN TI', setor: 'DISTRIBUIDORES', empresa: 'MOCK', total_vendas: 250000 }],
-          mensal: [],
-          porSubgrupo: [],
-          meta_vendedor: null,
-          is_televendas: false,
-          is_ferragens: false,
-          is_distribuidores: true,
-          total_recebido: 200000,
-          comissao_distribuidores: distMeta ? calcularComissaoDistribuidores(250000, 200000, distMeta, distBonus) : null,
-          dist_meta: distMeta,
-          dist_bonus: distBonus,
-        });
-      }).catch((err) => {
-        console.error('[vendedor] mock distribuidores:', err);
-        toast.warning('Não foi possível carregar a meta de Distribuidores para o mock.');
-      }).finally(() => setLoading(false));
-      return;
-    }
-
     setLoading(true);
     const params = new URLSearchParams({ ano: ano.toString() });
     if (mes) params.set('mes', mes.toString());

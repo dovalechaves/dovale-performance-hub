@@ -353,6 +353,8 @@ export default function ComissaoSimulacao() {
         const tvLista: string[] = tv.vendedores || [];
         const feLista: string[] = fe.vendedores || [];
         const diLista: string[] = di.vendedores || [];
+        // MOCK TEMPORÁRIO para apresentação ao setor de Distribuidores — REMOVER após a demo
+        if (!diLista.includes('WILLIAN TI')) diLista.push('WILLIAN TI');
         setVendedores(tvLista);
         setFerrVendedores(feLista);
         setDistVendedores(diLista);
@@ -369,7 +371,12 @@ export default function ComissaoSimulacao() {
         .then((f) => setFerrVendedores(f.vendedores || []));
       api('/filtros?setor=DISTRIBUIDORES', { cache: 'no-store' })
         .then((r) => r.json())
-        .then((f) => setDistVendedores(f.vendedores || []));
+        .then((f) => {
+          // MOCK TEMPORÁRIO para apresentação ao setor de Distribuidores — REMOVER após a demo
+          const diLista: string[] = f.vendedores || [];
+          if (!diLista.includes('WILLIAN TI')) diLista.push('WILLIAN TI');
+          setDistVendedores(diLista);
+        });
     }
   }, [api, usuario]);
 

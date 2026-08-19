@@ -368,6 +368,11 @@ export default function ComissaoGestor() {
       .then((r) => r.json())
       .then((lista: ResumoVendedor[]) => {
         // MOCK TEMPORÁRIO para apresentação ao setor de Distribuidores — REMOVER após a demo
+        const podeMostrarMock = !filtroSetor || filtroSetor === 'DISTRIBUIDORES';
+        if (!podeMostrarMock) {
+          setVendedores(lista);
+          return;
+        }
         const MOCK_APRESENTACAO: ResumoVendedor = {
           vendedor: 'WILLIAN TI',
           setor: 'DISTRIBUIDORES',

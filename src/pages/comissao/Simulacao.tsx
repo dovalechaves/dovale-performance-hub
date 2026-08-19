@@ -403,7 +403,7 @@ export default function ComissaoSimulacao() {
         setDistVendedor(diLista[0] || '');
       });
     } else {
-      api('/filtros', { cache: 'no-store' })
+      api('/filtros?setor=TELEVENDAS,TELEVENDAS MG', { cache: 'no-store' })
         .then((r) => r.json())
         .then((f) => setVendedores(f.vendedores || []));
       api('/filtros?setor=FERRAGENS', { cache: 'no-store' })

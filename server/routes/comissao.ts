@@ -64,10 +64,11 @@ function vendedorCasaComConfig(nomeReal: unknown, nomeConfig: unknown): boolean 
   return new RegExp(`(^|\\s)${escaparRegex(config)}($|\\s)`).test(real);
 }
 
-function filtrarVendedoresPorConfig(nomes: string[], nomeConfig: string | null): string[] {
+function filtrarVendedoresPorConfig(nomes: string[], nomeConfig: string | null, permitirFallback = true): string[] {
   if (!nomeConfig) return [];
   const matches = nomes.filter((nome) => vendedorCasaComConfig(nome, nomeConfig));
-  return matches.length ? matches : [nomeConfig];
+  if (matches.length) return matches;
+  return permitirFallback ? [nomeConfig] : [];
 }
 
 function podeAcessarSetor(usuario: ComissaoUsuario, setor: string): boolean {
@@ -643,7 +644,7 @@ router.get("/filtros", async (req: any, res: any) => {
       });
       const nomes = [...new Set(vendasVend.map((v) => v.USU_NOME).filter(Boolean))].sort();
       return res.json({
-        vendedores: filtrarVendedoresPorConfig(nomes, usuario.nome_vendedor),
+        vendedores: filtrarVendedoresPorConfig(nomes, usuario.nome_vendedor, setoresFiltroVend.length === 0),
         setores: [],
         empresas: [],
       });

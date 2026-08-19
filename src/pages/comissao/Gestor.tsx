@@ -229,6 +229,7 @@ interface DistVendedorBonus {
 
 export default function ComissaoGestor() {
   const usuario = useUser();
+  const isAdm = usuario && usuario !== 'loading' && usuario.cargo === 'ADM';
   const api = useComissaoApi();
   const navigate = useNavigate();
   const [vendedores, setVendedores] = useState<ResumoVendedor[]>([]);
@@ -575,19 +576,27 @@ export default function ComissaoGestor() {
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             {/* Filtros */}
-            <div className="relative">
-              <select
-                value={filtroSetor}
-                onChange={(e) => setFiltroSetor(e.target.value)}
-                className="appearance-none rounded-lg pl-8 pr-8 py-2 text-sm font-medium cursor-pointer"
-                style={{ background: '#ffffff', border: '1px solid #e2e8f0', color: '#00205C' }}
-              >
-                <option value="">Todos os setores</option>
-                {setores.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-              <Filter size={13} className="absolute left-2.5 top-3 pointer-events-none" style={{ color: '#64748b' }} />
-              <ChevronDown size={14} className="absolute right-2 top-3 pointer-events-none" style={{ color: '#64748b' }} />
-            </div>
+            {isAdm ? (
+              <div className="relative">
+                <select
+                  value={filtroSetor}
+                  onChange={(e) => setFiltroSetor(e.target.value)}
+                  className="appearance-none rounded-lg pl-8 pr-8 py-2 text-sm font-medium cursor-pointer"
+                  style={{ background: '#ffffff', border: '1px solid #e2e8f0', color: '#00205C' }}
+                >
+                  <option value="">Todos os setores</option>
+                  {setores.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+                <Filter size={13} className="absolute left-2.5 top-3 pointer-events-none" style={{ color: '#64748b' }} />
+                <ChevronDown size={14} className="absolute right-2 top-3 pointer-events-none" style={{ color: '#64748b' }} />
+              </div>
+            ) : setores.length > 0 && (
+              <div className="flex items-center gap-1.5 rounded-lg pl-3 pr-3 py-2 text-sm font-medium"
+                style={{ background: '#ffffff', border: '1px solid #e2e8f0', color: '#00205C' }}>
+                <Filter size={13} style={{ color: '#64748b' }} />
+                {setores.join(' / ')}
+              </div>
+            )}
 
             <div className="relative">
               <select

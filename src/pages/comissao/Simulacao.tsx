@@ -178,6 +178,45 @@ function calcularVendasOtimoFerragens(
   return null;
 }
 
+// ─── Distribuidores reverse calc ──────────────────────────────────────────────
+// Mesmo modelo do Ferragens (faixa de total vendido → % sobre recebimento + bônus fixo),
+// mas sem bônus de grupo e com 5 faixas (Meta 1-4 + Desafio).
+
+interface DistVendasOtimoResult {
+  vendasNeeded: number;
+  meta: { label: string; valor: number; percentual: number };
+  bonusVal: number;
+  commissionMeta: number;
+  commissionBonus: number;
+  commissionTotal: number;
+}
+
+function calcularVendasOtimoDistribuidores(
+  desired: number,
+  avgRec: number,
+  meta: DistMetaConfig,
+  bonus: DistBonusConfig | null,
+): DistVendasOtimoResult | null {
+  if (desired <= 0 || avgRec < 0) return null;
+
+  const tiers = [
+    { label: 'Meta 1',       valor: meta.meta1_valor,       pct: meta.meta1_percentual,       bonus_val: bonus?.bonus1_valor ?? 0 },
+    { label: 'Meta 2',       valor: meta.meta2_valor,       pct: meta.meta2_percentual,       bonus_val: bonus?.bonus2_valor ?? 0 },
+    { label: 'Meta 3',       valor: meta.meta3_valor,       pct: meta.meta3_percentual,       bonus_val: bonus?.bonus3_valor ?? 0 },
+    { label: 'Meta 4',       valor: meta.meta4_valor,       pct: meta.meta4_percentual,       bonus_val: bonus?.bonus4_valor ?? 0 },
+    { label: 'Meta Desafio', valor: meta.metadesafio_valor, pct: meta.metadesafio_percentual, bonus_val: bonus?.bonusdesafio_valor ?? 0 },
+  ].filter(t => t.valor > 0);
+
+  for (const tier of tiers) {
+    const commMeta = (tier.pct / 100) * avgRec;
+    const total = commMeta + tier.bonus_val;
+    if (total >= desired) {
+      return { vendasNeeded: tier.valor, meta: { label: tier.label, valor: tier.valor, percentual: tier.pct }, bonusVal: tier.bonus_val, commissionMeta: commMeta, commissionBonus: tier.bonus_val, commissionTotal: total };
+    }
+  }
+  return null;
+}
+
 // ─── CurrencyInput ────────────────────────────────────────────────────────────
 
 function maskCurrency(raw: string): string {
@@ -322,6 +361,9 @@ export default function ComissaoSimulacao() {
   const [distRecebimentos, setDistRecebimentos] = useState('');
   const [distResultado, setDistResultado] = useState<ComissaoDistribuidores | null>(null);
   const [distMediaRec, setDistMediaRec] = useState<MediaRec | null>(null);
+  const [distModoReverso, setDistModoReverso] = useState(false);
+  const [distComissaoDesejada, setDistComissaoDesejada] = useState('');
+  const [distReversoCalculado, setDistReversoCalculado] = useState(false);
 
   const [metaConfig, setMetaConfig] = useState<MetaConfig | null>(null);
   const [bonusConfig, setBonusConfig] = useState<BonusConfig | null>(null);
@@ -551,6 +593,20 @@ export default function ComissaoSimulacao() {
         { label: 'Meta Desafio', valor: distMetaConf.metadesafio_valor, pct: distMetaConf.metadesafio_percentual },
       ].filter((m) => m.valor > 0)
     : [];
+
+  const ferrAvgRec = ferrMediaRec?.media ?? 0;
+  const ferrComissaoDesejadaNum = parseFloat(ferrComissaoDesejada.replace(/\./g, '').replace(',', '.')) || 0;
+  const ferrVendasOtimo: FerrVendasOtimoResult | null =
+    ferrReversoCalculado && ferrComissaoDesejadaNum > 0 && ferrMetaConf && ferrAvgRec > 0
+      ? calcularVendasOtimoFerragens(ferrComissaoDesejadaNum, ferrAvgRec, ferrMetaConf, ferrBonusConf, ferrMetaGrupoConf)
+      : null;
+
+  const distAvgRec = distMediaRec?.media ?? 0;
+  const distComissaoDesejadaNum = parseFloat(distComissaoDesejada.replace(/\./g, '').replace(',', '.')) || 0;
+  const distVendasOtimo: DistVendasOtimoResult | null =
+    distReversoCalculado && distComissaoDesejadaNum > 0 && distMetaConf && distAvgRec > 0
+      ? calcularVendasOtimoDistribuidores(distComissaoDesejadaNum, distAvgRec, distMetaConf, distBonusConf)
+      : null;
 
   return (
     <AppShell>
@@ -1051,7 +1107,24 @@ export default function ComissaoSimulacao() {
                   </div>
                 )}
 
+                {/* Modo toggle */}
+                {ferrMetasVisiveis.length > 0 && (
+                  <div className="flex items-center gap-2 rounded-xl p-1 w-fit" style={{ background: '#f1f5f9' }}>
+                    <button onClick={() => setFerrModoReverso(false)}
+                      className="px-4 py-2 rounded-lg text-sm font-semibold transition-all"
+                      style={{ background: !ferrModoReverso ? '#00205C' : 'transparent', color: !ferrModoReverso ? '#FFD700' : '#64748b' }}>
+                      Quanto vou ganhar?
+                    </button>
+                    <button onClick={() => setFerrModoReverso(true)}
+                      className="px-4 py-2 rounded-lg text-sm font-semibold transition-all"
+                      style={{ background: ferrModoReverso ? '#00205C' : 'transparent', color: ferrModoReverso ? '#FFD700' : '#64748b' }}>
+                      Quanto preciso vender?
+                    </button>
+                  </div>
+                )}
+
                 {/* ── SIMULAÇÃO DIRETA ── */}
+                {!ferrModoReverso && (
                 <div className="rounded-xl p-5 space-y-5" style={{ background: '#ffffff', border: '1px solid #e2e8f0' }}>
                     <h3 className="text-sm font-bold" style={{ color: '#00205C' }}>
                       <Calculator size={15} className="inline mr-2" />
@@ -1166,6 +1239,126 @@ export default function ComissaoSimulacao() {
                       </div>
                     )}
                 </div>
+                )}
+
+                {/* ── MODO REVERSO — FERRAGENS ── */}
+                {ferrModoReverso && ferrMetasVisiveis.length > 0 && (
+                  <div className="rounded-xl p-5 space-y-5" style={{ background: '#ffffff', border: '1px solid #e2e8f0' }}>
+                    <div>
+                      <h3 className="text-sm font-bold" style={{ color: '#00205C' }}>
+                        <TrendingUp size={15} className="inline mr-2" />
+                        Quanto preciso vender?
+                      </h3>
+                      <p className="text-xs mt-1" style={{ color: '#64748b' }}>
+                        Informe quanto quer ganhar. Calculamos a menor faixa de total vendido que atinge essa comissão, com base no seu recebimento médio dos últimos 3 meses.
+                      </p>
+                    </div>
+
+                    <div className="flex items-end gap-3">
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#64748b' }}>
+                          Comissão desejada
+                        </label>
+                        <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ border: '1px solid #e2e8f0' }}>
+                          <span className="text-sm" style={{ color: '#94a3b8' }}>R$</span>
+                          <CurrencyInput value={ferrComissaoDesejada} onChange={(v) => { setFerrComissaoDesejada(v); setFerrReversoCalculado(false); }} className="w-48 outline-none text-sm font-medium" />
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setFerrReversoCalculado(true)}
+                        disabled={!ferrComissaoDesejada}
+                        className="flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-bold disabled:opacity-40"
+                        style={{ background: '#00205C', color: '#FFD700' }}>
+                        <Calculator size={15} /> Calcular
+                      </button>
+                    </div>
+
+                    {ferrReversoCalculado && ferrComissaoDesejadaNum > 0 && (
+                      <div className="space-y-4 pt-2 border-t" style={{ borderColor: '#f1f5f9' }}>
+                        {ferrMediaRec && (
+                          <div className="rounded-xl p-4" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                            <div className="flex items-center gap-2 mb-2">
+                              <Clock size={13} style={{ color: '#64748b' }} />
+                              <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#64748b' }}>
+                                Recebimento médio — últimos 3 meses
+                              </span>
+                            </div>
+                            <p className="text-2xl font-bold" style={{ color: '#00205C' }}>{formatBRL(ferrAvgRec)}</p>
+                            <div className="flex gap-5 mt-2">
+                              {ferrMediaRec.meses.map((m) => (
+                                <div key={`${m.ano}-${m.mes}`}>
+                                  <span className="text-xs" style={{ color: '#94a3b8' }}>{m.label}: </span>
+                                  <span className="text-xs font-semibold" style={{ color: '#64748b' }}>{formatBRL(m.total)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {ferrAvgRec <= 0 && (
+                          <div className="rounded-xl p-4 text-sm text-center"
+                            style={{ background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a' }}>
+                            Sem histórico de recebimentos para calcular. Use o modo &quot;Quanto vou ganhar?&quot; e preencha os valores manualmente.
+                          </div>
+                        )}
+
+                        {ferrAvgRec > 0 && (
+                          ferrVendasOtimo ? (
+                            <div className="space-y-3">
+                              <div className="rounded-xl p-6 text-center"
+                                style={{ background: 'linear-gradient(135deg, #00205C 0%, #1a3a6e 100%)' }}>
+                                <p className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: '#64748b' }}>
+                                  Total que você precisa vender
+                                </p>
+                                <p className="text-5xl font-bold" style={{ color: '#FFD700' }}>
+                                  {formatBRL(ferrVendasOtimo.vendasNeeded)}
+                                </p>
+                                <div className="flex items-center justify-center gap-2 mt-3 flex-wrap">
+                                  <span className="text-xs px-3 py-1 rounded-full font-medium"
+                                    style={{ background: '#1a3a6e', color: '#cbd5e1' }}>
+                                    {ferrVendasOtimo.meta.label}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="rounded-xl p-4 space-y-2" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                                <p className="text-xs font-bold uppercase tracking-wide mb-2" style={{ color: '#64748b' }}>
+                                  Como chega nesse valor
+                                </p>
+                                <div className="flex justify-between text-sm py-1.5 border-b" style={{ borderColor: '#e2e8f0' }}>
+                                  <span style={{ color: '#64748b' }}>Recebimento médio (base do cálculo)</span>
+                                  <span className="font-semibold" style={{ color: '#0a1628' }}>{formatBRL(ferrAvgRec)}</span>
+                                </div>
+                                <div className="flex justify-between text-sm py-1.5 border-b" style={{ borderColor: '#e2e8f0' }}>
+                                  <span style={{ color: '#64748b' }}>
+                                    Comissão meta ({ferrVendasOtimo.meta.percentual}% × recebimento)
+                                  </span>
+                                  <span className="font-semibold" style={{ color: '#0a1628' }}>{formatBRL(ferrVendasOtimo.commissionMeta)}</span>
+                                </div>
+                                <div className="flex justify-between text-sm py-1.5 border-b" style={{ borderColor: '#e2e8f0' }}>
+                                  <span style={{ color: '#64748b' }}>Bônus individual ({ferrVendasOtimo.meta.label})</span>
+                                  <span className="font-semibold" style={{ color: '#0a1628' }}>{formatBRL(ferrVendasOtimo.commissionBonus)}</span>
+                                </div>
+                                <div className="flex justify-between text-sm py-2 font-bold">
+                                  <span style={{ color: '#00205C' }}>Total comissão (sem bônus de grupo)</span>
+                                  <span style={{ color: '#00205C', fontSize: 16 }}>{formatBRL(ferrVendasOtimo.commissionTotal)}</span>
+                                </div>
+                              </div>
+                              <p className="text-xs" style={{ color: '#94a3b8' }}>
+                                Não considera o bônus de grupo (depende das vendas do setor inteiro, fora do seu controle individual).
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="rounded-xl p-4 text-sm text-center"
+                              style={{ background: '#fff1f2', color: '#991b1b', border: '1px solid #fecdd3' }}>
+                              Não é possível atingir {formatBRL(ferrComissaoDesejadaNum)} com as metas e bônus configurados.
+                            </div>
+                          )
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -1278,7 +1471,24 @@ export default function ComissaoSimulacao() {
                   </div>
                 )}
 
+                {/* Modo toggle */}
+                {distMetasVisiveis.length > 0 && (
+                  <div className="flex items-center gap-2 rounded-xl p-1 w-fit" style={{ background: '#f1f5f9' }}>
+                    <button onClick={() => setDistModoReverso(false)}
+                      className="px-4 py-2 rounded-lg text-sm font-semibold transition-all"
+                      style={{ background: !distModoReverso ? '#00205C' : 'transparent', color: !distModoReverso ? '#FFD700' : '#64748b' }}>
+                      Quanto vou ganhar?
+                    </button>
+                    <button onClick={() => setDistModoReverso(true)}
+                      className="px-4 py-2 rounded-lg text-sm font-semibold transition-all"
+                      style={{ background: distModoReverso ? '#00205C' : 'transparent', color: distModoReverso ? '#FFD700' : '#64748b' }}>
+                      Quanto preciso vender?
+                    </button>
+                  </div>
+                )}
+
                 {/* ── SIMULAÇÃO DIRETA ── */}
+                {!distModoReverso && (
                 <div className="rounded-xl p-5 space-y-5" style={{ background: '#ffffff', border: '1px solid #e2e8f0' }}>
                     <h3 className="text-sm font-bold" style={{ color: '#00205C' }}>
                       <Calculator size={15} className="inline mr-2" />
@@ -1372,6 +1582,123 @@ export default function ComissaoSimulacao() {
                       </div>
                     )}
                 </div>
+                )}
+
+                {/* ── MODO REVERSO — DISTRIBUIDORES ── */}
+                {distModoReverso && distMetasVisiveis.length > 0 && (
+                  <div className="rounded-xl p-5 space-y-5" style={{ background: '#ffffff', border: '1px solid #e2e8f0' }}>
+                    <div>
+                      <h3 className="text-sm font-bold" style={{ color: '#00205C' }}>
+                        <TrendingUp size={15} className="inline mr-2" />
+                        Quanto preciso vender?
+                      </h3>
+                      <p className="text-xs mt-1" style={{ color: '#64748b' }}>
+                        Informe quanto quer ganhar. Calculamos a menor faixa de total vendido que atinge essa comissão, com base no seu recebimento médio dos últimos 3 meses.
+                      </p>
+                    </div>
+
+                    <div className="flex items-end gap-3">
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#64748b' }}>
+                          Comissão desejada
+                        </label>
+                        <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ border: '1px solid #e2e8f0' }}>
+                          <span className="text-sm" style={{ color: '#94a3b8' }}>R$</span>
+                          <CurrencyInput value={distComissaoDesejada} onChange={(v) => { setDistComissaoDesejada(v); setDistReversoCalculado(false); }} className="w-48 outline-none text-sm font-medium" />
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setDistReversoCalculado(true)}
+                        disabled={!distComissaoDesejada}
+                        className="flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-bold disabled:opacity-40"
+                        style={{ background: '#00205C', color: '#FFD700' }}>
+                        <Calculator size={15} /> Calcular
+                      </button>
+                    </div>
+
+                    {distReversoCalculado && distComissaoDesejadaNum > 0 && (
+                      <div className="space-y-4 pt-2 border-t" style={{ borderColor: '#f1f5f9' }}>
+                        {distMediaRec && (
+                          <div className="rounded-xl p-4" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                            <div className="flex items-center gap-2 mb-2">
+                              <Clock size={13} style={{ color: '#64748b' }} />
+                              <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#64748b' }}>
+                                Recebimento médio — últimos 3 meses
+                              </span>
+                            </div>
+                            <p className="text-2xl font-bold" style={{ color: '#00205C' }}>{formatBRL(distAvgRec)}</p>
+                            <div className="flex gap-5 mt-2">
+                              {distMediaRec.meses.map((m) => (
+                                <div key={`${m.ano}-${m.mes}`}>
+                                  <span className="text-xs" style={{ color: '#94a3b8' }}>{m.label}: </span>
+                                  <span className="text-xs font-semibold" style={{ color: '#64748b' }}>{formatBRL(m.total)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {distAvgRec <= 0 && (
+                          <div className="rounded-xl p-4 text-sm text-center"
+                            style={{ background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a' }}>
+                            Sem histórico de recebimentos para calcular. Use o modo &quot;Quanto vou ganhar?&quot; e preencha os valores manualmente.
+                          </div>
+                        )}
+
+                        {distAvgRec > 0 && (
+                          distVendasOtimo ? (
+                            <div className="space-y-3">
+                              <div className="rounded-xl p-6 text-center"
+                                style={{ background: 'linear-gradient(135deg, #00205C 0%, #1a3a6e 100%)' }}>
+                                <p className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: '#64748b' }}>
+                                  Total que você precisa vender
+                                </p>
+                                <p className="text-5xl font-bold" style={{ color: '#FFD700' }}>
+                                  {formatBRL(distVendasOtimo.vendasNeeded)}
+                                </p>
+                                <div className="flex items-center justify-center gap-2 mt-3 flex-wrap">
+                                  <span className="text-xs px-3 py-1 rounded-full font-medium"
+                                    style={{ background: '#1a3a6e', color: '#cbd5e1' }}>
+                                    {distVendasOtimo.meta.label}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="rounded-xl p-4 space-y-2" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                                <p className="text-xs font-bold uppercase tracking-wide mb-2" style={{ color: '#64748b' }}>
+                                  Como chega nesse valor
+                                </p>
+                                <div className="flex justify-between text-sm py-1.5 border-b" style={{ borderColor: '#e2e8f0' }}>
+                                  <span style={{ color: '#64748b' }}>Recebimento médio (base do cálculo)</span>
+                                  <span className="font-semibold" style={{ color: '#0a1628' }}>{formatBRL(distAvgRec)}</span>
+                                </div>
+                                <div className="flex justify-between text-sm py-1.5 border-b" style={{ borderColor: '#e2e8f0' }}>
+                                  <span style={{ color: '#64748b' }}>
+                                    Comissão meta ({distVendasOtimo.meta.percentual}% × recebimento)
+                                  </span>
+                                  <span className="font-semibold" style={{ color: '#0a1628' }}>{formatBRL(distVendasOtimo.commissionMeta)}</span>
+                                </div>
+                                <div className="flex justify-between text-sm py-1.5 border-b" style={{ borderColor: '#e2e8f0' }}>
+                                  <span style={{ color: '#64748b' }}>Bônus individual ({distVendasOtimo.meta.label})</span>
+                                  <span className="font-semibold" style={{ color: '#0a1628' }}>{formatBRL(distVendasOtimo.commissionBonus)}</span>
+                                </div>
+                                <div className="flex justify-between text-sm py-2 font-bold">
+                                  <span style={{ color: '#00205C' }}>Total comissão</span>
+                                  <span style={{ color: '#00205C', fontSize: 16 }}>{formatBRL(distVendasOtimo.commissionTotal)}</span>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="rounded-xl p-4 text-sm text-center"
+                              style={{ background: '#fff1f2', color: '#991b1b', border: '1px solid #fecdd3' }}>
+                              Não é possível atingir {formatBRL(distComissaoDesejadaNum)} com as metas e bônus configurados.
+                            </div>
+                          )
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </>
             )}
           </div>

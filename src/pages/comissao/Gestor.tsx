@@ -366,7 +366,21 @@ export default function ComissaoGestor() {
 
     api(`/vendedores?${params}`, { cache: 'no-store' })
       .then((r) => r.json())
-      .then(setVendedores)
+      .then((lista: ResumoVendedor[]) => {
+        // MOCK TEMPORÁRIO para apresentação ao setor de Distribuidores — REMOVER após a demo
+        const MOCK_APRESENTACAO: ResumoVendedor = {
+          vendedor: 'WILLIAN TI',
+          setor: 'DISTRIBUIDORES',
+          empresa: 'MOCK',
+          total_vendas: 250000,
+          total_qtde: 0,
+          total_registros: 0,
+          valor_pa: 0,
+          total_recebido: 200000,
+          is_televendas: false,
+        };
+        setVendedores([...lista, MOCK_APRESENTACAO]);
+      })
       .catch((err) => {
         console.error(err);
         toast.warning('A lista de vendedores ainda não atualizou. Tentando novamente em breve.');

@@ -594,6 +594,7 @@ router.get("/dashboard", async (req: any, res: any) => {
       }
     }
 
+    avisarFontesIndisponiveis(res);
     return res.json({
       total_vendas,
       total_vendas_mes,
@@ -643,6 +644,7 @@ router.get("/filtros", async (req: any, res: any) => {
         setores: setoresFiltroVend,
       });
       const nomes = [...new Set(vendasVend.map((v) => v.USU_NOME).filter(Boolean))].sort();
+      avisarFontesIndisponiveis(res);
       return res.json({
         vendedores: filtrarVendedoresPorConfig(nomes, usuario.nome_vendedor, setoresFiltroVend.length === 0),
         setores: [],
@@ -678,6 +680,7 @@ router.get("/filtros", async (req: any, res: any) => {
     const empresas = [...new Set(vendas.map(v => v.EMP).filter(Boolean))].sort();
 
     res.set('Cache-Control', 'private, max-age=60, stale-while-revalidate=120');
+    avisarFontesIndisponiveis(res);
     return res.json({ vendedores, setores, empresas });
   } catch (error) {
     console.error('Erro ao buscar filtros:', error);
@@ -767,6 +770,7 @@ router.get("/vendedores", async (req: any, res: any) => {
       .sort((a, b) => b.total_vendas - a.total_vendas);
 
     res.set('Cache-Control', 'private, max-age=30, stale-while-revalidate=60');
+    avisarFontesIndisponiveis(res);
     return res.json(resultado);
   } catch (error) {
     console.error('Erro ao buscar vendedores:', error);
@@ -1067,6 +1071,7 @@ router.get("/vendedor/:nome", async (req: any, res: any) => {
       }
     }
 
+    avisarFontesIndisponiveis(res);
     return res.json({
       resumo,
       mensal,
@@ -1169,6 +1174,7 @@ router.get("/vendedor/:nome/evolucao", async (req: any, res: any) => {
 
     const evolucao = meses.map(({ ano, mes }) => ({ ano, mes, ...mapa.get(`${ano}-${mes}`)! }));
 
+    avisarFontesIndisponiveis(res);
     return res.json({ evolucao, is_televendas: isTelevendas(setorDoVendedor) });
   } catch (error) {
     console.error('Erro ao buscar evolução do vendedor:', error);
@@ -1793,6 +1799,7 @@ router.get("/vendas-media-setor", async (req: any, res: any) => {
 
     const media = resultados.reduce((s, r) => s + r.total, 0) / resultados.length;
 
+    avisarFontesIndisponiveis(res);
     return res.json({
       media: Math.round(media * 100) / 100,
       meses: resultados,

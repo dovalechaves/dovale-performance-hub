@@ -29,12 +29,15 @@ export interface RecebRow {
   DATABAIXA: Date | null;
 }
 
-// ─── Cache em memória (15 min por ano) ───────────────────────────────────────
+// ─── Cache em memória (2 min por ano) ────────────────────────────────────────
+// Vendas continuam entrando o dia inteiro — um cache longo faz o painel ficar
+// sistematicamente atrás de qualquer conferência feita "na hora" numa fonte externa,
+// parecendo erro sem ser. 2 min equilibra isso sem bater as 8 bases externas a cada clique.
 // Se alguma fonte falhou nessa busca, o resultado fica incompleto — não pode ficar
-// memoizado por 15 min (isso transformaria um blip de rede de alguns segundos em até
-// 15 min de números errados para todo mundo). Nesse caso o cache expira bem mais rápido,
-// pra próxima request tentar de novo em breve em vez de repetir o valor incompleto.
-const TTL = 15 * 60 * 1000;
+// memoizado nem esses 2 min (um blip de rede de alguns segundos não pode custar minutos
+// de números errados para todo mundo). Nesse caso o cache expira ainda mais rápido, pra
+// próxima request tentar de novo em breve em vez de repetir o valor incompleto.
+const TTL = 2 * 60 * 1000;
 const TTL_INCOMPLETO = 20 * 1000;
 const _cv = new Map<number, { rows: VendaRow[]; ts: number; ttl: number }>();
 const _cr = new Map<number, { rows: RecebRow[]; ts: number; ttl: number }>();
@@ -421,9 +424,9 @@ export function fontesIndisponiveis(): { fonte: string; erro: string }[] {
 // aplicado na leitura (getVendas/getRecebimentos), assim uma alteração no vínculo tem
 // efeito imediato sem precisar invalidar/refazer as consultas nos bancos externos.
 
-function getVendasBrutas(ano: number): Promise<VendaRow[]> {
+function getVendasBrutas(ano: number, forcarFresco = false): Promise<VendaRow[]> {
   const hit = _cv.get(ano);
-  if (hit && Date.now() - hit.ts < hit.ttl) return Promise.resolve(hit.rows);
+  if (!forcarFresco && hit && Date.now() - hit.ts < hit.ttl) return Promise.resolve(hit.rows);
 
   const inflight = _inFlightV.get(ano);
   if (inflight) return inflight;
@@ -466,9 +469,9 @@ function getVendasBrutas(ano: number): Promise<VendaRow[]> {
   return promise;
 }
 
-function getRecebimentosBrutos(ano: number): Promise<RecebRow[]> {
+function getRecebimentosBrutos(ano: number, forcarFresco = false): Promise<RecebRow[]> {
   const hit = _cr.get(ano);
-  if (hit && Date.now() - hit.ts < hit.ttl) return Promise.resolve(hit.rows);
+  if (!forcarFresco && hit && Date.now() - hit.ts < hit.ttl) return Promise.resolve(hit.rows);
 
   const inflight = _inFlightR.get(ano);
   if (inflight) return inflight;
@@ -508,8 +511,11 @@ function getRecebimentosBrutos(ano: number): Promise<RecebRow[]> {
   return promise;
 }
 
-export async function getVendas(ano: number): Promise<VendaRow[]> {
-  const [rows, vinculos] = await Promise.all([getVendasBrutas(ano), getVinculosDistribuidoresMap()]);
+// forcarFresco=true ignora o cache em memória e busca direto nas 8 bases externas.
+// Usado na tela individual do vendedor, onde o número precisa refletir a venda que
+// acabou de entrar, não o que foi buscado há até 2 min por outra pessoa.
+export async function getVendas(ano: number, forcarFresco = false): Promise<VendaRow[]> {
+  const [rows, vinculos] = await Promise.all([getVendasBrutas(ano, forcarFresco), getVinculosDistribuidoresMap()]);
   if (Object.keys(vinculos).length === 0) return rows;
   return rows.map(r => {
     const usu = aplicarVinculo(r.USU_NOME, vinculos);
@@ -517,8 +523,8 @@ export async function getVendas(ano: number): Promise<VendaRow[]> {
   });
 }
 
-export async function getRecebimentos(ano: number): Promise<RecebRow[]> {
-  const [rows, vinculos] = await Promise.all([getRecebimentosBrutos(ano), getVinculosDistribuidoresMap()]);
+export async function getRecebimentos(ano: number, forcarFresco = false): Promise<RecebRow[]> {
+  const [rows, vinculos] = await Promise.all([getRecebimentosBrutos(ano, forcarFresco), getVinculosDistribuidoresMap()]);
   if (Object.keys(vinculos).length === 0) return rows;
   return rows.map(r => {
     const rep = aplicarVinculo(r.REP_NOME, vinculos);

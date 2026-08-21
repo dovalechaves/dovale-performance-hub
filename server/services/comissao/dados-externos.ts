@@ -29,11 +29,15 @@ export interface RecebRow {
   DATABAIXA: Date | null;
 }
 
-// ─── Cache em memória (5 min por ano) ────────────────────────────────────────
-
+// ─── Cache em memória (15 min por ano) ───────────────────────────────────────
+// Se alguma fonte falhou nessa busca, o resultado fica incompleto — não pode ficar
+// memoizado por 15 min (isso transformaria um blip de rede de alguns segundos em até
+// 15 min de números errados para todo mundo). Nesse caso o cache expira bem mais rápido,
+// pra próxima request tentar de novo em breve em vez de repetir o valor incompleto.
 const TTL = 15 * 60 * 1000;
-const _cv = new Map<number, { rows: VendaRow[]; ts: number }>();
-const _cr = new Map<number, { rows: RecebRow[]; ts: number }>();
+const TTL_INCOMPLETO = 20 * 1000;
+const _cv = new Map<number, { rows: VendaRow[]; ts: number; ttl: number }>();
+const _cr = new Map<number, { rows: RecebRow[]; ts: number; ttl: number }>();
 // In-flight deduplication: evita múltiplas queries simultâneas para o mesmo ano
 const _inFlightV = new Map<number, Promise<VendaRow[]>>();
 const _inFlightR = new Map<number, Promise<RecebRow[]>>();
@@ -351,6 +355,10 @@ async function queryEPVendas(ano: number): Promise<VendaRow[]> {
 interface Falha { fonte: string; erro: string; ts: number }
 const _falhas = new Map<string, Falha>();
 
+// Instabilidade de rede/VPN de alguns segundos não deveria custar 15 min de dados
+// incompletos — tenta mais uma vez antes de declarar a fonte fora do ar.
+const RETRY_DELAY_MS = 1_000;
+
 async function comBreaker<T>(
   fonte: string,
   host: string,
@@ -366,10 +374,21 @@ async function comBreaker<T>(
     _falhas.delete(chave);
     return rows;
   } catch (err) {
-    if (ehFalhaDeConexao(err)) {
-      _falhas.set(chave, { fonte, erro: (err as Error).message, ts: Date.now() });
+    if (!ehFalhaDeConexao(err)) {
+      throw new Error(`${fonte}: ${(err as Error).message}`);
     }
-    throw new Error(`${fonte}: ${(err as Error).message}`);
+    // Falha de conexão: pode ser um blip passageiro — tenta mais uma vez antes de abrir o breaker.
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+    try {
+      const rows = await fn();
+      _falhas.delete(chave);
+      return rows;
+    } catch (err2) {
+      if (ehFalhaDeConexao(err2)) {
+        _falhas.set(chave, { fonte, erro: (err2 as Error).message, ts: Date.now() });
+      }
+      throw new Error(`${fonte}: ${(err2 as Error).message}`);
+    }
   }
 }
 
@@ -388,7 +407,7 @@ export function fontesIndisponiveis(): { fonte: string; erro: string }[] {
 
 function getVendasBrutas(ano: number): Promise<VendaRow[]> {
   const hit = _cv.get(ano);
-  if (hit && Date.now() - hit.ts < TTL) return Promise.resolve(hit.rows);
+  if (hit && Date.now() - hit.ts < hit.ttl) return Promise.resolve(hit.rows);
 
   const inflight = _inFlightV.get(ano);
   if (inflight) return inflight;
@@ -410,13 +429,17 @@ function getVendasBrutas(ano: number): Promise<VendaRow[]> {
       ]);
 
       const raw: Record<string, unknown>[] = [];
+      let incompleto = false;
       settled.forEach(r => {
         if (r.status === 'fulfilled') raw.push(...r.value);
-        else console.error('[dados-externos] vendas:', (r.reason as Error)?.message ?? r.reason);
+        else {
+          incompleto = true;
+          console.error('[dados-externos] vendas:', (r.reason as Error)?.message ?? r.reason);
+        }
       });
 
       const rows = [...normalizeVendas(raw), ...epRows];
-      _cv.set(ano, { rows, ts: Date.now() });
+      _cv.set(ano, { rows, ts: Date.now(), ttl: incompleto ? TTL_INCOMPLETO : TTL });
       return rows;
     } finally {
       _inFlightV.delete(ano);
@@ -429,7 +452,7 @@ function getVendasBrutas(ano: number): Promise<VendaRow[]> {
 
 function getRecebimentosBrutos(ano: number): Promise<RecebRow[]> {
   const hit = _cr.get(ano);
-  if (hit && Date.now() - hit.ts < TTL) return Promise.resolve(hit.rows);
+  if (hit && Date.now() - hit.ts < hit.ttl) return Promise.resolve(hit.rows);
 
   const inflight = _inFlightR.get(ano);
   if (inflight) return inflight;
@@ -448,13 +471,17 @@ function getRecebimentosBrutos(ano: number): Promise<RecebRow[]> {
       ]);
 
       const raw: Record<string, unknown>[] = [];
+      let incompleto = false;
       settled.forEach(r => {
         if (r.status === 'fulfilled') raw.push(...r.value);
-        else console.error('[dados-externos] recebimentos:', (r.reason as Error)?.message ?? r.reason);
+        else {
+          incompleto = true;
+          console.error('[dados-externos] recebimentos:', (r.reason as Error)?.message ?? r.reason);
+        }
       });
 
       const rows = normalizeReceb(raw);
-      _cr.set(ano, { rows, ts: Date.now() });
+      _cr.set(ano, { rows, ts: Date.now(), ttl: incompleto ? TTL_INCOMPLETO : TTL });
       return rows;
     } finally {
       _inFlightR.delete(ano);

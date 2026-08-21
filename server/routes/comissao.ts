@@ -809,11 +809,9 @@ router.get("/vendedor/:nome", async (req: any, res: any) => {
     : `${ano}-12-31`;
 
   try {
-    // Tela individual do vendedor: busca sempre fresca (sem cache) — é aqui que ele
-    // confere se o número bate, então não pode mostrar um valor de até 2 min atrás.
     const [todasVendas, todosReceb] = await Promise.all([
-      getVendas(ano, true),
-      getRecebimentos(ano, true),
+      getVendas(ano),
+      getRecebimentos(ano),
     ]);
 
     // Filtro base: só esse vendedor, aplicando SETORES_ATIVOS

@@ -302,6 +302,19 @@ export async function getVendedoresNomesRaw(): Promise<string[]> {
 
 // ─── EP (SQL Server principal) ───────────────────────────────────────────────
 
+// A EP não tem uma coluna de setor — o setor é inferido pelo prefixo do nome do vendedor
+// (mesmo critério do WHERE da query abaixo). Antes isso vinha fixo como 'DISTRIBUIDORES'
+// para toda a EP, o que classificaria errado um eventual vendedor FERRAGENS/TELEVENDAS.
+function rvsFromVendedorEP(vendedor: string | null): string | null {
+  if (!vendedor) return null;
+  const upper = vendedor.toUpperCase();
+  if (upper.startsWith('TELEVENDAS MG')) return 'TELEVENDAS MG';
+  if (upper.startsWith('TELEVENDAS')) return 'TELEVENDAS';
+  if (upper.startsWith('FERRAGENS')) return 'FERRAGENS';
+  if (upper.startsWith('DISTRIBUIDOR')) return 'DISTRIBUIDORES';
+  return null;
+}
+
 async function queryEPVendas(ano: number): Promise<VendaRow[]> {
   try {
     const pool = await getPool();
@@ -329,18 +342,21 @@ async function queryEPVendas(ano: number): Promise<VendaRow[]> {
         GROUP BY e.VENDEDOR, p.GRUPO, p.SUBGRUPO, p.FAMILIA, e.[DATA]
       `);
 
-    return result.recordset.map((r: Record<string, unknown>) => ({
-      EMP: 'EP',
-      PDV_DATA: toDate(r.pdv_data) ?? new Date(0),
-      ETA_DESCRICAO: null,
-      USU_NOME: str(r.usu_nome)?.toUpperCase() ?? null,
-      GRUPO: str(r.grupo),
-      SUBGRUPO: str(r.subgrupo),
-      FAMILIA: str(r.familia),
-      QTDE: Number(r.qtde ?? 0),
-      RVS_NOME: 'DISTRIBUIDORES',
-      SUM: Number(r.total ?? 0),
-    }));
+    return result.recordset.map((r: Record<string, unknown>) => {
+      const usuNome = str(r.usu_nome)?.toUpperCase() ?? null;
+      return {
+        EMP: 'EP',
+        PDV_DATA: toDate(r.pdv_data) ?? new Date(0),
+        ETA_DESCRICAO: null,
+        USU_NOME: usuNome,
+        GRUPO: str(r.grupo),
+        SUBGRUPO: str(r.subgrupo),
+        FAMILIA: str(r.familia),
+        QTDE: Number(r.qtde ?? 0),
+        RVS_NOME: rvsFromVendedorEP(usuNome),
+        SUM: Number(r.total ?? 0),
+      };
+    });
   } catch (err) {
     console.error('[dados-externos] EP vendas:', (err as Error)?.message ?? err);
     return [];

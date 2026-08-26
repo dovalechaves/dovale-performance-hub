@@ -25,6 +25,7 @@ export const LOJAS = [
   { value: "l3", label: "Rio de Janeiro" },
   { value: "campinas", label: "Campinas" },
   { value: "riopreto", label: "Rio Preto" },
+  { value: "fortaleza", label: "Fortaleza" },
 ];
 
 async function handleResponse<T>(res: Response): Promise<T> {

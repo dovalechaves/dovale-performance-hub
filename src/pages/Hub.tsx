@@ -232,7 +232,7 @@ function RepSelectorCell({
         scVendCache[lojaKey] = list;
         setOptions(list);
       })
-      .catch(() => {})
+      .catch((err) => console.error("[RepSelectorCell] falha ao buscar vendedores:", err))
       .finally(() => setLoading(false));
   }, [lojaKey]);
 

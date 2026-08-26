@@ -32,7 +32,7 @@ const LOJA_TO_META: Record<string, string> = {
   l3: "l3",       rj: "l3",
   l2: "l2",       santana: "l2",
   bh: "bh",
-  campinas: "l1",
+  campinas: "campinas",
   riopreto: "riopreto",
   fortaleza: "fortaleza",
 };

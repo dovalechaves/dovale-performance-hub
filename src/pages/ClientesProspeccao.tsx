@@ -36,6 +36,7 @@ interface ClienteRow {
   razao: string;
   cidade: string;
   uf: string;
+  bairro: string;
   telefone: string;
   email: string;
   naBase: boolean; // se o cliente já existe na base interna (comCadastro)
@@ -84,6 +85,7 @@ function toRow(r: CadastroRegistro, naBase: boolean): ClienteRow {
     razao: (r.razao ?? "").trim(),
     cidade: (r.cidade ?? "").trim(),
     uf: (r.uf ?? "").trim().toUpperCase(),
+    bairro: (r.bairro ?? "").trim(),
     telefone: (r.telefone ?? "").trim(),
     email: (r.email ?? "").trim(),
     naBase,
@@ -115,6 +117,7 @@ export default function ClientesProspeccao() {
   const [selCnaes, setSelCnaes] = useState<string[]>(initialCnaes);
   const [selUfs, setSelUfs] = useState<string[]>(initialUfs);
   const [selCidades, setSelCidades] = useState<string[]>([]);
+  const [selBairros, setSelBairros] = useState<string[]>([]);
   const [selLojas, setSelLojas] = useState<string[]>([]);
   const [baseFiltro, setBaseFiltro] = useState<BaseFiltro>("ambos");
   const [search, setSearch] = useState("");
@@ -197,6 +200,21 @@ export default function ClientesProspeccao() {
       .map(([cidade, uf]) => ({ value: cidade, label: cidade, hint: uf }));
   }, [clientes, selUfs]);
 
+  // Opções de bairro — respeitam estado e cidade selecionados (se houver) para a
+  // lista ficar gerenciável. A cidade vai como hint para desambiguar bairros homônimos.
+  const bairroOptions: MultiOption[] = useMemo(() => {
+    const map = new Map<string, string>();
+    clientes.forEach((c) => {
+      if (!c.bairro) return;
+      if (selUfs.length && !selUfs.includes(c.uf)) return;
+      if (selCidades.length && !selCidades.includes(c.cidade)) return;
+      if (!map.has(c.bairro)) map.set(c.bairro, c.cidade);
+    });
+    return [...map.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0], "pt-BR"))
+      .map(([bairro, cidade]) => ({ value: bairro, label: bairro, hint: cidade }));
+  }, [clientes, selUfs, selCidades]);
+
   // Opções de loja (todas as lojas presentes nos cadastros dos clientes).
   const lojaOptions: MultiOption[] = useMemo(() => {
     const set = new Set<string>();
@@ -221,16 +239,18 @@ export default function ClientesProspeccao() {
     return clientes.filter((c) => {
       if (selUfs.length && !selUfs.includes(c.uf)) return false;
       if (selCidades.length && !selCidades.includes(c.cidade)) return false;
+      if (selBairros.length && !selBairros.includes(c.bairro)) return false;
       if (!q) return true;
       return (
         c.razao.toLocaleLowerCase("pt-BR").includes(q) ||
         c.cnpj.toLowerCase().includes(q) ||
         c.cidade.toLocaleLowerCase("pt-BR").includes(q) ||
+        c.bairro.toLocaleLowerCase("pt-BR").includes(q) ||
         c.telefone.includes(q) ||
         c.email.toLowerCase().includes(q)
       );
     });
-  }, [clientes, selUfs, selCidades, search]);
+  }, [clientes, selUfs, selCidades, selBairros, search]);
 
   // Lista da tabela: o escopo com o toggle na/fora aplicado (relativo à loja).
   const filtered = useMemo(() => {
@@ -257,7 +277,7 @@ export default function ClientesProspeccao() {
   }, [filtered, sortKey, sortDir]);
 
   // Reseta paginação quando o conjunto muda.
-  useEffect(() => setPage(1), [selCnaes, selUfs, selCidades, selLojas, baseFiltro, search, pageSize]);
+  useEffect(() => setPage(1), [selCnaes, selUfs, selCidades, selBairros, selLojas, baseFiltro, search, pageSize]);
 
   const total = sorted.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -278,11 +298,11 @@ export default function ClientesProspeccao() {
   const pctAtiva = naBaseCount > 0 ? Math.round((ativosCount / naBaseCount) * 100) : 0;
 
   const exportXlsx = () => {
-    const headers = ["Razão social", "CNPJ", "Cidade", "UF", "Telefone", "Email", "Na base", "Situação", "Encontrado por", "Lojas com cadastro", "Última compra", "Valor última compra", "Segmento (CNAE)"];
+    const headers = ["Razão social", "CNPJ", "Cidade", "UF", "Bairro", "Telefone", "Email", "Na base", "Situação", "Encontrado por", "Lojas com cadastro", "Última compra", "Valor última compra", "Segmento (CNAE)"];
     const rows = sorted.map((c) => {
       const naBase = naBaseDe(c); // relativo à(s) loja(s) selecionada(s), igual à tabela
       return [
-      c.razao, c.cnpj, c.cidade, c.uf, c.telefone, c.email, naBase ? "Sim" : "Não",
+      c.razao, c.cnpj, c.cidade, c.uf, c.bairro, c.telefone, c.email, naBase ? "Sim" : "Não",
       naBase ? c.situacao : "", c.forma ? FORMA_META[c.forma].label : "",
       c.lojas.join(", "),
       c.dataUltimaCompra ? formatData(c.dataUltimaCompra) : "",
@@ -291,7 +311,7 @@ export default function ClientesProspeccao() {
       ];
     });
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-    ws["!cols"] = [{ wch: 42 }, { wch: 20 }, { wch: 22 }, { wch: 5 }, { wch: 18 }, { wch: 32 }, { wch: 8 }, { wch: 12 }, { wch: 14 }, { wch: 18 }, { wch: 14 }, { wch: 18 }, { wch: 30 }];
+    ws["!cols"] = [{ wch: 42 }, { wch: 20 }, { wch: 22 }, { wch: 5 }, { wch: 24 }, { wch: 18 }, { wch: 32 }, { wch: 8 }, { wch: 12 }, { wch: 14 }, { wch: 18 }, { wch: 14 }, { wch: 18 }, { wch: 30 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Clientes");
     XLSX.writeFile(wb, `clientes_prospeccao_${total}.xlsx`);
@@ -384,6 +404,20 @@ export default function ClientesProspeccao() {
                 disabled={!cidadeOptions.length}
               />
               <div className="flex items-center gap-2 shrink-0">
+                <MapPinned className="w-4 h-4 text-primary" />
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Bairro</span>
+              </div>
+              <MultiSelect
+                className="w-[200px]"
+                options={bairroOptions}
+                values={selBairros}
+                onChange={setSelBairros}
+                placeholder="Todos os bairros"
+                manyLabel="bairros"
+                searchPlaceholder="Buscar bairro…"
+                disabled={!bairroOptions.length}
+              />
+              <div className="flex items-center gap-2 shrink-0">
                 <Store className="w-4 h-4 text-primary" />
                 <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Loja</span>
               </div>
@@ -447,7 +481,7 @@ export default function ClientesProspeccao() {
                   <input
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Buscar por razão, CNPJ, cidade, telefone ou email…"
+                    placeholder="Buscar por razão, CNPJ, cidade, bairro, telefone ou email…"
                     className="w-full h-9 pl-9 pr-3 rounded-lg bg-secondary/60 border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
                   />
                 </div>
@@ -498,6 +532,7 @@ export default function ClientesProspeccao() {
                         { key: "razao" as const, label: "Razão social", sortable: true },
                         { key: null, label: "CNPJ", sortable: false },
                         { key: "cidade" as const, label: "Cidade / UF", sortable: true },
+                        { key: null, label: "Bairro", sortable: false },
                         { key: null, label: "Telefone", sortable: false },
                         { key: null, label: "Email", sortable: false },
                         { key: "naBase" as const, label: "Na base", sortable: true },
@@ -520,7 +555,7 @@ export default function ClientesProspeccao() {
                   <tbody>
                     {!total && (
                       <tr>
-                        <td colSpan={11} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                        <td colSpan={12} className="px-4 py-10 text-center text-sm text-muted-foreground">
                           Nenhum cliente para o filtro atual.
                         </td>
                       </tr>
@@ -539,6 +574,7 @@ export default function ClientesProspeccao() {
                           <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">
                             {c.cidade || DASH}{c.uf ? <span className="text-muted-foreground/60"> / {c.uf}</span> : null}
                           </td>
+                          <td className="px-3 py-2.5 text-muted-foreground max-w-[180px] truncate" title={c.bairro}>{c.bairro || DASH}</td>
                           <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">
                             {c.telefone ? (
                               <a href={`tel:${c.telefone}`} className="hover:text-primary">{formatTelefone(c.telefone)}</a>

@@ -21,6 +21,7 @@ export interface CadastroRegistro {
   razao: string | null;
   cidade: string | null;
   uf: string | null;
+  bairro: string | null;
   telefone: string | null;
   email: string | null;
   temCadastro: boolean;

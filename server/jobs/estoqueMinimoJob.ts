@@ -25,6 +25,11 @@ const DESTINATARIOS_WHATSAPP = (process.env.ESTOQUE_MINIMO_DESTINATARIOS || [
   "551232121033",
 ].join(",")).split(",").map((n) => n.trim()).filter(Boolean);
 
+// Filtros customizados por telefone — se não constar, recebe todos os produtos
+const FILTROS_POR_TELEFONE: Record<string, (p: ProdutoAbaixoMinimo) => boolean> = {
+  "551232121033": (p) => p.proNivel1 === 1 && p.proNivel2 !== 1,
+};
+
 export interface ProdutoAbaixoMinimo {
   codigo: string;
   descricao: string;
@@ -32,6 +37,8 @@ export interface ProdutoAbaixoMinimo {
   estoqueAtual: number;
   estoqueMinimo: number;
   diferenca: number;
+  proNivel1: number;
+  proNivel2: number;
 }
 
 export async function buscarProdutosAbaixoMinimo(): Promise<ProdutoAbaixoMinimo[]> {
@@ -39,6 +46,7 @@ export async function buscarProdutosAbaixoMinimo(): Promise<ProdutoAbaixoMinimo[
     SELECT * FROM (
       SELECT p.pro_codigo, p.pro_resumo,
              a.nome AS grupo,
+             p.pro_nivel1, p.pro_nivel2,
              p.pro_estoqueminimo AS estoque_minimo,
              (SELECT disponivel FROM CONSULTA_ESTOQUE(p.pro_codigo, ${FILIAL_ID}, 1, 0, CAST('NOW' AS DATE))) AS saldo
       FROM produtos p
@@ -62,6 +70,8 @@ export async function buscarProdutosAbaixoMinimo(): Promise<ProdutoAbaixoMinimo[
       estoqueAtual,
       estoqueMinimo,
       diferenca: estoqueMinimo - estoqueAtual,
+      proNivel1: Number(row.PRO_NIVEL1) || 0,
+      proNivel2: Number(row.PRO_NIVEL2) || 0,
     };
   });
 }
@@ -295,9 +305,18 @@ async function enviarWhatsappParaTelefone(telefone: string, mensagem: string): P
   }
 }
 
-async function enviarMensagemWhatsapp(mensagem: string): Promise<boolean> {
+async function enviarMensagemWhatsapp(produtos: ProdutoAbaixoMinimo[]): Promise<boolean> {
   const resultados = await Promise.all(
-    DESTINATARIOS_WHATSAPP.map((telefone) => enviarWhatsappParaTelefone(telefone, mensagem))
+    DESTINATARIOS_WHATSAPP.map(async (telefone) => {
+      const filtro = FILTROS_POR_TELEFONE[telefone];
+      const produtosFiltrados = filtro ? produtos.filter(filtro) : produtos;
+      if (produtosFiltrados.length === 0) {
+        console.log(`[estoque-minimo] Nenhum produto para ${telefone} após filtro.`);
+        return false;
+      }
+      const mensagem = formatarMensagemWhatsapp(produtosFiltrados);
+      return enviarWhatsappParaTelefone(telefone, mensagem);
+    })
   );
   return resultados.some(Boolean);
 }
@@ -311,8 +330,7 @@ async function notificarNovosAbaixoDoMinimo(produtosAtuais: ProdutoAbaixoMinimo[
   const recuperados = [...jaNotificados].filter((codigo) => !codigosAtuais.has(codigo));
 
   if (novos.length > 0) {
-    const mensagem = formatarMensagemWhatsapp(novos);
-    const enviado = await enviarMensagemWhatsapp(mensagem);
+    const enviado = await enviarMensagemWhatsapp(novos);
     if (enviado) {
       await registrarNotificados(novos.map((p) => p.codigo));
       console.log(`[estoque-minimo] ${novos.length} produto(s) novo(s) notificado(s) no WhatsApp.`);
@@ -371,9 +389,10 @@ export async function enviarNotificacaoTeste(): Promise<boolean> {
     estoqueAtual: 5,
     estoqueMinimo: 100,
     diferenca: 95,
+    proNivel1: 1,
+    proNivel2: 0,
   };
-  const mensagem = formatarMensagemWhatsapp([produtoTeste]);
-  return enviarMensagemWhatsapp(mensagem);
+  return enviarMensagemWhatsapp([produtoTeste]);
 }
 
 export async function startEstoqueMinimoJob() {

@@ -55,7 +55,12 @@ const fbConfig: Firebird.Options = {
 const CHATWOOT_BASE = process.env.PROD_FIRST_MOV_CHATWOOT_URL || process.env.CW_TI_BASE || "http://192.168.10.181:3000";
 const CHATWOOT_TOKEN = process.env.PROD_FIRST_MOV_CHATWOOT_TOKEN || process.env.CW_TI_TOKEN || "o4Y7pWQePkSsSw5uKczFRqZ9";
 const CHATWOOT_ACCOUNT_ID = Number(process.env.PROD_FIRST_MOV_CHATWOOT_ACCOUNT_ID || process.env.CW_TI_ACCOUNT || 1);
-const CHATWOOT_CONVERSATION_ID = Number(process.env.PROD_FIRST_MOV_CHATWOOT_CONVERSATION_ID || 106);
+const CHATWOOT_CONVERSATION_IDS = (process.env.PROD_FIRST_MOV_CHATWOOT_CONVERSATION_ID || "")
+  .split(",")
+  .map((id) => id.trim())
+  .filter(Boolean)
+  .map(Number)
+  .filter((id) => Number.isFinite(id));
 const PRODUCT_MIN_DATE = process.env.PROD_FIRST_MOV_PRODUCT_MIN_DATE || "2025-01-01";
 const MOVEMENT_MIN_DATE = process.env.PROD_FIRST_MOV_MOVEMENT_MIN_DATE || "2026-04-02";
 
@@ -221,19 +226,30 @@ function formatChatwootMessage(products: ProductFirstMovementItem[], month: numb
 }
 
 async function sendChatwootMessage(message: string): Promise<boolean> {
-  const response = await fetch(`${CHATWOOT_BASE}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/conversations/${CHATWOOT_CONVERSATION_ID}/messages`, {
-    method: "POST",
-    headers: {
-      api_access_token: CHATWOOT_TOKEN,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      content: message,
-      message_type: "outgoing",
-      private: false,
-    }),
-  });
-  return response.ok;
+  if (CHATWOOT_CONVERSATION_IDS.length === 0) {
+    console.warn("[product-first-movement] Nenhum PROD_FIRST_MOV_CHATWOOT_CONVERSATION_ID configurado; notificação não enviada.");
+    return false;
+  }
+
+  const results = await Promise.all(
+    CHATWOOT_CONVERSATION_IDS.map(async (conversationId) => {
+      const response = await fetch(`${CHATWOOT_BASE}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`, {
+        method: "POST",
+        headers: {
+          api_access_token: CHATWOOT_TOKEN,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          content: message,
+          message_type: "outgoing",
+          private: false,
+        }),
+      });
+      return response.ok;
+    })
+  );
+
+  return results.every(Boolean);
 }
 
 async function ensureStatusTable(): Promise<void> {

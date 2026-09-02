@@ -1,0 +1,48 @@
+# Compose de HOMOLOGAÇÃO (HML).
+# Espelho do docker-compose.yml, com domínios próprios e o frontend "buildado"
+# apontando para o backend de HML. Use este arquivo no recurso de homologação
+# do Coolify (branch: homologacao).
+#
+# O arquivo .env deste ambiente é gerenciado pelo Coolify (separado do de prod):
+#   - NÃO defina ENABLE_JOBS (crons ficam desligados)
+#   - integrações WhatsApp/AD/Multi-Preço em modo teste
+#   - ver docker-compose / plano de homologação para detalhes
+
+services:
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file: .env
+    restart: unless-stopped
+    volumes:
+      - uploads:/app/uploads
+      - uploads_media:/app/uploads_media
+    labels:
+      - caddy_0=backend-hml.dovale.online
+      - caddy_0.encode=zstd gzip
+      - caddy_0.reverse_proxy={{upstreams 3001}}
+      - caddy_0.header=-Server
+      - caddy_ingress_network=r101pwz0f1vqyh2yjh64h86o
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        VITE_API_URL: https://backend-hml.dovale.online/api
+        VITE_APP_ENV: homologacao
+    restart: unless-stopped
+    labels:
+      - caddy_0=http://hub-hml.dovale.online
+      - caddy_0.encode=zstd gzip
+      - caddy_0.handle_path=/*
+      - caddy_0.handle_path.0_reverse_proxy={{upstreams 80}}
+      - caddy_0.header=-Server
+      - caddy_0.try_files={path} /index.html /index.php
+      - caddy_ingress_network=r101pwz0f1vqyh2yjh64h86o
+
+volumes:
+  uploads:
+  uploads_media:

@@ -35,6 +35,7 @@ import ClientesProspeccao from "./pages/ClientesProspeccao.tsx";
 import EstoqueMinimo from "./pages/EstoqueMinimo.tsx";
 import NotasFiscaisAmazon from "./pages/NotasFiscaisAmazon.tsx";
 import React from "react";
+import Prospeccao from "./pages/Prospecção.tsx";
 
 const queryClient = new QueryClient();
 
@@ -232,6 +233,7 @@ const App = () => (
       <TooltipProvider>
         <Toaster />
         <Sonner />
+        <EnvBanner />
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />

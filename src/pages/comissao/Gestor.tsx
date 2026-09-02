@@ -181,6 +181,7 @@ interface ResumoVendedor {
   valor_pa: number;
   total_recebido: number;
   is_televendas: boolean;
+  recorrencia_meta1_ativa?: boolean;
 }
 
 interface MetaVendedor {
@@ -422,7 +423,7 @@ export default function ComissaoGestor() {
       meta3_valor: Number(m.meta3_valor), meta3_percentual: Number(m.meta3_percentual),
       percentual_sem_meta: Number(m.percentual_sem_meta ?? 0),
     };
-    return calcularComissaoTelevendas(v.valor_pa, v.total_recebido, metaConfig, bonusConfig);
+    return calcularComissaoTelevendas(v.valor_pa, v.total_recebido, metaConfig, bonusConfig, v.recorrencia_meta1_ativa ?? false);
   };
 
   // Lógica Ferragens: comissão baseada em total_vendas e total_recebido
@@ -907,6 +908,9 @@ export default function ComissaoGestor() {
                         </td>
                         <td className="px-4 py-3 text-center font-semibold" style={{ color: '#16a34a' }}>
                           {formatBRL(comissaoDisplay)}
+                          {ctv?.bonus_recorrencia_ativo && (
+                            <p className="text-xs font-normal mt-0.5" style={{ color: '#065f46' }}>+10% recorrência</p>
+                          )}
                         </td>
                         <td className="px-4 py-3" style={{ minWidth: 120 }}>
                           {metaRef > 0 ? (

@@ -6,7 +6,10 @@ import { formatBRL, formatNumber, MESES } from './_shared/format';
 import { DollarSign, TrendingUp, ChevronDown, Search, User } from 'lucide-react';
 import { useComissaoUser as useUser, useComissaoApi } from './_shared/hooks';
 import { toast } from 'sonner';
-import { calcularComissaoTelevendas, type MetaConfig, type BonusConfig } from './_shared/commission';
+import {
+  calcularComissaoTelevendas, RECORRENCIA_MESES_CONSECUTIVOS, RECORRENCIA_PERCENTUAL,
+  type MetaConfig, type BonusConfig,
+} from './_shared/commission';
 import { calcularComissaoFerragens, type FerrMetaConfig, type FerrBonusConfig, type FerrMetaGrupoConfig, type ComissaoFerragens } from './_shared/commission-ferragens';
 import { calcularComissaoDistribuidores, type DistMetaConfig, type DistBonusConfig, type ComissaoDistribuidores } from './_shared/commission-distribuidores';
 
@@ -32,13 +35,17 @@ interface VendedorData {
   valor_mercadoria?: number;
   total_recebido?: number;
   bonus_config?: BonusConfig | null;
+  recorrencia_meta1_ativa?: boolean;
+  recorrencia_meta1_meses_anteriores_ativo?: boolean;
   comissao_televendas?: {
     valor_pa: number; total_recebido: number;
     meta_atingida: { label: string; valor: number; percentual: number } | null;
     comissao_meta: number; percentual_sem_meta: number;
     bonus_desbloqueado: boolean;
     bonus_tier: { label: string; valor: number; percentual: number } | null;
-    comissao_bonus: number; comissao_total: number;
+    comissao_bonus: number;
+    bonus_recorrencia_ativo: boolean; comissao_recorrencia: number;
+    comissao_total: number;
   } | null;
   comissao_ferragens?: ComissaoFerragens | null;
   ferr_meta?: FerrMetaConfig | null;
@@ -222,8 +229,9 @@ export default function ComissaoVendedor() {
   } : null;
 
   // Comissão Televendas
+  const recorrenciaMeta1Ativa = data?.recorrencia_meta1_ativa ?? false;
   const ctv = isTelevendas && mes
-    ? calcularComissaoTelevendas(valorPAAtual, recebidoAtual, metaConfigObj, bonusConfigData)
+    ? calcularComissaoTelevendas(valorPAAtual, recebidoAtual, metaConfigObj, bonusConfigData, recorrenciaMeta1Ativa)
     : null;
 
   // Ferragens — faixas de meta (4 níveis: M1, M2, M3, Desafio)
@@ -283,8 +291,14 @@ export default function ComissaoVendedor() {
   const projecaoVendas = temProjecao && !isTelevendas ? (totalVendas / diasUteisDecorridos) * diasUteisNoMes : 0;
   const projecaoPA = temProjecao && isTelevendas ? (valorPAAtual / diasUteisDecorridos) * diasUteisNoMes : 0;
   const projecaoRecebidos = temProjecao && isTelevendas ? (recebidoAtual / diasUteisDecorridos) * diasUteisNoMes : 0;
+  // Projeção da recorrência: se os meses anteriores já garantiram a sequência,
+  // basta o ritmo projetado deste mês também bater a Meta PA 1 (ou superior).
+  const recorrenciaMeta1MesesAnteriores = data?.recorrencia_meta1_meses_anteriores_ativo ?? false;
+  const recorrenciaProjetadaAtiva = recorrenciaMeta1MesesAnteriores
+    && !!metaConfigObj && metaConfigObj.meta1_valor > 0
+    && projecaoPA >= metaConfigObj.meta1_valor;
   const ctvProjecao = isTelevendas && projecaoPA > 0
-    ? calcularComissaoTelevendas(projecaoPA, projecaoRecebidos, metaConfigObj, bonusConfigData)
+    ? calcularComissaoTelevendas(projecaoPA, projecaoRecebidos, metaConfigObj, bonusConfigData, recorrenciaProjetadaAtiva)
     : null;
   const projecaoExibida = isTelevendas ? projecaoPA : projecaoVendas;
   const faixaProjetada = temProjecao
@@ -554,6 +568,36 @@ export default function ComissaoVendedor() {
                 </div>
               </div>
 
+              {/* Recorrência Meta 1 (3+ meses seguidos) */}
+              <div className="rounded-lg p-3 mb-3" style={{
+                background: ctv.bonus_recorrencia_ativo ? '#f0fdf4' : '#f8fafc',
+                border: `1px solid ${ctv.bonus_recorrencia_ativo ? '#bbf7d0' : '#e2e8f0'}`
+              }}>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs font-semibold" style={{ color: ctv.bonus_recorrencia_ativo ? '#065f46' : '#94a3b8' }}>
+                    {ctv.bonus_recorrencia_ativo
+                      ? `Meta batida pelo ${RECORRENCIA_MESES_CONSECUTIVOS}º mês seguido ✓`
+                      : 'Recorrência de meta não ativa'}
+                  </span>
+                  {ctv.bonus_recorrencia_ativo && (
+                    <span className="text-xs font-bold" style={{ color: '#065f46' }}>
+                      +{RECORRENCIA_PERCENTUAL}% × (meta + bônus)
+                    </span>
+                  )}
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span style={{ color: '#64748b' }}>Comissão recorrência</span>
+                  <span className="font-bold" style={{ color: ctv.comissao_recorrencia > 0 ? '#16a34a' : '#94a3b8' }}>
+                    {formatBRL(ctv.comissao_recorrencia)}
+                  </span>
+                </div>
+                {!ctv.bonus_recorrencia_ativo && (
+                  <p className="text-xs mt-1" style={{ color: '#94a3b8' }}>
+                    Bata a meta por {RECORRENCIA_MESES_CONSECUTIVOS} meses seguidos para ativar
+                  </p>
+                )}
+              </div>
+
               {/* Total */}
               <div className="rounded-lg p-4 text-center"
                 style={{ background: '#00205C', border: '1px solid #1a3a6e' }}>
@@ -562,7 +606,7 @@ export default function ComissaoVendedor() {
                   {formatBRL(ctv.comissao_total)}
                 </p>
                 <p className="text-xs mt-1" style={{ color: '#64748b' }}>
-                  Meta + Bônus
+                  Meta + Bônus{ctv.bonus_recorrencia_ativo ? ' + Recorrência' : ''}
                 </p>
               </div>
             </div>
@@ -878,7 +922,7 @@ export default function ComissaoVendedor() {
                           <div className="h-full rounded-full" style={{ width: `${Math.min((ctvProjecao.comissao_total / maxComissao) * 100, 100)}%`, background: '#FFD700' }} />
                         </div>
                       </div>
-                      <div className="pt-2 grid grid-cols-2 gap-2">
+                      <div className="pt-2 grid grid-cols-3 gap-2">
                         <div className="rounded-lg p-2 text-center" style={{ background: ctvProjecao.meta_atingida ? '#f0fdf4' : '#fff1f2', border: `1px solid ${ctvProjecao.meta_atingida ? '#bbf7d0' : '#fecdd3'}` }}>
                           <p className="text-xs font-semibold mb-0.5" style={{ color: ctvProjecao.meta_atingida ? '#065f46' : '#991b1b' }}>Meta projetada</p>
                           <p className="text-xs font-bold" style={{ color: ctvProjecao.meta_atingida ? '#065f46' : '#991b1b' }}>
@@ -892,6 +936,13 @@ export default function ComissaoVendedor() {
                             {ctvProjecao.bonus_tier?.label ?? (ctvProjecao.bonus_desbloqueado ? 'Sem tier' : 'Não desbloqueado')}
                           </p>
                           <p className="text-sm font-bold mt-1" style={{ color: ctvProjecao.bonus_desbloqueado ? '#16a34a' : '#94a3b8' }}>{formatBRL(ctvProjecao.comissao_bonus)}</p>
+                        </div>
+                        <div className="rounded-lg p-2 text-center" style={{ background: ctvProjecao.bonus_recorrencia_ativo ? '#f0fdf4' : '#f8fafc', border: `1px solid ${ctvProjecao.bonus_recorrencia_ativo ? '#bbf7d0' : '#e2e8f0'}` }}>
+                          <p className="text-xs font-semibold mb-0.5" style={{ color: ctvProjecao.bonus_recorrencia_ativo ? '#065f46' : '#94a3b8' }}>Recorrência projetada</p>
+                          <p className="text-xs font-bold" style={{ color: ctvProjecao.bonus_recorrencia_ativo ? '#065f46' : '#94a3b8' }}>
+                            {ctvProjecao.bonus_recorrencia_ativo ? `+${RECORRENCIA_PERCENTUAL}%` : 'Não ativa'}
+                          </p>
+                          <p className="text-sm font-bold mt-1" style={{ color: ctvProjecao.bonus_recorrencia_ativo ? '#16a34a' : '#94a3b8' }}>{formatBRL(ctvProjecao.comissao_recorrencia)}</p>
                         </div>
                       </div>
                     </div>

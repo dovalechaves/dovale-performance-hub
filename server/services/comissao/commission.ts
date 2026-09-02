@@ -25,21 +25,31 @@ export interface ComissaoTelevendas {
   bonus_desbloqueado: boolean;
   bonus_tier: { label: string; valor: number; percentual: number } | null;
   comissao_bonus: number;
+  bonus_recorrencia_ativo: boolean;
+  comissao_recorrencia: number;
   comissao_total: number;
 }
+
+// Bônus de recorrência: TELEVENDAS/TELEVENDAS MG que baterem a Meta PA 1 por
+// 3 meses seguidos (ou mais) recebem +10% sobre a comissão de meta+bônus,
+// a partir do 3º mês da sequência.
+export const RECORRENCIA_MESES_CONSECUTIVOS = 3;
+export const RECORRENCIA_PERCENTUAL = 10;
 
 export function calcularComissaoTelevendas(
   valor_pa: number,
   total_recebido: number,
   meta: MetaConfig | null,
-  bonus: BonusConfig | null
+  bonus: BonusConfig | null,
+  recorrenciaAtiva = false
 ): ComissaoTelevendas {
   const empty: ComissaoTelevendas = {
     valor_pa, total_recebido,
     meta_atingida: null, comissao_meta: 0,
     percentual_sem_meta: meta?.percentual_sem_meta ?? 0,
     bonus_desbloqueado: false, bonus_tier: null,
-    comissao_bonus: 0, comissao_total: 0,
+    comissao_bonus: 0, bonus_recorrencia_ativo: false,
+    comissao_recorrencia: 0, comissao_total: 0,
   };
   if (!meta) return empty;
 
@@ -76,11 +86,17 @@ export function calcularComissaoTelevendas(
     if (bonus_tier) comissao_bonus = (bonus_tier.percentual / 100) * valor_pa;
   }
 
+  const comissao_recorrencia = recorrenciaAtiva
+    ? (RECORRENCIA_PERCENTUAL / 100) * (comissao_meta + comissao_bonus)
+    : 0;
+
   return {
     valor_pa, total_recebido, meta_atingida, comissao_meta,
     percentual_sem_meta: meta.percentual_sem_meta,
     bonus_desbloqueado, bonus_tier, comissao_bonus,
-    comissao_total: comissao_meta + comissao_bonus,
+    bonus_recorrencia_ativo: recorrenciaAtiva,
+    comissao_recorrencia,
+    comissao_total: comissao_meta + comissao_bonus + comissao_recorrencia,
   };
 }
 

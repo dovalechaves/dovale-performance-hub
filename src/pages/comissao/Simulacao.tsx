@@ -3,6 +3,8 @@ import AppShell from './layout/AppShell';
 import { formatBRL, MESES } from './_shared/format';
 import {
   calcularComissaoTelevendas,
+  RECORRENCIA_MESES_CONSECUTIVOS,
+  RECORRENCIA_PERCENTUAL,
   type MetaConfig,
   type BonusConfig,
   type ComissaoTelevendas,
@@ -372,6 +374,7 @@ export default function ComissaoSimulacao() {
   // Direct mode
   const [valorPA, setValorPA] = useState('');
   const [recebimentos, setRecebimentos] = useState('');
+  const [recorrenciaSimulada, setRecorrenciaSimulada] = useState(false);
   const [resultado, setResultado] = useState<ComissaoTelevendas | null>(null);
 
   // Reverse mode
@@ -542,7 +545,8 @@ export default function ComissaoSimulacao() {
   const simular = () => {
     const pa = parseFloat(valorPA.replace(/\./g, '').replace(',', '.')) || 0;
     const rec = parseFloat(recebimentos.replace(/\./g, '').replace(',', '.')) || 0;
-    setResultado(calcularComissaoTelevendas(pa, rec, metaConfig, bonusConfig));
+    const recorrenciaAtiva = recorrenciaSimulada && !!metaConfig && metaConfig.meta1_valor > 0 && pa >= metaConfig.meta1_valor;
+    setResultado(calcularComissaoTelevendas(pa, rec, metaConfig, bonusConfig, recorrenciaAtiva));
   };
 
   const avgRec = mediaRec?.media ?? 0;
@@ -780,6 +784,14 @@ export default function ComissaoSimulacao() {
                     </div>
                   </div>
                 </div>
+                <label className="flex items-center gap-2 text-sm" style={{ color: '#64748b' }}>
+                  <input
+                    type="checkbox"
+                    checked={recorrenciaSimulada}
+                    onChange={(e) => setRecorrenciaSimulada(e.target.checked)}
+                  />
+                  Já bateu a meta (Meta PA 1 ou superior) nos {RECORRENCIA_MESES_CONSECUTIVOS - 1} meses anteriores?
+                </label>
                 <button onClick={simular}
                   className="flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-bold"
                   style={{ background: '#00205C', color: '#FFD700' }}>
@@ -847,6 +859,12 @@ export default function ComissaoSimulacao() {
                           Comissão Bônus{resultado.bonus_tier ? ` (${resultado.bonus_tier.percentual}% × valor PA)` : ' (não desbloqueado)'}
                         </span>
                         <span className="font-semibold" style={{ color: '#0a1628' }}>{formatBRL(resultado.comissao_bonus)}</span>
+                      </div>
+                      <div className="flex justify-between text-sm py-1 border-b" style={{ borderColor: '#e2e8f0' }}>
+                        <span style={{ color: '#64748b' }}>
+                          Comissão Recorrência{resultado.bonus_recorrencia_ativo ? ` (+${RECORRENCIA_PERCENTUAL}% × meta+bônus)` : ' (não ativa)'}
+                        </span>
+                        <span className="font-semibold" style={{ color: '#0a1628' }}>{formatBRL(resultado.comissao_recorrencia)}</span>
                       </div>
                       <div className="flex justify-between text-sm py-2 font-bold">
                         <span style={{ color: '#00205C' }}>Total comissão</span>

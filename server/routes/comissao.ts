@@ -7,6 +7,7 @@ import { SETORES_ATIVOS, addSetoresGlobais } from "../services/comissao/setores"
 import { ensureVendedorAtivoTable, getVendedoresInativos } from "../services/comissao/vendedorAtivoTable";
 import {
   calcularComissaoTelevendas, isTelevendas,
+  RECORRENCIA_MESES_CONSECUTIVOS,
   type MetaConfig, type BonusConfig,
 } from "../services/comissao/commission";
 import {
@@ -41,6 +42,86 @@ function getActor(req: any): string {
 }
 
 const SETORES_TELEVENDAS = ["TELEVENDAS", "TELEVENDAS MG"];
+
+// Últimos N meses terminando em (ano, mes), cruzando virada de ano quando necessário.
+function ultimosNMeses(ano: number, mes: number, n: number): { ano: number; mes: number }[] {
+  const meses: { ano: number; mes: number }[] = [];
+  let a = ano, m = mes;
+  for (let i = 0; i < n; i++) {
+    meses.unshift({ ano: a, mes: m });
+    m -= 1;
+    if (m === 0) { m = 12; a -= 1; }
+  }
+  return meses;
+}
+
+// Bônus de recorrência Televendas: verifica, mês a mês e vendedor a vendedor,
+// se cada um bateu a meta (Meta PA 1 ou superior) nos últimos
+// RECORRENCIA_MESES_CONSECUTIVOS meses (incluindo o mês selecionado). Retorna
+// um Map vendedor -> booleanos por mês (do mais antigo para o mais recente;
+// o último item é sempre o mês selecionado). Faz só 1 query de meta por mês
+// (não por vendedor), pra suportar listas inteiras (dashboard, gestor).
+async function checarRecorrenciaMeta1Lote(
+  vendedores: string[],
+  ano: number,
+  mes: number,
+  userSetores: string[],
+  vendasAnoAtual: Awaited<ReturnType<typeof getVendas>>,
+): Promise<Map<string, boolean[]>> {
+  const resultado = new Map<string, boolean[]>();
+  if (vendedores.length === 0) return resultado;
+
+  const janela = ultimosNMeses(ano, mes, RECORRENCIA_MESES_CONSECUTIVOS);
+  const anosNecessarios = [...new Set(janela.map((j) => j.ano))];
+  const vendasPorAno = await Promise.all(
+    anosNecessarios.map((a) => (a === ano ? vendasAnoAtual : getVendas(a)))
+  );
+  const todasVendasJanela = vendasPorAno.flat();
+
+  const pool = await getPool();
+  const metasPorMes = await Promise.all(
+    janela.map(({ ano: a, mes: m }) =>
+      pool.request()
+        .input('na', sql.Int, a)
+        .input('nm', sql.VarChar, String(m))
+        .query(`SELECT VENDEDOR as vendedor, META1_VALOR as meta1_valor FROM [TI-PAINELCOMISSAO_METAS] WHERE ANO=@na AND MES=@nm`)
+        .catch(() => ({ recordset: [] as Array<Record<string, unknown>> }))
+    )
+  );
+  const meta1PorMesEVendedor = metasPorMes.map((r) => {
+    const mapa = new Map<string, number>();
+    r.recordset.forEach((row: any) => mapa.set(String(row.vendedor), Number(row.meta1_valor ?? 0)));
+    return mapa;
+  });
+
+  for (const vendedor of vendedores) {
+    const bateuPorMes = janela.map(({ ano: a, mes: m }, i) => {
+      const meta1 = meta1PorMesEVendedor[i].get(vendedor) ?? 0;
+      if (!(meta1 > 0)) return false;
+      const inicioM = `${a}-${String(m).padStart(2, '0')}-01`;
+      const fimM = new Date(a, m, 0).toISOString().split('T')[0];
+      const vendasMes = filtrarVendas(todasVendasJanela, { inicio: inicioM, fim: fimM, userSetores, setores: [], vendedor });
+      const pa = vendasMes.reduce((s, v) => {
+        const isPA = v.SUBGRUPO === 'CHAVE' || ['PRODUÇÃO', 'DOVALE'].includes(v.GRUPO ?? '');
+        return s + (isPA ? v.SUM : 0);
+      }, 0);
+      return pa >= meta1;
+    });
+    resultado.set(vendedor, bateuPorMes);
+  }
+  return resultado;
+}
+
+async function checarRecorrenciaMeta1(
+  vendedor: string,
+  ano: number,
+  mes: number,
+  userSetores: string[],
+  vendasAnoAtual: Awaited<ReturnType<typeof getVendas>>,
+): Promise<boolean[]> {
+  const mapa = await checarRecorrenciaMeta1Lote([vendedor], ano, mes, userSetores, vendasAnoAtual);
+  return mapa.get(vendedor) ?? [];
+}
 
 function normalizarNome(nome: unknown): string {
   return String(nome || "")
@@ -578,6 +659,10 @@ router.get("/dashboard", async (req: any, res: any) => {
         } : null;
 
         const allVendors = new Set([...Object.keys(paMap), ...Object.keys(recMap)]);
+        const recorrenciaMap = await checarRecorrenciaMeta1Lote(
+          [...allVendors], ano, parseInt(mes), userSetores, todasVendas
+        ).catch(() => new Map<string, boolean[]>());
+
         for (const vendedor of allVendors) {
           const pa = paMap[vendedor] || 0;
           const rec = recMap[vendedor] || 0;
@@ -585,7 +670,9 @@ router.get("/dashboard", async (req: any, res: any) => {
           total_recebimentos_televendas += rec;
           const meta = metaMap[vendedor] || null;
           if (meta) {
-            const c = calcularComissaoTelevendas(pa, rec, meta, bonus);
+            const mesesBateram = recorrenciaMap.get(vendedor) ?? [];
+            const recorrenciaAtiva = mesesBateram.length === RECORRENCIA_MESES_CONSECUTIVOS && mesesBateram.every(Boolean);
+            const c = calcularComissaoTelevendas(pa, rec, meta, bonus, recorrenciaAtiva);
             total_comissao_televendas += c.comissao_total;
           }
         }
@@ -746,10 +833,19 @@ router.get("/vendedores", async (req: any, res: any) => {
     // Agrupa por vendedor + setor (equivalente ao GROUP BY USU_NOME, RVS_NOME)
     const byKey = groupBy(vendas, v => `${v.USU_NOME}||${v.RVS_NOME ?? ''}`);
 
+    const vendedoresTv = [...byKey.keys()]
+      .map((key) => key.split('||'))
+      .filter(([, setorV]) => isTelevendas(setorV))
+      .map(([vendedor]) => vendedor);
+    const recorrenciaMap = mes
+      ? await checarRecorrenciaMeta1Lote(vendedoresTv, ano, parseInt(mes), userSetores, todasVendas).catch(() => new Map<string, boolean[]>())
+      : new Map<string, boolean[]>();
+
     const resultado = [...byKey.entries()]
       .map(([key, rows]) => {
         const [vendedor, setorV] = key.split('||');
         const datas = rows.map(r => r.PDV_DATA.getTime());
+        const mesesBateram = recorrenciaMap.get(vendedor) ?? [];
         return {
           vendedor,
           setor: setorV,
@@ -765,6 +861,7 @@ router.get("/vendedores", async (req: any, res: any) => {
           }, 0),
           total_recebido: recMap[vendedor] ?? 0,
           is_televendas: isTelevendas(setorV),
+          recorrencia_meta1_ativa: mesesBateram.length === RECORRENCIA_MESES_CONSECUTIVOS && mesesBateram.every(Boolean),
         };
       })
       .sort((a, b) => b.total_vendas - a.total_vendas);
@@ -954,8 +1051,25 @@ router.get("/vendedor/:nome", async (req: any, res: any) => {
     }
 
     const metaRow = metaVendedor.recordset[0] as unknown as MetaConfig | null;
+
+    let recorrencia_meta1_ativa = false;
+    let recorrencia_meta1_meses_anteriores_ativo = false;
+    if (is_televendas && mes) {
+      try {
+        const mesesBateram = await checarRecorrenciaMeta1(
+          vendedor, ano, parseInt(mes), userSetores, todasVendas
+        );
+        recorrencia_meta1_ativa = mesesBateram.every(Boolean);
+        // Meses anteriores ao selecionado (exclui o mês atual) — usado para
+        // saber se a PROJEÇÃO do mês atual também ativaria a recorrência.
+        recorrencia_meta1_meses_anteriores_ativo = mesesBateram.slice(0, -1).every(Boolean);
+      } catch (e) {
+        console.error('[vendedor] recorrência meta1:', e);
+      }
+    }
+
     const comissao_televendas = is_televendas
-      ? calcularComissaoTelevendas(valor_pa, total_recebido, metaRow, bonusConfig)
+      ? calcularComissaoTelevendas(valor_pa, total_recebido, metaRow, bonusConfig, recorrencia_meta1_ativa)
       : null;
 
     // ── Ferragens ─────────────────────────────────────────────────────────────
@@ -1087,6 +1201,8 @@ router.get("/vendedor/:nome", async (req: any, res: any) => {
       valor_mercadoria,
       total_recebido,
       bonus_config: bonusConfig,
+      recorrencia_meta1_ativa,
+      recorrencia_meta1_meses_anteriores_ativo,
       comissao_televendas,
       comissao_ferragens,
       ferr_meta,

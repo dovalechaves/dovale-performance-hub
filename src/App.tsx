@@ -28,7 +28,12 @@ import ComissaoGestor from "./pages/comissao/Gestor.tsx";
 import ComissaoSimulacao from "./pages/comissao/Simulacao.tsx";
 import ComissaoConfiguracao from "./pages/comissao/Configuracao.tsx";
 import { ComissaoErrorBoundary } from "./pages/comissao/ComissaoErrorBoundary.tsx";
-import EnvBanner from "./components/EnvBanner.tsx";
+import PrimeiraMovimentacao from "./pages/PrimeiraMovimentacao.tsx";
+import InventarioFullApi from "./pages/InventarioFullApi.tsx";
+import Prospeccao from "./pages/Prospecção.tsx";
+import ClientesProspeccao from "./pages/ClientesProspeccao.tsx";
+import EstoqueMinimo from "./pages/EstoqueMinimo.tsx";
+import NotasFiscaisAmazon from "./pages/NotasFiscaisAmazon.tsx";
 import React from "react";
 import Prospeccao from "./pages/Prospecção.tsx";
 
@@ -121,6 +126,14 @@ function CobrancaRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function ProspeccaoRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.canAccessHub) return <Navigate to="/login" replace />;
+  if (!user.apps.prospeccao?.canAccess) return <Navigate to="/hub" replace />;
+  return <>{children}</>;
+}
+
 function EcommerceDisparoRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
@@ -145,13 +158,27 @@ function SalesCompassRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-// Relatório de Custos usa os mesmos dados do Disparo (Meta/WhatsApp + etiquetas);
-// reutiliza o acesso do app de Disparo.
 function RelatorioCustosRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
   if (!user.canAccessHub) return <Navigate to="/login" replace />;
-  if (!user.apps.disparo.canAccess) return <Navigate to="/hub" replace />;
+  if (!user.apps.relatoriocustos?.canAccess) return <Navigate to="/hub" replace />;
+  return <>{children}</>;
+}
+
+function EstoqueMinimoRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.canAccessHub) return <Navigate to="/login" replace />;
+  if (!user.apps.estoqueminimo?.canAccess) return <Navigate to="/hub" replace />;
+  return <>{children}</>;
+}
+
+function NotasFiscaisAmazonRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.canAccessHub) return <Navigate to="/login" replace />;
+  if (!user.apps.notasfiscaisamazon?.canAccess) return <Navigate to="/hub" replace />;
   return <>{children}</>;
 }
 
@@ -173,6 +200,22 @@ function ComissaoRoute({ children }: { children: React.ReactNode }) {
     return <Navigate to={fallback} replace />;
   }
   return <ComissaoErrorBoundary>{children}</ComissaoErrorBoundary>;
+}
+
+function PrimeiraMovRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.canAccessHub) return <Navigate to="/login" replace />;
+  if (!user.apps.primeiramov.canAccess) return <Navigate to="/hub" replace />;
+  return <>{children}</>;
+}
+
+function InventarioFullRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.canAccessHub) return <Navigate to="/login" replace />;
+  if (!user.apps.invfull?.canAccess) return <Navigate to="/hub" replace />;
+  return <>{children}</>;
 }
 
 function AdminManagerRoute({ children }: { children: React.ReactNode }) {
@@ -211,12 +254,17 @@ const App = () => (
             <Route path="/sugestao-compras" element={<SugestaoComprasRoute><SugestaoCompras /></SugestaoComprasRoute>} />
             <Route path="/sales-compass" element={<SalesCompassRoute><SalesCompass /></SalesCompassRoute>} />
             <Route path="/relatorio-custos" element={<RelatorioCustosRoute><RelatorioCustos /></RelatorioCustosRoute>} />
+            <Route path="/estoque-minimo" element={<EstoqueMinimoRoute><EstoqueMinimo /></EstoqueMinimoRoute>} />
+            <Route path="/notas-fiscais-amazon" element={<NotasFiscaisAmazonRoute><NotasFiscaisAmazon /></NotasFiscaisAmazonRoute>} />
             <Route path="/comissao" element={<ComissaoRoute><ComissaoDashboard /></ComissaoRoute>} />
             <Route path="/comissao/vendedor" element={<ComissaoRoute><ComissaoVendedor /></ComissaoRoute>} />
             <Route path="/comissao/gestor" element={<ComissaoRoute><ComissaoGestor /></ComissaoRoute>} />
             <Route path="/comissao/simulacao" element={<ComissaoRoute><ComissaoSimulacao /></ComissaoRoute>} />
             <Route path="/comissao/configuracao" element={<ComissaoRoute><ComissaoConfiguracao /></ComissaoRoute>} />
-            <Route path="/prospeccao" element={<Prospeccao></Prospeccao>}/>
+            <Route path="/primeira-movimentacao" element={<PrimeiraMovRoute><PrimeiraMovimentacao /></PrimeiraMovRoute>} />
+            <Route path="/inventario-full-api" element={<InventarioFullRoute><InventarioFullApi /></InventarioFullRoute>} />
+            <Route path="/prospeccao" element={<ProspeccaoRoute><Prospeccao /></ProspeccaoRoute>} />
+            <Route path="/prospeccao/clientes" element={<ProspeccaoRoute><ClientesProspeccao /></ProspeccaoRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

@@ -6,7 +6,7 @@ import { getPool } from "../db/sqlserver";
 const router = Router();
 const VALID_ROLES = ["admin", "manager", "viewer"] as const;
 const VALID_HUB_ROLES = ["admin", "viewer"] as const;
-const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento", "assistente", "multipreco", "inventario", "onboarding", "score", "cobranca", "ecommercedisparo", "sugestaocompras", "salescompass", "painelcomissao"] as const;
+const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento", "assistente", "multipreco", "inventario", "onboarding", "prospeccao", "primeiramov", "invfull", "score", "cobranca", "ecommercedisparo", "sugestaocompras", "salescompass", "painelcomissao", "relatoriocustos", "estoqueminimo", "notasfiscaisamazon"] as const;
 
 type Role = typeof VALID_ROLES[number];
 type HubRole = typeof VALID_HUB_ROLES[number];
@@ -175,6 +175,24 @@ function buildDefaultApps(usuario: string, localRole: unknown, localLoja: unknow
       loja: null,
       can_access: false,
     },
+    primeiramov: {
+      app_key: "primeiramov" as AppKey,
+      role: baseRole,
+      loja: null,
+      can_access: false,
+    },
+    invfull: {
+      app_key: "invfull" as AppKey,
+      role: baseRole,
+      loja: null,
+      can_access: false,
+    },
+    prospeccao: {
+      app_key: "prospeccao" as AppKey,
+      role: baseRole,
+      loja: null,
+      can_access: false,
+    },
     score: {
       app_key: "score" as AppKey,
       role: baseRole,
@@ -212,6 +230,24 @@ function buildDefaultApps(usuario: string, localRole: unknown, localLoja: unknow
       can_access: false,
       config: { setores: [], nome_vendedor: null } as PainelComissaoConfig,
     },
+    relatoriocustos: {
+      app_key: "relatoriocustos" as AppKey,
+      role: baseRole,
+      loja: null,
+      can_access: false,
+    },
+    estoqueminimo: {
+      app_key: "estoqueminimo" as AppKey,
+      role: baseRole,
+      loja: null,
+      can_access: false,
+    },
+    notasfiscaisamazon: {
+      app_key: "notasfiscaisamazon" as AppKey,
+      role: baseRole,
+      loja: null,
+      can_access: false,
+    },
   };
 }
 
@@ -233,12 +269,18 @@ function mergeApps(
     multipreco: { ...defaults.multipreco },
     inventario: { ...defaults.inventario },
     onboarding: { ...defaults.onboarding },
+    prospeccao: { ...defaults.prospeccao },
+    primeiramov: { ...defaults.primeiramov },
+    invfull: { ...defaults.invfull },
     score: { ...defaults.score },
     cobranca: { ...defaults.cobranca },
     ecommercedisparo: { ...defaults.ecommercedisparo },
     sugestaocompras: { ...defaults.sugestaocompras },
     salescompass: { ...defaults.salescompass },
     painelcomissao: { ...defaults.painelcomissao },
+    relatoriocustos: { ...defaults.relatoriocustos },
+    estoqueminimo: { ...defaults.estoqueminimo },
+    notasfiscaisamazon: { ...defaults.notasfiscaisamazon },
   };
 
   for (const row of appRows) {
@@ -287,12 +329,18 @@ function normalizeAppsPayload(
     multipreco: { ...defaults.multipreco },
     inventario: { ...defaults.inventario },
     onboarding: { ...defaults.onboarding },
+    prospeccao: { ...defaults.prospeccao },
+    primeiramov: { ...defaults.primeiramov },
+    invfull: { ...defaults.invfull },
     score: { ...defaults.score },
     cobranca: { ...defaults.cobranca },
     ecommercedisparo: { ...defaults.ecommercedisparo },
     sugestaocompras: { ...defaults.sugestaocompras },
     salescompass: { ...defaults.salescompass },
     painelcomissao: { ...defaults.painelcomissao },
+    relatoriocustos: { ...defaults.relatoriocustos },
+    estoqueminimo: { ...defaults.estoqueminimo },
+    notasfiscaisamazon: { ...defaults.notasfiscaisamazon },
   };
 
   if (payload && typeof payload === "object") {
@@ -515,7 +563,7 @@ router.get("/users", async (req, res) => {
       pool.request().query(`
         SELECT usuario, app_key, role, loja, ativo, usu_codigo_sistema, config
         FROM dbo.USUARIOS_APPS
-        WHERE app_key IN ('dashboard', 'calculadora', 'disparo', 'fechamento', 'assistente', 'multipreco', 'inventario', 'onboarding', 'score', 'cobranca', 'ecommercedisparo', 'sugestaocompras', 'salescompass', 'painelcomissao')
+        WHERE app_key IN ('dashboard', 'calculadora', 'disparo', 'fechamento', 'assistente', 'multipreco', 'inventario', 'onboarding', 'prospeccao', 'primeiramov', 'invfull', 'score', 'cobranca', 'ecommercedisparo', 'sugestaocompras', 'salescompass', 'painelcomissao', 'relatoriocustos', 'estoqueminimo', 'notasfiscaisamazon')
       `),
     ]);
 

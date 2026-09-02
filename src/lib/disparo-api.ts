@@ -138,6 +138,8 @@ export interface TemplateMeta {
   id: string;
   name: string;
   language_code: string;
+  /** Status na Meta. O endpoint só devolve APPROVED. */
+  status?: string;
   header_format: string;
   requires_media: boolean;
   header_text_params_count: number;

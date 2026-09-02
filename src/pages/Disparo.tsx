@@ -228,6 +228,9 @@ export default function Disparo() {
       if (mediaUrl && tmpl?.requires_media) cfg.media_url = mediaUrl;
       if (tmpl?.header_format) cfg.header_format = tmpl.header_format;
 
+      // O backend valida o template na Meta e sincroniza no Chatwoot — pode levar alguns segundos
+      addLog("Validando template na Meta e sincronizando no Chatwoot...");
+
       const r = await api.iniciarDisparo({
         lista_id: listaId,
         template_nome: selectedTemplate,

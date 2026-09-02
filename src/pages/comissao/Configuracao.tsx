@@ -177,7 +177,8 @@ import AppShell from './layout/AppShell';
 import { MESES, formatBRL } from './_shared/format';
 import { Save, CheckCircle, AlertCircle, Calendar, Users, Loader2 } from 'lucide-react';
 import { useComissaoUser as useUser, useComissaoApi } from './_shared/hooks';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { toast } from 'sonner';
 
 interface VendedorMeta {
   nome_vendedor: string;
@@ -224,6 +225,7 @@ interface DistVendedorMeta {
   meta1_valor: number; meta1_percentual: number;
   meta2_valor: number; meta2_percentual: number;
   meta3_valor: number; meta3_percentual: number;
+  meta4_valor: number; meta4_percentual: number;
   metadesafio_valor: number; metadesafio_percentual: number;
   percentual_sem_meta: number;
 }
@@ -233,6 +235,7 @@ interface DistVendedorBonus {
   bonus1_valor: number;
   bonus2_valor: number;
   bonus3_valor: number;
+  bonus4_valor: number;
   bonusdesafio_valor: number;
 }
 
@@ -277,8 +280,31 @@ export default function ComissaoConfiguracao() {
   // ── Metas PA ──
   const [allVendedores, setAllVendedores] = useState<string[]>([]);
   const [buscaVend, setBuscaVend] = useState('');
-  const [mesMeta, setMesMeta] = useState(new Date().getMonth() + 1);
-  const [anoMeta, setAnoMeta] = useState(new Date().getFullYear());
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [mesMeta, setMesMetaState] = useState(() => {
+    const m = parseInt(searchParams.get('mesMeta') ?? '', 10);
+    return m >= 1 && m <= 12 ? m : new Date().getMonth() + 1;
+  });
+  const [anoMeta, setAnoMetaState] = useState(() => {
+    const a = parseInt(searchParams.get('anoMeta') ?? '', 10);
+    return a >= 2000 && a <= 2100 ? a : new Date().getFullYear();
+  });
+  const setMesMeta = (m: number) => {
+    setMesMetaState(m);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('mesMeta', String(m));
+      return next;
+    }, { replace: true });
+  };
+  const setAnoMeta = (a: number) => {
+    setAnoMetaState(a);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('anoMeta', String(a));
+      return next;
+    }, { replace: true });
+  };
   const [metasMensaisEdit, setMetasMensaisEdit] = useState<Record<string, VendedorMeta>>({});
   const [savingMensais, setSavingMensais] = useState(false);
   const [savedMensais, setSavedMensais] = useState(false);
@@ -291,8 +317,30 @@ export default function ComissaoConfiguracao() {
 
   // ── Ferragens ──
   const [ferrAba, setFerrAba] = useState<'metas' | 'bonus' | 'grupo'>('metas');
-  const [ferrMesConf, setFerrMesConf] = useState(new Date().getMonth() + 1);
-  const [ferrAnoConf, setFerrAnoConf] = useState(new Date().getFullYear());
+  const [ferrMesConf, setFerrMesConfState] = useState(() => {
+    const m = parseInt(searchParams.get('ferrMes') ?? '', 10);
+    return m >= 1 && m <= 12 ? m : new Date().getMonth() + 1;
+  });
+  const [ferrAnoConf, setFerrAnoConfState] = useState(() => {
+    const a = parseInt(searchParams.get('ferrAno') ?? '', 10);
+    return a >= 2000 && a <= 2100 ? a : new Date().getFullYear();
+  });
+  const setFerrMesConf = (m: number) => {
+    setFerrMesConfState(m);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('ferrMes', String(m));
+      return next;
+    }, { replace: true });
+  };
+  const setFerrAnoConf = (a: number) => {
+    setFerrAnoConfState(a);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('ferrAno', String(a));
+      return next;
+    }, { replace: true });
+  };
   const [ferrVendedores, setFerrVendedores] = useState<string[]>([]);
   const [ferrMetasEdit, setFerrMetasEdit] = useState<Record<string, FerrVendedorMeta>>({});
   const [ferrBonusEdit, setFerrBonusEdit] = useState<Record<string, FerrVendedorBonus>>({});
@@ -308,8 +356,30 @@ export default function ComissaoConfiguracao() {
 
   // ── Distribuidores ──
   const [distAba, setDistAba] = useState<'metas' | 'bonus' | 'vinculos'>('metas');
-  const [distMesConf, setDistMesConf] = useState(new Date().getMonth() + 1);
-  const [distAnoConf, setDistAnoConf] = useState(new Date().getFullYear());
+  const [distMesConf, setDistMesConfState] = useState(() => {
+    const m = parseInt(searchParams.get('distMes') ?? '', 10);
+    return m >= 1 && m <= 12 ? m : new Date().getMonth() + 1;
+  });
+  const [distAnoConf, setDistAnoConfState] = useState(() => {
+    const a = parseInt(searchParams.get('distAno') ?? '', 10);
+    return a >= 2000 && a <= 2100 ? a : new Date().getFullYear();
+  });
+  const setDistMesConf = (m: number) => {
+    setDistMesConfState(m);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('distMes', String(m));
+      return next;
+    }, { replace: true });
+  };
+  const setDistAnoConf = (a: number) => {
+    setDistAnoConfState(a);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('distAno', String(a));
+      return next;
+    }, { replace: true });
+  };
   const [distVendedores, setDistVendedores] = useState<string[]>([]);
   const [distMetasEdit, setDistMetasEdit] = useState<Record<string, DistVendedorMeta>>({});
   const [distBonusEdit, setDistBonusEdit] = useState<Record<string, DistVendedorBonus>>({});
@@ -346,7 +416,10 @@ export default function ComissaoConfiguracao() {
       api('/vendedor-ativo')
         .then((r) => r.json())
         .then((data) => setVendedoresComStatus(Array.isArray(data) ? data : []))
-        .catch(() => {})
+        .catch((err) => {
+          console.error('[config] vendedor-ativo:', err);
+          toast.warning('Não foi possível carregar os vendedores agora. Tentando novamente em breve.');
+        })
         .finally(() => setLoadingVendAtivo(false));
       return;
     }
@@ -360,12 +433,18 @@ export default function ComissaoConfiguracao() {
     api('/bonus-config')
       .then((r) => r.json())
       .then((b) => setBonusEdit(b))
-      .catch(() => {});
+      .catch((err) => {
+        console.error('[config] bonus-config:', err);
+        toast.warning('Não foi possível carregar o bônus global agora. Tentando novamente em breve.');
+      });
     setLoadingVendAtivo(true);
     api('/vendedor-ativo')
       .then((r) => r.json())
       .then((data) => setVendedoresComStatus(Array.isArray(data) ? data : []))
-      .catch(() => {})
+      .catch((err) => {
+        console.error('[config] vendedor-ativo:', err);
+        toast.warning('Não foi possível carregar os vendedores agora. Tentando novamente em breve.');
+      })
       .finally(() => setLoadingVendAtivo(false));
   }, [api, usuario]);
 
@@ -452,7 +531,10 @@ export default function ComissaoConfiguracao() {
       const map: Record<string, VendedorMeta> = {};
       list.forEach((m) => { map[m.nome_vendedor] = m; });
       setMetasMensaisEdit(map);
-    } catch { /* silent */ }
+    } catch (err) {
+      console.error('[config] metas-mensais:', err);
+      toast.warning('As metas ainda não carregaram. Os dados exibidos podem estar desatualizados — tentando novamente em breve.');
+    }
   };
 
   const salvarMetasMensais = async () => {
@@ -474,7 +556,7 @@ export default function ComissaoConfiguracao() {
       setTimeout(() => setSavedMensais(false), 3000);
     } catch (err) {
       console.error('Erro ao salvar metas:', err);
-      alert('Erro ao salvar. Verifique o console.');
+      toast.error('Erro ao salvar metas. Tente novamente.');
     } finally {
       setSavingMensais(false);
     }
@@ -493,7 +575,7 @@ export default function ComissaoConfiguracao() {
       setTimeout(() => setSavedBonus(false), 3000);
     } catch (err) {
       console.error('Erro ao salvar bônus:', err);
-      alert('Erro ao salvar. Verifique o console.');
+      toast.error('Erro ao salvar o bônus global. Tente novamente.');
     } finally {
       setSavingBonus(false);
     }
@@ -520,7 +602,10 @@ export default function ComissaoConfiguracao() {
       } else {
         setFerrMetaGrupoEdit(FERR_META_GRUPO_VAZIO);
       }
-    } catch { /* silent */ }
+    } catch (err) {
+      console.error('[config] ferragens:', err);
+      toast.warning('Os dados de Ferragens ainda não carregaram. Tentando novamente em breve.');
+    }
     setLoadingFerr(false);
   };
 
@@ -553,7 +638,7 @@ export default function ComissaoConfiguracao() {
       if (!res.ok) throw new Error(await res.text());
       setSavedFerrMetas(true);
       setTimeout(() => setSavedFerrMetas(false), 3000);
-    } catch (err) { console.error(err); alert('Erro ao salvar metas Ferragens.'); }
+    } catch (err) { console.error(err); toast.error('Erro ao salvar metas Ferragens.'); }
     setSavingFerrMetas(false);
   };
 
@@ -565,7 +650,7 @@ export default function ComissaoConfiguracao() {
       if (!res.ok) throw new Error(await res.text());
       setSavedFerrBonus(true);
       setTimeout(() => setSavedFerrBonus(false), 3000);
-    } catch (err) { console.error(err); alert('Erro ao salvar bônus Ferragens.'); }
+    } catch (err) { console.error(err); toast.error('Erro ao salvar bônus Ferragens.'); }
     setSavingFerrBonus(false);
   };
 
@@ -577,7 +662,7 @@ export default function ComissaoConfiguracao() {
       if (!res.ok) throw new Error(await res.text());
       setSavedFerrGrupo(true);
       setTimeout(() => setSavedFerrGrupo(false), 3000);
-    } catch (err) { console.error(err); alert('Erro ao salvar meta grupo Ferragens.'); }
+    } catch (err) { console.error(err); toast.error('Erro ao salvar meta grupo Ferragens.'); }
     setSavingFerrGrupo(false);
   };
 
@@ -596,15 +681,18 @@ export default function ComissaoConfiguracao() {
       const bonusMap: Record<string, DistVendedorBonus> = {};
       if (Array.isArray(bonusRes)) bonusRes.forEach((b: DistVendedorBonus) => { bonusMap[b.nome_vendedor] = b; });
       setDistBonusEdit(bonusMap);
-    } catch { /* silent */ }
+    } catch (err) {
+      console.error('[config] distribuidores:', err);
+      toast.warning('Os dados de Distribuidores ainda não carregaram. Tentando novamente em breve.');
+    }
     setLoadingDist(false);
   };
 
   const getDistMeta = (nome: string): DistVendedorMeta =>
-    distMetasEdit[nome] || { nome_vendedor: nome, meta1_valor: 0, meta1_percentual: 0, meta2_valor: 0, meta2_percentual: 0, meta3_valor: 0, meta3_percentual: 0, metadesafio_valor: 0, metadesafio_percentual: 0, percentual_sem_meta: 0 };
+    distMetasEdit[nome] || { nome_vendedor: nome, meta1_valor: 0, meta1_percentual: 0, meta2_valor: 0, meta2_percentual: 0, meta3_valor: 0, meta3_percentual: 0, meta4_valor: 0, meta4_percentual: 0, metadesafio_valor: 0, metadesafio_percentual: 0, percentual_sem_meta: 0 };
 
   const getDistBonus = (nome: string): DistVendedorBonus =>
-    distBonusEdit[nome] || { nome_vendedor: nome, bonus1_valor: 0, bonus2_valor: 0, bonus3_valor: 0, bonusdesafio_valor: 0 };
+    distBonusEdit[nome] || { nome_vendedor: nome, bonus1_valor: 0, bonus2_valor: 0, bonus3_valor: 0, bonus4_valor: 0, bonusdesafio_valor: 0 };
 
   const updateDistMeta = (nome: string, field: keyof Omit<DistVendedorMeta, 'nome_vendedor'>, value: number) => {
     setSavedDistMetas(false);
@@ -624,7 +712,7 @@ export default function ComissaoConfiguracao() {
       if (!res.ok) throw new Error(await res.text());
       setSavedDistBonus(true);
       setTimeout(() => setSavedDistBonus(false), 3000);
-    } catch (err) { console.error(err); alert('Erro ao salvar bônus Distribuidores.'); }
+    } catch (err) { console.error(err); toast.error('Erro ao salvar bônus Distribuidores.'); }
     setSavingDistBonus(false);
   };
 
@@ -636,7 +724,7 @@ export default function ComissaoConfiguracao() {
       if (!res.ok) throw new Error(await res.text());
       setSavedDistMetas(true);
       setTimeout(() => setSavedDistMetas(false), 3000);
-    } catch (err) { console.error(err); alert('Erro ao salvar metas Distribuidores.'); }
+    } catch (err) { console.error(err); toast.error('Erro ao salvar metas Distribuidores.'); }
     setSavingDistMetas(false);
   };
 
@@ -655,7 +743,10 @@ export default function ComissaoConfiguracao() {
         });
       }
       setDistVinculos(map);
-    } catch { /* silent */ }
+    } catch (err) {
+      console.error('[config] vínculos:', err);
+      toast.warning('Os vínculos de Distribuidores ainda não carregaram. Tentando novamente em breve.');
+    }
     setLoadingDistVinculos(false);
   };
 
@@ -688,7 +779,7 @@ export default function ComissaoConfiguracao() {
       if (!res.ok) throw new Error(await res.text());
       setSavedDistVinculos(true);
       setTimeout(() => setSavedDistVinculos(false), 3000);
-    } catch (err) { console.error(err); alert('Erro ao salvar vínculos Distribuidores.'); }
+    } catch (err) { console.error(err); toast.error('Erro ao salvar vínculos Distribuidores.'); }
     setSavingDistVinculos(false);
   };
 
@@ -1424,21 +1515,21 @@ export default function ComissaoConfiguracao() {
                 </div>
                 <div className="overflow-x-auto">
                   <div className="grid px-5 py-2 text-xs font-semibold uppercase tracking-wider"
-                    style={{ gridTemplateColumns: '220px repeat(4, 200px) 120px', minWidth: 1200, borderBottom: '1px solid #f1f5f9', background: '#f8fafc', color: '#64748b' }}>
+                    style={{ gridTemplateColumns: '220px repeat(5, 200px) 120px', minWidth: 1400, borderBottom: '1px solid #f1f5f9', background: '#f8fafc', color: '#64748b' }}>
                     <span>Vendedor</span>
-                    {['Meta 1', 'Meta 2', 'Meta 3', 'Meta Desafio'].map((l, i) => (
+                    {['Meta 1', 'Meta 2', 'Meta 3', 'Meta 4', 'Meta Desafio'].map((l, i) => (
                       <span key={i} className="text-center px-3 py-1 rounded-full mx-2"
-                        style={{ background: ['#dbeafe','#d1fae5','#fef3c7','#e9d5ff'][i], color: ['#1e40af','#065f46','#92400e','#6b21a8'][i] }}>{l}</span>
+                        style={{ background: ['#dbeafe','#d1fae5','#fef3c7','#fee2d5','#e9d5ff'][i], color: ['#1e40af','#065f46','#92400e','#9a3412','#6b21a8'][i] }}>{l}</span>
                     ))}
                     <span className="text-center px-2 py-1 rounded-full" style={{ background: '#fee2e2', color: '#991b1b' }}>% Sem Meta</span>
                   </div>
-                  <div className="divide-y" style={{ borderColor: '#f1f5f9', minWidth: 1200 }}>
+                  <div className="divide-y" style={{ borderColor: '#f1f5f9', minWidth: 1400 }}>
                     {distVendedores.filter(v => !distBuscaVend || v.toLowerCase().includes(distBuscaVend.toLowerCase())).map((v) => {
                       const m = getDistMeta(v);
                       const temConf = !!distMetasEdit[v];
                       return (
                         <div key={v} className="grid items-center px-5 py-3"
-                          style={{ gridTemplateColumns: '220px repeat(4, 200px) 120px' }}
+                          style={{ gridTemplateColumns: '220px repeat(5, 200px) 120px' }}
                           onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = '#f8fafc')}
                           onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = '')}>
                           <div className="flex items-center gap-2 pr-3">
@@ -1449,6 +1540,7 @@ export default function ComissaoConfiguracao() {
                             { vf: 'meta1_valor' as const, pf: 'meta1_percentual' as const, bg: '#eff6ff', border: '#bfdbfe' },
                             { vf: 'meta2_valor' as const, pf: 'meta2_percentual' as const, bg: '#f0fdf4', border: '#bbf7d0' },
                             { vf: 'meta3_valor' as const, pf: 'meta3_percentual' as const, bg: '#fffbeb', border: '#fde68a' },
+                            { vf: 'meta4_valor' as const, pf: 'meta4_percentual' as const, bg: '#fff7ed', border: '#fed7aa' },
                             { vf: 'metadesafio_valor' as const, pf: 'metadesafio_percentual' as const, bg: '#fdf4ff', border: '#e9d5ff' },
                           ]).map(({ vf, pf, bg, border }) => (
                             <div key={vf} className="flex items-center gap-1 mx-2 px-2 py-1.5 rounded-lg"
@@ -1519,19 +1611,19 @@ export default function ComissaoConfiguracao() {
                   </div>
                   <div className="overflow-x-auto">
                     <div className="grid px-5 py-2 text-xs font-semibold uppercase tracking-wider"
-                      style={{ gridTemplateColumns: '220px repeat(4, 160px)', minWidth: 860, borderBottom: '1px solid #f1f5f9', background: '#f8fafc', color: '#64748b' }}>
+                      style={{ gridTemplateColumns: '220px repeat(5, 160px)', minWidth: 1020, borderBottom: '1px solid #f1f5f9', background: '#f8fafc', color: '#64748b' }}>
                       <span>Vendedor</span>
-                      {['Bônus 1', 'Bônus 2', 'Bônus 3', 'Bônus Desafio'].map((l, i) => (
+                      {['Bônus 1', 'Bônus 2', 'Bônus 3', 'Bônus 4', 'Bônus Desafio'].map((l, i) => (
                         <span key={i} className="text-center px-3 py-1 rounded-full mx-2"
-                          style={{ background: ['#dbeafe','#d1fae5','#fef3c7','#e9d5ff'][i], color: ['#1e40af','#065f46','#92400e','#6b21a8'][i] }}>{l}</span>
+                          style={{ background: ['#dbeafe','#d1fae5','#fef3c7','#fee2d5','#e9d5ff'][i], color: ['#1e40af','#065f46','#92400e','#9a3412','#6b21a8'][i] }}>{l}</span>
                       ))}
                     </div>
-                    <div className="divide-y" style={{ borderColor: '#f1f5f9', minWidth: 860 }}>
+                    <div className="divide-y" style={{ borderColor: '#f1f5f9', minWidth: 1020 }}>
                       {distVendedores.filter(v => !distBuscaVend || v.toLowerCase().includes(distBuscaVend.toLowerCase())).map((v) => {
                         const b = getDistBonus(v);
                         return (
                           <div key={v} className="grid items-center px-5 py-3"
-                            style={{ gridTemplateColumns: '220px repeat(4, 160px)' }}
+                            style={{ gridTemplateColumns: '220px repeat(5, 160px)' }}
                             onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = '#f8fafc')}
                             onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = '')}>
                             <span className="text-sm font-medium pr-3" style={{ color: '#0a1628' }}>{v}</span>
@@ -1539,6 +1631,7 @@ export default function ComissaoConfiguracao() {
                               { f: 'bonus1_valor' as const, bg: '#eff6ff', border: '#bfdbfe' },
                               { f: 'bonus2_valor' as const, bg: '#f0fdf4', border: '#bbf7d0' },
                               { f: 'bonus3_valor' as const, bg: '#fffbeb', border: '#fde68a' },
+                              { f: 'bonus4_valor' as const, bg: '#fff7ed', border: '#fed7aa' },
                               { f: 'bonusdesafio_valor' as const, bg: '#fdf4ff', border: '#e9d5ff' },
                             ]).map(({ f, bg, border }) => (
                               <div key={f} className="flex items-center gap-1 mx-2 px-2 py-1.5 rounded-lg"

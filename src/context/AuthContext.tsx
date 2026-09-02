@@ -53,6 +53,21 @@ interface AuthUser {
       role: Role;
       loja: string | null;
     };
+    primeiramov: {
+      canAccess: boolean;
+      role: Role;
+      loja: string | null;
+    };
+    invfull: {
+      canAccess: boolean;
+      role: Role;
+      loja: string | null;
+    };
+    prospeccao: {
+      canAccess: boolean;
+      role: Role;
+      loja: string | null;
+    };
     score: {
       canAccess: boolean;
       role: Role;
@@ -85,6 +100,21 @@ interface AuthUser {
       loja: string | null;
       config?: { setores: string[]; nome_vendedor: string | null } | null;
     };
+    relatoriocustos: {
+      canAccess: boolean;
+      role: Role;
+      loja: string | null;
+    };
+    estoqueminimo: {
+      canAccess: boolean;
+      role: Role;
+      loja: string | null;
+    };
+    notasfiscaisamazon: {
+      canAccess: boolean;
+      role: Role;
+      loja: string | null;
+    };
   };
 }
 
@@ -109,12 +139,18 @@ interface AuthContextValue {
       multipreco?: { role?: string; loja?: string | null; can_access?: boolean };
       inventario?: { role?: string; loja?: string | null; can_access?: boolean };
       onboarding?: { role?: string; loja?: string | null; can_access?: boolean };
+      primeiramov?: { role?: string; loja?: string | null; can_access?: boolean };
+      invfull?: { role?: string; loja?: string | null; can_access?: boolean };
+      prospeccao?: { role?: string; loja?: string | null; can_access?: boolean };
       score?: { role?: string; loja?: string | null; can_access?: boolean };
       cobranca?: { role?: string; loja?: string | null; can_access?: boolean };
       ecommercedisparo?: { role?: string; loja?: string | null; can_access?: boolean };
       sugestaocompras?: { role?: string; loja?: string | null; can_access?: boolean };
       salescompass?: { role?: string; loja?: string | null; can_access?: boolean; usu_codigo_sistema?: number | null };
       painelcomissao?: { role?: string; loja?: string | null; can_access?: boolean; config?: { setores: string[]; nome_vendedor: string | null } | null };
+      relatoriocustos?: { role?: string; loja?: string | null; can_access?: boolean };
+      estoqueminimo?: { role?: string; loja?: string | null; can_access?: boolean };
+      notasfiscaisamazon?: { role?: string; loja?: string | null; can_access?: boolean };
     },
     hubRole?: string
   ) => void;
@@ -145,12 +181,18 @@ function buildUser(
     multipreco?: { role?: string; loja?: string | null; can_access?: boolean };
     inventario?: { role?: string; loja?: string | null; can_access?: boolean };
     onboarding?: { role?: string; loja?: string | null; can_access?: boolean };
+    primeiramov?: { role?: string; loja?: string | null; can_access?: boolean };
+    invfull?: { role?: string; loja?: string | null; can_access?: boolean };
+    prospeccao?: { role?: string; loja?: string | null; can_access?: boolean };
     score?: { role?: string; loja?: string | null; can_access?: boolean };
     cobranca?: { role?: string; loja?: string | null; can_access?: boolean };
     ecommercedisparo?: { role?: string; loja?: string | null; can_access?: boolean };
     sugestaocompras?: { role?: string; loja?: string | null; can_access?: boolean };
     salescompass?: { role?: string; loja?: string | null; can_access?: boolean; usu_codigo_sistema?: number | null };
     painelcomissao?: { role?: string; loja?: string | null; can_access?: boolean; config?: { setores: string[]; nome_vendedor: string | null } | null };
+    relatoriocustos?: { role?: string; loja?: string | null; can_access?: boolean };
+    estoqueminimo?: { role?: string; loja?: string | null; can_access?: boolean };
+    notasfiscaisamazon?: { role?: string; loja?: string | null; can_access?: boolean };
   },
   apiHubRole?: string
 ): AuthUser {
@@ -175,6 +217,12 @@ function buildUser(
   const inventarioLoja = apiApps?.inventario?.loja ?? null;
   const onboardingRole = resolveRole(usuario, apiApps?.onboarding?.role ?? apiRole);
   const onboardingAccess = apiApps?.onboarding?.can_access ?? false;
+  const primeiramovRole = resolveRole(usuario, apiApps?.primeiramov?.role ?? apiRole);
+  const primeiramovAccess = apiApps?.primeiramov?.can_access ?? false;
+  const invfullRole = resolveRole(usuario, apiApps?.invfull?.role ?? apiRole);
+  const invfullAccess = apiApps?.invfull?.can_access ?? false;
+  const prospeccaoRole = resolveRole(usuario, apiApps?.prospeccao?.role ?? apiRole);
+  const prospeccaoAccess = apiApps?.prospeccao?.can_access ?? false;
   const scoreRole = resolveRole(usuario, apiApps?.score?.role ?? apiRole);
   const scoreAccess = apiApps?.score?.can_access ?? false;
   const cobrancaRole = resolveRole(usuario, apiApps?.cobranca?.role ?? apiRole);
@@ -190,6 +238,12 @@ function buildUser(
   const painelcomissaoRole = resolveRole(usuario, apiApps?.painelcomissao?.role ?? apiRole);
   const painelcomissaoAccess = apiApps?.painelcomissao?.can_access ?? false;
   const painelcomissaoConfig = apiApps?.painelcomissao?.config ?? null;
+  const relatoriocustosRole = resolveRole(usuario, apiApps?.relatoriocustos?.role ?? apiRole);
+  const relatoriocustosAccess = apiApps?.relatoriocustos?.can_access ?? false;
+  const estoqueminimoRole = resolveRole(usuario, apiApps?.estoqueminimo?.role ?? apiRole);
+  const estoqueminimoAccess = apiApps?.estoqueminimo?.can_access ?? false;
+  const notasfiscaisamazonRole = resolveRole(usuario, apiApps?.notasfiscaisamazon?.role ?? apiRole);
+  const notasfiscaisamazonAccess = apiApps?.notasfiscaisamazon?.can_access ?? false;
 
   return {
     usuario,
@@ -243,6 +297,21 @@ function buildUser(
         role: onboardingRole,
         loja: null,
       },
+      primeiramov: {
+        canAccess: primeiramovAccess,
+        role: primeiramovRole,
+        loja: null,
+      },
+      invfull: {
+        canAccess: invfullAccess,
+        role: invfullRole,
+        loja: null,
+      },
+      prospeccao: {
+        canAccess: prospeccaoAccess,
+        role: prospeccaoRole,
+        loja: null,
+      },
       score: {
         canAccess: scoreAccess,
         role: scoreRole,
@@ -275,6 +344,21 @@ function buildUser(
         loja: null,
         config: painelcomissaoConfig,
       },
+      relatoriocustos: {
+        canAccess: relatoriocustosAccess,
+        role: relatoriocustosRole,
+        loja: null,
+      },
+      estoqueminimo: {
+        canAccess: estoqueminimoAccess,
+        role: estoqueminimoRole,
+        loja: null,
+      },
+      notasfiscaisamazon: {
+        canAccess: notasfiscaisamazonAccess,
+        role: notasfiscaisamazonRole,
+        loja: null,
+      },
     },
   };
 }
@@ -306,6 +390,12 @@ function loadFromStorage(): AuthUser | null {
     const inventarioLoja = (parsed.apps as any)?.inventario?.loja ?? null;
     const onboardingRole = (parsed.apps as any)?.onboarding?.role ?? parsed.role;
     const onboardingAccess = (parsed.apps as any)?.onboarding?.canAccess ?? false;
+    const primeiramovRole = (parsed.apps as any)?.primeiramov?.role ?? parsed.role;
+    const primeiramovAccess = (parsed.apps as any)?.primeiramov?.canAccess ?? false;
+    const invfullRole = (parsed.apps as any)?.invfull?.role ?? parsed.role;
+    const invfullAccess = (parsed.apps as any)?.invfull?.canAccess ?? false;
+    const prospeccaoRole = (parsed.apps as any)?.prospeccao?.role ?? parsed.role;
+    const prospeccaoAccess = (parsed.apps as any)?.prospeccao?.canAccess ?? false;
     const scoreRole = (parsed.apps as any)?.score?.role ?? parsed.role;
     const scoreAccess = (parsed.apps as any)?.score?.canAccess ?? false;
     const cobrancaRole = (parsed.apps as any)?.cobranca?.role ?? parsed.role;
@@ -321,6 +411,12 @@ function loadFromStorage(): AuthUser | null {
     const painelcomissaoRole = (parsed.apps as any)?.painelcomissao?.role ?? parsed.role;
     const painelcomissaoAccess = (parsed.apps as any)?.painelcomissao?.canAccess ?? false;
     const painelcomissaoConfig = (parsed.apps as any)?.painelcomissao?.config ?? null;
+    const relatoriocustosRole = (parsed.apps as any)?.relatoriocustos?.role ?? parsed.role;
+    const relatoriocustosAccess = (parsed.apps as any)?.relatoriocustos?.canAccess ?? false;
+    const estoqueminimoRole = (parsed.apps as any)?.estoqueminimo?.role ?? parsed.role;
+    const estoqueminimoAccess = (parsed.apps as any)?.estoqueminimo?.canAccess ?? false;
+    const notasfiscaisamazonRole = (parsed.apps as any)?.notasfiscaisamazon?.role ?? parsed.role;
+    const notasfiscaisamazonAccess = (parsed.apps as any)?.notasfiscaisamazon?.canAccess ?? false;
 
     return {
       usuario: parsed.usuario,
@@ -374,6 +470,21 @@ function loadFromStorage(): AuthUser | null {
           role: onboardingRole,
           loja: null,
         },
+        primeiramov: {
+          canAccess: primeiramovAccess,
+          role: primeiramovRole,
+          loja: null,
+        },
+        invfull: {
+          canAccess: invfullAccess,
+          role: invfullRole,
+          loja: null,
+        },
+        prospeccao: {
+          canAccess: prospeccaoAccess,
+          role: prospeccaoRole,
+          loja: null,
+        },
         score: {
           canAccess: scoreAccess,
           role: scoreRole,
@@ -405,6 +516,21 @@ function loadFromStorage(): AuthUser | null {
           role: painelcomissaoRole,
           loja: null,
           config: painelcomissaoConfig,
+        },
+        relatoriocustos: {
+          canAccess: relatoriocustosAccess,
+          role: relatoriocustosRole,
+          loja: null,
+        },
+        estoqueminimo: {
+          canAccess: estoqueminimoAccess,
+          role: estoqueminimoRole,
+          loja: null,
+        },
+        notasfiscaisamazon: {
+          canAccess: notasfiscaisamazonAccess,
+          role: notasfiscaisamazonRole,
+          loja: null,
         },
       },
     };
@@ -461,12 +587,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       multipreco?: { role?: string; loja?: string | null; can_access?: boolean };
       inventario?: { role?: string; loja?: string | null; can_access?: boolean };
       onboarding?: { role?: string; loja?: string | null; can_access?: boolean };
+      primeiramov?: { role?: string; loja?: string | null; can_access?: boolean };
+      invfull?: { role?: string; loja?: string | null; can_access?: boolean };
+      prospeccao?: { role?: string; loja?: string | null; can_access?: boolean };
       score?: { role?: string; loja?: string | null; can_access?: boolean };
       cobranca?: { role?: string; loja?: string | null; can_access?: boolean };
       ecommercedisparo?: { role?: string; loja?: string | null; can_access?: boolean };
       sugestaocompras?: { role?: string; loja?: string | null; can_access?: boolean };
       salescompass?: { role?: string; loja?: string | null; can_access?: boolean; usu_codigo_sistema?: number | null };
       painelcomissao?: { role?: string; loja?: string | null; can_access?: boolean; config?: { setores: string[]; nome_vendedor: string | null } | null };
+      relatoriocustos?: { role?: string; loja?: string | null; can_access?: boolean };
+      estoqueminimo?: { role?: string; loja?: string | null; can_access?: boolean };
+      notasfiscaisamazon?: { role?: string; loja?: string | null; can_access?: boolean };
     },
     hubRole?: string
   ) => {

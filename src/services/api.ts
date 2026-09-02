@@ -25,6 +25,7 @@ export const LOJAS = [
   { value: "l3", label: "Rio de Janeiro" },
   { value: "campinas", label: "Campinas" },
   { value: "riopreto", label: "Rio Preto" },
+  { value: "fortaleza", label: "Fortaleza" },
 ];
 
 async function handleResponse<T>(res: Response): Promise<T> {
@@ -46,6 +47,37 @@ export interface VendaConsolidada {
   total_vendas: number;
   origem?: string;
   detalhes?: VendaDetalhe[];
+}
+
+export interface ProductFirstMovementItem {
+  codigo: string;
+  nome: string;
+  tipo: string;
+  primeiraMovimentacao: string;
+  quantidade: number;
+}
+
+export interface ProductFirstMovementStatus {
+  lastRunAt: string | null;
+  lastRunResult: {
+    mes: number;
+    ano: number;
+    totalMes: number;
+    novosProdutos: number;
+    enviadoChatwoot: boolean;
+  } | null;
+  lastRunError: string | null;
+}
+
+export interface ProductFirstMovementRunResult {
+  ok?: boolean;
+  mes: number;
+  ano: number;
+  totalMes: number;
+  novosProdutos: number;
+  enviadoChatwoot: boolean;
+  produtos: ProductFirstMovementItem[];
+  mensagem: string;
 }
 
 export interface AuthManagedUser {
@@ -107,6 +139,24 @@ export interface AuthManagedUser {
       loja: string | null;
       can_access: boolean;
     };
+    primeiramov: {
+      app_key: "primeiramov";
+      role: "admin" | "manager" | "viewer";
+      loja: string | null;
+      can_access: boolean;
+    };
+    invfull: {
+      app_key: "invfull";
+      role: "admin" | "manager" | "viewer";
+      loja: string | null;
+      can_access: boolean;
+    };
+    prospeccao: {
+      app_key: "prospeccao";
+      role: "admin" | "manager" | "viewer";
+      loja: string | null;
+      can_access: boolean;
+    };
     score: {
       app_key: "score";
       role: "admin" | "manager" | "viewer";
@@ -145,6 +195,24 @@ export interface AuthManagedUser {
       can_access: boolean;
       config?: { setores: string[]; nome_vendedor: string | null } | null;
     };
+    relatoriocustos: {
+      app_key: "relatoriocustos";
+      role: "admin" | "manager" | "viewer";
+      loja: string | null;
+      can_access: boolean;
+    };
+    estoqueminimo: {
+      app_key: "estoqueminimo";
+      role: "admin" | "manager" | "viewer";
+      loja: string | null;
+      can_access: boolean;
+    };
+    notasfiscaisamazon: {
+      app_key: "notasfiscaisamazon";
+      role: "admin" | "manager" | "viewer";
+      loja: string | null;
+      can_access: boolean;
+    };
   };
 }
 
@@ -175,6 +243,29 @@ export async function saveMeta(meta: Omit<Meta, "id">): Promise<void> {
     body: JSON.stringify(meta),
   });
   return handleResponse<void>(res);
+}
+
+export async function getProductFirstMovementMonthly(mes?: number, ano?: number): Promise<ProductFirstMovementItem[]> {
+  const params = new URLSearchParams();
+  if (mes != null) params.set("mes", String(mes));
+  if (ano != null) params.set("ano", String(ano));
+  const qs = params.toString();
+  const res = await fetch(`${BASE}/product-first-movement/monthly${qs ? `?${qs}` : ""}`);
+  return handleResponse<ProductFirstMovementItem[]>(res);
+}
+
+export async function getProductFirstMovementStatus(): Promise<ProductFirstMovementStatus> {
+  const res = await fetch(`${BASE}/product-first-movement/status`);
+  return handleResponse<ProductFirstMovementStatus>(res);
+}
+
+export async function runProductFirstMovementCheck(mes?: number, ano?: number): Promise<ProductFirstMovementRunResult> {
+  const res = await fetch(`${BASE}/product-first-movement/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mes, ano }),
+  });
+  return handleResponse<ProductFirstMovementRunResult>(res);
 }
 
 export async function saveDiasUteis(loja: string, mes: number, ano: number, dias_uteis: number): Promise<void> {

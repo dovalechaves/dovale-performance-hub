@@ -12,13 +12,13 @@ export const IGNORAR_NOMES_BH = [
 
 // Códigos ignorados por loja
 const IGNORAR_CODIGOS: Record<string, number[]> = {
-  l2: [954, 159, 951, 6, 39, 114],        // Santana: E-COMMERCE, JOSI, LIZ, LOJA, PAMELA, THASMIN
+  l2: [954, 951, 6, 39, 114],        // Santana: E-COMMERCE, LIZ, LOJA, PAMELA, THASMIN (JOSI/159 liberada)
   l3: [519, 543, 559, 2049],              // Rio de Janeiro: LENIN, LIGIA BENTO, RAYANE LIMA, REBECA PEREIRA
 };
 
 // Códigos PERMITIDOS por loja (whitelist — somente esses aparecem)
 const PERMITIR_CODIGOS: Record<string, number[]> = {
-  campinas: [24, 42, 6, 44, 3, 43,21],       // BEATRIZ, CAMILA, CHICO, ALESSANDRA, LOJA, MAIARA,RODRIGO
+  campinas: [24, 42, 6, 45, 3, 43,21],       // BEATRIZ, CAMILA, CHICO, ALESSANDRA, LOJA, MAIARA,RODRIGO
 };
 
 // Filtros por nome CONTAINING (auto-descoberta — não precisa manter códigos)

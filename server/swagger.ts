@@ -497,7 +497,11 @@ const spec: object = {
             },
           },
         },
-        responses: { 200: { description: "Disparo iniciado (aguardando aprovação)" } },
+        responses: {
+          202: { description: "Disparo criado (aguardando aprovação)" },
+          400: { description: "Template não encontrado, não aprovado na Meta ou sem a mídia obrigatória" },
+          409: { description: "Já existe disparo ativo, ou template ainda não sincronizado no Chatwoot" },
+        },
       },
     },
     "/disparo/disparos/{id}/logs": {

@@ -4,7 +4,7 @@ import sql from "mssql";
 import { getPool } from "../db/sqlserver";
 import { getComissaoUsuario, podeVerTudo, isADM, type ComissaoUsuario } from "../services/comissao/permissions";
 import { SETORES_ATIVOS, addSetoresGlobais } from "../services/comissao/setores";
-import { ensureVendedorAtivoTable } from "../services/comissao/vendedorAtivoTable";
+import { ensureVendedorAtivoTable, getVendedoresInativos } from "../services/comissao/vendedorAtivoTable";
 import {
   calcularComissaoTelevendas, isTelevendas,
   type MetaConfig, type BonusConfig,
@@ -26,10 +26,12 @@ import {
   groupBy,
   getVendedoresNomesRaw,
   invalidarCacheVinculos,
+  fontesIndisponiveis,
 } from "../services/comissao/dados-externos";
 import { queryFirebird } from "../services/comissao/firebird";
 import { queryMySQL } from "../services/comissao/mysql-ext";
 import { fbSJC, fbSPM, fbLockeyMG, fbLockey, myLockeyRS, myNiteroi } from "../services/comissao/db-externas";
+import { registrarVendedoresVistos, getVendedoresVistosPorSetor } from "../services/comissao/vendedores-vistos-table";
 
 const router = Router();
 
@@ -62,10 +64,11 @@ function vendedorCasaComConfig(nomeReal: unknown, nomeConfig: unknown): boolean 
   return new RegExp(`(^|\\s)${escaparRegex(config)}($|\\s)`).test(real);
 }
 
-function filtrarVendedoresPorConfig(nomes: string[], nomeConfig: string | null): string[] {
+function filtrarVendedoresPorConfig(nomes: string[], nomeConfig: string | null, permitirFallback = true): string[] {
   if (!nomeConfig) return [];
   const matches = nomes.filter((nome) => vendedorCasaComConfig(nome, nomeConfig));
-  return matches.length ? matches : [nomeConfig];
+  if (matches.length) return matches;
+  return permitirFallback ? [nomeConfig] : [];
 }
 
 function podeAcessarSetor(usuario: ComissaoUsuario, setor: string): boolean {
@@ -111,7 +114,21 @@ async function getVendedoresPermitidos(
     userSetores: setoresPermitidos,
     setores: setoresPermitidos,
   });
-  return new Set(vendas.map((v) => normalizarNome(v.USU_NOME)).filter(Boolean));
+
+  const vistosAgora = vendas
+    .map((v) => ({ nome: normalizarNome(v.USU_NOME), setor: v.RVS_NOME ?? "" }))
+    .filter((p) => p.nome && p.setor);
+
+  // Nunca reduz o conjunto: registra (assíncrono, sem bloquear a request) o que foi
+  // visto agora e une com o histórico persistido — assim uma falha temporária de fonte
+  // externa (ex.: VPN de uma loja fora do ar) não faz vendedores "desaparecerem" das
+  // metas/bônus do gestor de um dia para o outro.
+  registrarVendedoresVistos(ano, vistosAgora);
+  const historico = await getVendedoresVistosPorSetor(setoresPermitidos);
+
+  const permitidos = new Set(vistosAgora.map((p) => p.nome));
+  historico.forEach((nome) => permitidos.add(nome));
+  return permitidos;
 }
 
 function filtrarLinhasPorVendedor<T extends Record<string, any>>(
@@ -121,6 +138,13 @@ function filtrarLinhasPorVendedor<T extends Record<string, any>>(
 ): T[] {
   if (!permitidos) return rows;
   return rows.filter((row) => permitidos.has(normalizarNome(row[campo])));
+}
+
+// Avisa (sem bloquear) que alguma fonte externa está temporariamente fora do ar —
+// não altera o corpo da resposta, só soma um header para o frontend exibir um aviso.
+function avisarFontesIndisponiveis(res: any): void {
+  const fontes = fontesIndisponiveis();
+  if (fontes.length) res.set("X-Fontes-Indisponiveis", fontes.map((f) => f.fonte).join("|"));
 }
 
 async function garantirVendedoresDoBody(
@@ -276,7 +300,7 @@ function fbVendas(emp: string) {
     left join produtos_nivel2 pn on pn.codigo = p.pro_nivel2
     left join produtos_nivel1 g on g.codigo = p.pro_nivel1
     left join produtos_nivel3 pg on pg.codigo = p.pro_nivel3
-    where ped.pdv_data > DATEADD(MONTH, -4, current_date)
+    where ped.pdv_data > DATEADD(MONTH, -8, current_date)
     and ped.pdv_psi_codigo not in ('CC')
     and ped.pdv_tve_codigo not in ('6','7','26', '34')
     and c.cli_codigo not in ('44274','98030','49268')
@@ -302,7 +326,7 @@ const FB_VENDAS_LOCKEY = `
   left join produtos_nivel2 pn on pn.codigo = p.pro_nivel2
   left join produtos_nivel1 g on g.codigo = p.pro_nivel1
   left join produtos_nivel3 pg on pg.codigo = p.pro_nivel3
-  where ped.pdv_data > DATEADD(MONTH, -4, current_date)
+  where ped.pdv_data > DATEADD(MONTH, -8, current_date)
   and ped.pdv_psi_codigo not in ('CC')
   and ped.pdv_tve_codigo not in ('6','7','26', '34')
   and c.cli_codigo not in ('44274','98030','49268')
@@ -410,16 +434,24 @@ router.get("/dashboard", async (req: any, res: any) => {
     const vendasAno = filtrarVendas(todasVendas, fBase);
     const vendasPeriodo = filtrarVendas(todasVendas, fPeriodo);
 
+    // Vendedores inativos não aparecem em nenhuma estatística por vendedor
+    let inativosSet = new Set<string>();
+    try {
+      inativosSet = await getVendedoresInativos();
+    } catch { /* se falhar, não filtra inativos */ }
+    const vendasAnoAtivos = vendasAno.filter(v => !v.USU_NOME || !inativosSet.has(v.USU_NOME));
+    const vendasPeriodoAtivos = vendasPeriodo.filter(v => !v.USU_NOME || !inativosSet.has(v.USU_NOME));
+
     // ── Total Ano ──────────────────────────────────────────────────────────
     const total_vendas = somarVendas(vendasAno);
-    const total_vendedores = new Set(vendasAno.filter(v => v.SUM > 0 && v.USU_NOME).map(v => v.USU_NOME)).size;
+    const total_vendedores = new Set(vendasAnoAtivos.filter(v => v.SUM > 0 && v.USU_NOME).map(v => v.USU_NOME)).size;
     const total_setores = new Set(vendasAno.filter(v => v.RVS_NOME).map(v => v.RVS_NOME)).size;
 
     // ── Total Mês / Período ────────────────────────────────────────────────
     const total_vendas_mes = somarVendas(vendasPeriodo);
 
     // ── Top 10 vendedores (período) ────────────────────────────────────────
-    const byVend = groupBy(vendasPeriodo.filter(v => v.USU_NOME), v => `${v.USU_NOME}||${v.RVS_NOME}||${v.EMP}`);
+    const byVend = groupBy(vendasPeriodoAtivos.filter(v => v.USU_NOME), v => `${v.USU_NOME}||${v.RVS_NOME}||${v.EMP}`);
     const top_vendedores = [...byVend.entries()]
       .map(([k, rows]) => {
         const [vendedor, setor, empresa] = k.split('||');
@@ -487,7 +519,7 @@ router.get("/dashboard", async (req: any, res: any) => {
         // PA = vendas televendas no período
         const vendasTv = filtrarVendas(todasVendas, { ...fPeriodo, setores: televendasSetores });
         const paMap: Record<string, number> = {};
-        vendasTv.filter(v => v.USU_NOME).forEach(v => {
+        vendasTv.filter(v => v.USU_NOME && !inativosSet.has(v.USU_NOME)).forEach(v => {
           paMap[v.USU_NOME!] = (paMap[v.USU_NOME!] ?? 0) + v.SUM;
         });
 
@@ -562,6 +594,7 @@ router.get("/dashboard", async (req: any, res: any) => {
       }
     }
 
+    avisarFontesIndisponiveis(res);
     return res.json({
       total_vendas,
       total_vendas_mes,
@@ -574,6 +607,8 @@ router.get("/dashboard", async (req: any, res: any) => {
       total_pa_televendas,
       total_recebimentos_televendas,
       total_comissao_televendas,
+      // Bases externas fora do ar: os totais acima estão sem os dados dessas lojas
+      fontes_indisponiveis: fontesIndisponiveis().map(f => f.fonte),
     });
   } catch (error) {
     console.error('Erro ao buscar dashboard:', error);
@@ -598,9 +633,20 @@ router.get("/filtros", async (req: any, res: any) => {
     const todasVendas = await getVendas(ano);
 
     if (usuario.cargo === 'VENDEDOR') {
-      const nomes = [...new Set(todasVendas.map((v) => v.USU_NOME).filter(Boolean))].sort();
+      const setorFiltroVend = req.query.setor;
+      const setoresFiltroVend = setorFiltroVend
+        ? String(setorFiltroVend).split(',').map((s: string) => s.trim()).filter(Boolean)
+        : [];
+      const vendasVend = filtrarVendas(todasVendas, {
+        inicio: `${ano}-01-01`,
+        fim: `${ano}-12-31`,
+        userSetores: [],
+        setores: setoresFiltroVend,
+      });
+      const nomes = [...new Set(vendasVend.map((v) => v.USU_NOME).filter(Boolean))].sort();
+      avisarFontesIndisponiveis(res);
       return res.json({
-        vendedores: filtrarVendedoresPorConfig(nomes, usuario.nome_vendedor),
+        vendedores: filtrarVendedoresPorConfig(nomes, usuario.nome_vendedor, setoresFiltroVend.length === 0),
         setores: [],
         empresas: [],
       });
@@ -620,12 +666,7 @@ router.get("/filtros", async (req: any, res: any) => {
     // Vendedores inativos (ainda vem do SQL Server)
     let inativosSet = new Set<string>();
     try {
-      await ensureVendedorAtivoTable();
-      const pool = await getPool();
-      const r = await pool.request().query(
-        `SELECT nome_vendedor FROM [TI-PAINELCOMISSAO_VENDEDOR_ATIVO] WHERE ativo = 0`
-      );
-      inativosSet = new Set(r.recordset.map((row: { nome_vendedor: string }) => row.nome_vendedor));
+      inativosSet = await getVendedoresInativos();
     } catch { /* se falhar, não filtra inativos */ }
 
     const vendedores = [...new Set(
@@ -639,6 +680,7 @@ router.get("/filtros", async (req: any, res: any) => {
     const empresas = [...new Set(vendas.map(v => v.EMP).filter(Boolean))].sort();
 
     res.set('Cache-Control', 'private, max-age=60, stale-while-revalidate=120');
+    avisarFontesIndisponiveis(res);
     return res.json({ vendedores, setores, empresas });
   } catch (error) {
     console.error('Erro ao buscar filtros:', error);
@@ -683,13 +725,18 @@ router.get("/vendedores", async (req: any, res: any) => {
       getRecebimentos(ano),
     ]);
 
+    let inativosSet = new Set<string>();
+    try {
+      inativosSet = await getVendedoresInativos();
+    } catch { /* se falhar, não filtra inativos */ }
+
     const vendas = filtrarVendas(todasVendas, {
       inicio: dataInicio,
       fim: dataFim,
       userSetores,
       setores: setor ? [setor] : [],
       empresa: empresa ?? undefined,
-    }).filter(v => v.USU_NOME !== null);
+    }).filter(v => v.USU_NOME !== null && !inativosSet.has(v.USU_NOME));
 
     const recMap: Record<string, number> = {};
     filtrarReceb(todosReceb, { inicio: dataInicio, fim: dataFim }).forEach(r => {
@@ -723,6 +770,7 @@ router.get("/vendedores", async (req: any, res: any) => {
       .sort((a, b) => b.total_vendas - a.total_vendas);
 
     res.set('Cache-Control', 'private, max-age=30, stale-while-revalidate=60');
+    avisarFontesIndisponiveis(res);
     return res.json(resultado);
   } catch (error) {
     console.error('Erro ao buscar vendedores:', error);
@@ -744,6 +792,13 @@ router.get("/vendedor/:nome", async (req: any, res: any) => {
   if (usuario.cargo === 'VENDEDOR' && !vendedorCasaComConfig(vendedor, usuario.nome_vendedor)) {
     return res.status(403).json({ error: 'Sem permissão' });
   }
+
+  try {
+    const inativosSet = await getVendedoresInativos();
+    if (inativosSet.has(vendedor)) {
+      return res.status(404).json({ error: 'Vendedor inativo' });
+    }
+  } catch { /* se falhar, não bloqueia por inativo */ }
 
   const ano = parseInt(req.query.ano || new Date().getFullYear().toString());
   const mes = req.query.mes;
@@ -988,6 +1043,7 @@ router.get("/vendedor/:nome", async (req: any, res: any) => {
             .query(`SELECT META1_VALOR as meta1_valor, META1_PERCENTUAL as meta1_percentual,
                            META2_VALOR as meta2_valor, META2_PERCENTUAL as meta2_percentual,
                            META3_VALOR as meta3_valor, META3_PERCENTUAL as meta3_percentual,
+                           META4_VALOR as meta4_valor, META4_PERCENTUAL as meta4_percentual,
                            METADESAFIO_VALOR as metadesafio_valor, METADESAFIO_PERCENTUAL as metadesafio_percentual,
                            PERCENTUAL_SEM_META as percentual_sem_meta
                     FROM [TI-PAINELCOMISSAO_DISTRIBUIDORES_METAS]
@@ -998,7 +1054,8 @@ router.get("/vendedor/:nome", async (req: any, res: any) => {
             .input('da', sql.Int, ano)
             .input('dm', sql.Int, parseInt(mes))
             .query(`SELECT BONUS1_VALOR as bonus1_valor, BONUS2_VALOR as bonus2_valor,
-                           BONUS3_VALOR as bonus3_valor, BONUSDESAFIO_VALOR as bonusdesafio_valor
+                           BONUS3_VALOR as bonus3_valor, BONUS4_VALOR as bonus4_valor,
+                           BONUSDESAFIO_VALOR as bonusdesafio_valor
                     FROM [TI-PAINELCOMISSAO_DISTRIBUIDORES_BONUS]
                     WHERE VENDEDOR=@dv AND ANO=@da AND MES=@dm`)
             .catch(() => ({ recordset: [] as Array<Record<string, unknown>> })),
@@ -1014,6 +1071,7 @@ router.get("/vendedor/:nome", async (req: any, res: any) => {
       }
     }
 
+    avisarFontesIndisponiveis(res);
     return res.json({
       resumo,
       mensal,
@@ -1041,6 +1099,85 @@ router.get("/vendedor/:nome", async (req: any, res: any) => {
     });
   } catch (error) {
     console.error('Erro ao buscar vendedor:', error);
+    return res.status(500).json({ error: 'Erro ao buscar dados' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GET /vendedor/:nome/evolucao — últimos 6 meses (total vendas + PA)
+// ═══════════════════════════════════════════════════════════════════════════
+router.get("/vendedor/:nome/evolucao", async (req: any, res: any) => {
+  const actor = getActor(req);
+  if (!actor) return res.status(401).json({ error: "Não autenticado" });
+  const usuario = await getComissaoUsuario(actor);
+  if (!usuario) return res.status(403).json({ error: "Sem permissão" });
+
+  const vendedor = decodeURIComponent(req.params.nome).trim();
+
+  if (usuario.cargo === 'VENDEDOR' && !vendedorCasaComConfig(vendedor, usuario.nome_vendedor)) {
+    return res.status(403).json({ error: 'Sem permissão' });
+  }
+
+  try {
+    const inativosSet = await getVendedoresInativos();
+    if (inativosSet.has(vendedor)) {
+      return res.status(404).json({ error: 'Vendedor inativo' });
+    }
+  } catch { /* se falhar, não bloqueia por inativo */ }
+
+  const hoje = new Date();
+  const anoRef = parseInt(req.query.ano) || hoje.getFullYear();
+  const mesRef = parseInt(req.query.mes) || hoje.getMonth() + 1;
+
+  // Últimos 6 meses terminando em anoRef/mesRef (cruza virada de ano se necessário)
+  const meses: { ano: number; mes: number }[] = [];
+  let a = anoRef, m = mesRef;
+  for (let i = 0; i < 6; i++) {
+    meses.unshift({ ano: a, mes: m });
+    m -= 1;
+    if (m === 0) { m = 12; a -= 1; }
+  }
+
+  try {
+    const anosNecessarios = [...new Set(meses.map((x) => x.ano))];
+    const vendasPorAno = await Promise.all(anosNecessarios.map((ano) => getVendas(ano)));
+    const todasVendas = vendasPorAno.flat();
+
+    const userSetores = usuario.cargo === "GESTOR" ? usuario.setores : [];
+    const primeiroMes = meses[0];
+    const ultimoMes = meses[meses.length - 1];
+    const inicio = `${primeiroMes.ano}-${String(primeiroMes.mes).padStart(2, '0')}-01`;
+    const fim = new Date(ultimoMes.ano, ultimoMes.mes, 0).toISOString().split('T')[0];
+
+    const vendasVendedor = filtrarVendas(todasVendas, { inicio, fim, userSetores, setores: [], vendedor });
+
+    if (usuario.cargo === "GESTOR" && vendasVendedor.length === 0) {
+      return res.status(403).json({ error: "Sem permissão" });
+    }
+
+    const setorDoVendedor = vendasVendedor[0]?.RVS_NOME ?? '';
+    if (!podeVerTudo(usuario.cargo) && usuario.cargo !== 'VENDEDOR' && setorDoVendedor && !usuario.setores.includes(setorDoVendedor)) {
+      return res.status(403).json({ error: 'Sem permissão' });
+    }
+
+    const mapa = new Map<string, { total_vendas: number; valor_pa: number }>();
+    meses.forEach(({ ano, mes }) => mapa.set(`${ano}-${mes}`, { total_vendas: 0, valor_pa: 0 }));
+
+    vendasVendedor.forEach((v) => {
+      const key = `${v.PDV_DATA.getFullYear()}-${v.PDV_DATA.getMonth() + 1}`;
+      const entry = mapa.get(key);
+      if (!entry) return;
+      entry.total_vendas += v.SUM;
+      const isPA = v.SUBGRUPO === 'CHAVE' || ['PRODUÇÃO', 'DOVALE'].includes(v.GRUPO ?? '');
+      if (isPA) entry.valor_pa += v.SUM;
+    });
+
+    const evolucao = meses.map(({ ano, mes }) => ({ ano, mes, ...mapa.get(`${ano}-${mes}`)! }));
+
+    avisarFontesIndisponiveis(res);
+    return res.json({ evolucao, is_televendas: isTelevendas(setorDoVendedor) });
+  } catch (error) {
+    console.error('Erro ao buscar evolução do vendedor:', error);
     return res.status(500).json({ error: 'Erro ao buscar dados' });
   }
 });
@@ -1089,6 +1226,7 @@ router.get("/vendedor-ativo", async (req: any, res: any) => {
       "nome",
     );
 
+    avisarFontesIndisponiveis(res);
     return res.json(vendors);
   } catch (err) {
     console.error('[vendedor-ativo GET]', err);
@@ -1155,6 +1293,7 @@ router.get("/metas", async (req: any, res: any) => {
       .request()
       .query('SELECT * FROM VendedorMeta ORDER BY nome_vendedor');
     const permitidos = await getVendedoresPermitidos(usuario);
+    avisarFontesIndisponiveis(res);
     return res.json(filtrarLinhasPorVendedor(result.recordset, permitidos));
   } catch (error) {
     console.error('Erro ao buscar metas:', error);
@@ -1260,6 +1399,7 @@ router.get("/metas-mensais", async (req: any, res: any) => {
     );
     const permitidos = await getVendedoresPermitidos(usuario, ano ? parseInt(ano) : new Date().getFullYear(), SETORES_TELEVENDAS);
     res.set('Cache-Control', 'private, max-age=60, stale-while-revalidate=120');
+    avisarFontesIndisponiveis(res);
     return res.json(filtrarLinhasPorVendedor(result.recordset, permitidos));
   } catch (error) {
     console.error('Erro ao buscar metas mensais:', error);
@@ -1452,6 +1592,7 @@ router.get("/bonus-mensais", async (req: any, res: any) => {
       FROM ${TABELA_BONUS_MENSAIS} ${where} ORDER BY VENDEDOR
     `);
     const permitidos = await getVendedoresPermitidos(usuario, ano ? parseInt(ano) : new Date().getFullYear(), SETORES_TELEVENDAS);
+    avisarFontesIndisponiveis(res);
     return res.json(filtrarLinhasPorVendedor(result.recordset, permitidos));
   } catch (error) {
     console.error('Erro ao buscar bonus:', error);
@@ -1588,6 +1729,7 @@ router.get("/recebimentos-media", async (req: any, res: any) => {
 
     const media = resultados.reduce((s, r) => s + r.total, 0) / resultados.length;
 
+    avisarFontesIndisponiveis(res);
     return res.json({
       media: Math.round(media * 100) / 100,
       meses: resultados,
@@ -1657,6 +1799,7 @@ router.get("/vendas-media-setor", async (req: any, res: any) => {
 
     const media = resultados.reduce((s, r) => s + r.total, 0) / resultados.length;
 
+    avisarFontesIndisponiveis(res);
     return res.json({
       media: Math.round(media * 100) / 100,
       meses: resultados,
@@ -1868,6 +2011,7 @@ router.get("/distribuidores/config", async (req: any, res: any) => {
                  META1_VALOR as meta1_valor, META1_PERCENTUAL as meta1_percentual,
                  META2_VALOR as meta2_valor, META2_PERCENTUAL as meta2_percentual,
                  META3_VALOR as meta3_valor, META3_PERCENTUAL as meta3_percentual,
+                 META4_VALOR as meta4_valor, META4_PERCENTUAL as meta4_percentual,
                  METADESAFIO_VALOR as metadesafio_valor, METADESAFIO_PERCENTUAL as metadesafio_percentual,
                  PERCENTUAL_SEM_META as percentual_sem_meta
           FROM [TI-PAINELCOMISSAO_DISTRIBUIDORES_METAS]
@@ -1879,7 +2023,8 @@ router.get("/distribuidores/config", async (req: any, res: any) => {
         .query(`
           SELECT VENDEDOR as nome_vendedor,
                  BONUS1_VALOR as bonus1_valor, BONUS2_VALOR as bonus2_valor,
-                 BONUS3_VALOR as bonus3_valor, BONUSDESAFIO_VALOR as bonusdesafio_valor
+                 BONUS3_VALOR as bonus3_valor, BONUS4_VALOR as bonus4_valor,
+                 BONUSDESAFIO_VALOR as bonusdesafio_valor
           FROM [TI-PAINELCOMISSAO_DISTRIBUIDORES_BONUS]
           WHERE ANO = @ano AND MES = @mes
         `),
@@ -1887,6 +2032,7 @@ router.get("/distribuidores/config", async (req: any, res: any) => {
 
     res.set('Cache-Control', 'private, max-age=60, stale-while-revalidate=120');
     const permitidos = await getVendedoresPermitidos(usuario, ano, ["DISTRIBUIDORES"]);
+    avisarFontesIndisponiveis(res);
     return res.json({
       metas: filtrarLinhasPorVendedor(metasResult.recordset, permitidos),
       bonus: filtrarLinhasPorVendedor(bonusResult.recordset, permitidos),
@@ -1921,12 +2067,14 @@ router.get("/distribuidores/metas", async (req: any, res: any) => {
                META1_VALOR as meta1_valor, META1_PERCENTUAL as meta1_percentual,
                META2_VALOR as meta2_valor, META2_PERCENTUAL as meta2_percentual,
                META3_VALOR as meta3_valor, META3_PERCENTUAL as meta3_percentual,
+               META4_VALOR as meta4_valor, META4_PERCENTUAL as meta4_percentual,
                METADESAFIO_VALOR as metadesafio_valor, METADESAFIO_PERCENTUAL as metadesafio_percentual,
                PERCENTUAL_SEM_META as percentual_sem_meta
         FROM [TI-PAINELCOMISSAO_DISTRIBUIDORES_METAS]
         WHERE ANO = @ano AND MES = @mes
       `);
     const permitidos = await getVendedoresPermitidos(usuario, ano, ["DISTRIBUIDORES"]);
+    avisarFontesIndisponiveis(res);
     return res.json(filtrarLinhasPorVendedor(result.recordset, permitidos));
   } catch (e) {
     console.error('[distribuidores/metas GET]', e);
@@ -1947,6 +2095,7 @@ router.put("/distribuidores/metas", async (req: any, res: any) => {
     meta1_valor: number; meta1_percentual: number;
     meta2_valor: number; meta2_percentual: number;
     meta3_valor: number; meta3_percentual: number;
+    meta4_valor: number; meta4_percentual: number;
     metadesafio_valor: number; metadesafio_percentual: number;
     percentual_sem_meta: number;
   }> = req.body;
@@ -1970,6 +2119,8 @@ router.put("/distribuidores/metas", async (req: any, res: any) => {
         .input('m2p', sql.Float, row.meta2_percentual || 0)
         .input('m3v', sql.Float, row.meta3_valor || 0)
         .input('m3p', sql.Float, row.meta3_percentual || 0)
+        .input('m4v', sql.Float, row.meta4_valor || 0)
+        .input('m4p', sql.Float, row.meta4_percentual || 0)
         .input('mdv', sql.Float, row.metadesafio_valor || 0)
         .input('mdp', sql.Float, row.metadesafio_percentual || 0)
         .input('psm', sql.Float, row.percentual_sem_meta || 0)
@@ -1980,12 +2131,13 @@ router.put("/distribuidores/metas", async (req: any, res: any) => {
             META1_VALOR=@m1v, META1_PERCENTUAL=@m1p,
             META2_VALOR=@m2v, META2_PERCENTUAL=@m2p,
             META3_VALOR=@m3v, META3_PERCENTUAL=@m3p,
+            META4_VALOR=@m4v, META4_PERCENTUAL=@m4p,
             METADESAFIO_VALOR=@mdv, METADESAFIO_PERCENTUAL=@mdp,
             PERCENTUAL_SEM_META=@psm
           WHEN NOT MATCHED THEN INSERT
             (VENDEDOR,ANO,MES,META1_VALOR,META1_PERCENTUAL,META2_VALOR,META2_PERCENTUAL,
-             META3_VALOR,META3_PERCENTUAL,METADESAFIO_VALOR,METADESAFIO_PERCENTUAL,PERCENTUAL_SEM_META)
-          VALUES(@vend,@ano,@mes,@m1v,@m1p,@m2v,@m2p,@m3v,@m3p,@mdv,@mdp,@psm);
+             META3_VALOR,META3_PERCENTUAL,META4_VALOR,META4_PERCENTUAL,METADESAFIO_VALOR,METADESAFIO_PERCENTUAL,PERCENTUAL_SEM_META)
+          VALUES(@vend,@ano,@mes,@m1v,@m1p,@m2v,@m2p,@m3v,@m3p,@m4v,@m4p,@mdv,@mdp,@psm);
         `);
     }
     return res.json({ ok: true });
@@ -2017,11 +2169,13 @@ router.get("/distribuidores/bonus", async (req: any, res: any) => {
       .query(`
         SELECT VENDEDOR as nome_vendedor,
                BONUS1_VALOR as bonus1_valor, BONUS2_VALOR as bonus2_valor,
-               BONUS3_VALOR as bonus3_valor, BONUSDESAFIO_VALOR as bonusdesafio_valor
+               BONUS3_VALOR as bonus3_valor, BONUS4_VALOR as bonus4_valor,
+               BONUSDESAFIO_VALOR as bonusdesafio_valor
         FROM [TI-PAINELCOMISSAO_DISTRIBUIDORES_BONUS]
         WHERE ANO = @ano AND MES = @mes
       `);
     const permitidos = await getVendedoresPermitidos(usuario, ano, ["DISTRIBUIDORES"]);
+    avisarFontesIndisponiveis(res);
     return res.json(filtrarLinhasPorVendedor(result.recordset, permitidos));
   } catch (e) {
     console.error('[distribuidores/bonus GET]', e);
@@ -2039,7 +2193,7 @@ router.put("/distribuidores/bonus", async (req: any, res: any) => {
 
   const body: Array<{
     nome_vendedor: string; ano: number; mes: number;
-    bonus1_valor: number; bonus2_valor: number; bonus3_valor: number; bonusdesafio_valor: number;
+    bonus1_valor: number; bonus2_valor: number; bonus3_valor: number; bonus4_valor: number; bonusdesafio_valor: number;
   }> = req.body;
   if (!exigirSetor(usuario, res, "DISTRIBUIDORES")) return;
 
@@ -2058,13 +2212,14 @@ router.put("/distribuidores/bonus", async (req: any, res: any) => {
         .input('b1', sql.Float, row.bonus1_valor || 0)
         .input('b2', sql.Float, row.bonus2_valor || 0)
         .input('b3', sql.Float, row.bonus3_valor || 0)
+        .input('b4', sql.Float, row.bonus4_valor || 0)
         .input('bd', sql.Float, row.bonusdesafio_valor || 0)
         .query(`
           MERGE [TI-PAINELCOMISSAO_DISTRIBUIDORES_BONUS] AS t
           USING (SELECT @vend AS V, @ano AS A, @mes AS M) AS s ON t.VENDEDOR=s.V AND t.ANO=s.A AND t.MES=s.M
-          WHEN MATCHED THEN UPDATE SET BONUS1_VALOR=@b1,BONUS2_VALOR=@b2,BONUS3_VALOR=@b3,BONUSDESAFIO_VALOR=@bd
-          WHEN NOT MATCHED THEN INSERT (VENDEDOR,ANO,MES,BONUS1_VALOR,BONUS2_VALOR,BONUS3_VALOR,BONUSDESAFIO_VALOR)
-          VALUES(@vend,@ano,@mes,@b1,@b2,@b3,@bd);
+          WHEN MATCHED THEN UPDATE SET BONUS1_VALOR=@b1,BONUS2_VALOR=@b2,BONUS3_VALOR=@b3,BONUS4_VALOR=@b4,BONUSDESAFIO_VALOR=@bd
+          WHEN NOT MATCHED THEN INSERT (VENDEDOR,ANO,MES,BONUS1_VALOR,BONUS2_VALOR,BONUS3_VALOR,BONUS4_VALOR,BONUSDESAFIO_VALOR)
+          VALUES(@vend,@ano,@mes,@b1,@b2,@b3,@b4,@bd);
         `);
     }
     return res.json({ ok: true });
@@ -2099,6 +2254,7 @@ router.get("/distribuidores/vinculos", async (req: any, res: any) => {
           permitidos.has(normalizarNome(row.vendedor_principal))
         )
       : result.recordset;
+    avisarFontesIndisponiveis(res);
     return res.json(rows);
   } catch (e) {
     console.error('[distribuidores/vinculos GET]', e);
@@ -2167,6 +2323,7 @@ router.get("/distribuidores/vendedores-raw", async (req: any, res: any) => {
   try {
     const vendedores = await getVendedoresNomesRaw();
     const permitidos = await getVendedoresPermitidos(usuario, undefined, ["DISTRIBUIDORES"]);
+    avisarFontesIndisponiveis(res);
     return res.json({
       vendedores: permitidos
         ? vendedores.filter((nome: string) => permitidos.has(normalizarNome(nome)))
@@ -2235,6 +2392,7 @@ router.get("/ferragens/config", async (req: any, res: any) => {
 
     res.set('Cache-Control', 'private, max-age=60, stale-while-revalidate=120');
     const permitidos = await getVendedoresPermitidos(usuario, ano, ["FERRAGENS"]);
+    avisarFontesIndisponiveis(res);
     return res.json({
       metas: filtrarLinhasPorVendedor(metasResult.recordset, permitidos),
       bonus: filtrarLinhasPorVendedor(bonusResult.recordset, permitidos),
@@ -2276,6 +2434,7 @@ router.get("/ferragens/metas", async (req: any, res: any) => {
         WHERE ANO = @ano AND MES = @mes
       `);
     const permitidos = await getVendedoresPermitidos(usuario, ano, ["FERRAGENS"]);
+    avisarFontesIndisponiveis(res);
     return res.json(filtrarLinhasPorVendedor(result.recordset, permitidos));
   } catch (e) {
     console.error('[ferragens/metas GET]', e);
@@ -2371,6 +2530,7 @@ router.get("/ferragens/bonus", async (req: any, res: any) => {
         WHERE ANO = @ano AND MES = @mes
       `);
     const permitidos = await getVendedoresPermitidos(usuario, ano, ["FERRAGENS"]);
+    avisarFontesIndisponiveis(res);
     return res.json(filtrarLinhasPorVendedor(result.recordset, permitidos));
   } catch (e) {
     console.error('[ferragens/bonus GET]', e);

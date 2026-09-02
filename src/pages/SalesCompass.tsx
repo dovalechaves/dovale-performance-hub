@@ -368,6 +368,7 @@ function ContatoModal({ cliente, onClose, onCrm, onWhatsApp }: { cliente: Client
           <div><h3 className="font-bold">{cliente.nome}</h3><StatusBadges c={cliente} /></div>
         </div>
         <div className="space-y-2 text-sm text-muted-foreground mb-6">
+          <p><strong className="text-foreground">Código:</strong> {cliente.id}</p>
           <p><Phone className="inline h-3 w-3 mr-1" /><strong className="text-foreground">Tel:</strong> {cliente.telefone}</p>
           <p><strong className="text-foreground">Ticket médio:</strong> {moeda(cliente.ticketMedio)}</p>
           <p><strong className="text-foreground">Última compra:</strong> {moeda(cliente.valorUltimaCompra)} (há {dias} dias)</p>
@@ -397,6 +398,7 @@ function ClienteCard({ cliente, potencial, gc, onCrm }: { cliente: Cliente; pote
         <div className={`h-10 w-10 rounded-xl flex items-center justify-center font-bold shrink-0 text-sm ${cc.bg} ${cc.text}`}>{cliente.categoria}</div>
         <div className="min-w-0">
           <p className="font-semibold text-sm truncate">{cliente.nome}</p>
+          <p className="text-[10px] text-muted-foreground">Cód: {cliente.id}</p>
           <div className="mt-0.5 flex flex-wrap gap-1">
             <StatusBadges c={cliente} />
             {potencial && <span className="text-[10px] bg-primary/10 text-primary border border-primary/30 rounded-full px-1.5 py-0.5">✨ Hoje</span>}
@@ -852,6 +854,7 @@ function CategoriaView({ loja, repCodigo, repLogin, categoria, onBack }:
                         <p className="font-semibold truncate">{c.nome}</p>
                         <div className="mt-1 mb-1"><StatusBadges c={c} /></div>
                         <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+                          <span>Cód: {c.id}</span>
                           <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{c.telefone}</span>
                           <span>Há {dias} dias</span>
                           <span className="flex items-center gap-1"><ShoppingBag className="h-3 w-3" /> TM: {moeda(c.ticketMedio)}</span>
@@ -894,7 +897,10 @@ function CategoriaView({ loja, repCodigo, repLogin, categoria, onBack }:
                     </div>
                     <div className="min-w-0">
                       <p className="font-semibold truncate">{c.nome}</p>
-                      <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5"><Phone className="h-3 w-3" />{c.telefone}</p>
+                      <p className="text-xs text-muted-foreground flex items-center gap-2 mt-0.5">
+                        <span>Cód: {c.id}</span>
+                        <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{c.telefone}</span>
+                      </p>
                       <div className="mt-1"><StatusBadges c={c} /></div>
                     </div>
                   </div>
@@ -1300,7 +1306,7 @@ function GerenteView({ loja: initialLoja, repLogin, isAdmin, onSetView }:
                       <div className="flex-1 min-w-0">
                         <p className="font-bold truncate">{c.nome}</p>
                         <p className="text-[10px] text-muted-foreground mt-0.5">
-                          {c.telefone}
+                          Cód: {c.id} • {c.telefone}
                           {stats.vendedorMap[String(c.repId)] && <> • <span className="text-primary font-medium">{stats.vendedorMap[String(c.repId)]}</span></>}
                         </p>
                       </div>
@@ -1356,8 +1362,8 @@ function GerenteView({ loja: initialLoja, repLogin, isAdmin, onSetView }:
 // ══════════════════════════════════════════════════════════════════════════════
 // ── VIEW: Relatórios
 // ══════════════════════════════════════════════════════════════════════════════
-function RelatoriosView({ loja: initialLoja, isAdmin, onBack }:
-  { loja: string; isAdmin: boolean; onBack: () => void }) {
+function RelatoriosView({ loja: initialLoja, isAdmin, repLogin, role, onBack }:
+  { loja: string; isAdmin: boolean; repLogin: string; role: string; onBack: () => void }) {
 
   const [loja, setLoja] = useState(initialLoja || "l3");
   const [filtroStatus, setFiltroStatus] = useState("todos");
@@ -1372,12 +1378,15 @@ function RelatoriosView({ loja: initialLoja, isAdmin, onBack }:
   });
 
   const filtrados = useMemo(() => logs.filter(l => {
+    // Viewer só vê seu próprio CRM
+    if (role === "viewer" && l.repLogin !== repLogin) return false;
+
     if (filtroStatus !== "todos" && l.status !== filtroStatus) return false;
     if (filtroInicio && new Date(l.dataFull) < new Date(filtroInicio)) return false;
     if (filtroFim && new Date(l.dataFull) > new Date(filtroFim + "T23:59:59")) return false;
     if (filtroCliente && !l.nomeCliente?.toLowerCase().includes(filtroCliente.toLowerCase())) return false;
     return true;
-  }), [logs, filtroStatus, filtroInicio, filtroFim, filtroCliente]);
+  }), [logs, filtroStatus, filtroInicio, filtroFim, filtroCliente, role, repLogin]);
 
   const exportarCSV = () => {
     const header = "Data,Loja,Vendedor,ID Cliente,Cliente,Telefone,Status,Observação\n";
@@ -1409,7 +1418,7 @@ function RelatoriosView({ loja: initialLoja, isAdmin, onBack }:
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        {isAdmin && (
+        {!["viewer"].includes(role) && (
           <div className="relative">
             <select value={loja} onChange={e=>setLoja(e.target.value)}
               className="appearance-none w-full rounded-lg border border-border bg-muted px-3 py-2 pr-7 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50">
@@ -1598,7 +1607,7 @@ export default function SalesCompass() {
         )}
         {/* ── Relatórios ──────────────────────────────────────────────── */}
         {view === "relatorios" && (
-          <RelatoriosView loja={loja} isAdmin={isAdmin}
+          <RelatoriosView loja={loja} isAdmin={isAdmin} repLogin={repLogin} role={role}
             onBack={() => setView(isAdmin ? "admin" : isGerente ? "gerente" : "rep")} />
         )}
       </main>

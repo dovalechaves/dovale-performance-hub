@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import { BarChart3, Calculator, LogOut, Sun, Moon, Users, RefreshCw, Loader2, ChevronDown, Settings2, Send, Archive, Bot, Database, ClipboardList, UserPlus, ShieldCheck, BellRing, ShoppingCart, Sparkles, Compass, TrendingDown, Coins, X } from "lucide-react";
+import { BarChart3, Calculator, LogOut, Sun, Moon, Users, RefreshCw, Loader2, ChevronDown, Settings2, Send, Archive, Bot, Database, ClipboardList, UserPlus, PackageSearch, ShieldCheck, BellRing, ShoppingCart, Sparkles, Compass, TrendingDown, Coins, Search, X, AlertTriangle, FileText } from "lucide-react";
 import logoBlue from "@/assets/logo-blue.png";
 import logoWhite from "@/assets/logo-white.png";
 import { API_BASE, LOJAS, getAuthUsers, updateAuthUserRole, type AuthManagedUser } from "@/services/api";
@@ -140,6 +140,41 @@ const APPS: AppCard[] = [
     route: "/comissao",
     color: "from-yellow-500/20 to-amber-600/10 border-yellow-500/30 hover:border-yellow-500/60",
   },
+  {
+    title: "Primeira Movimentação",
+    description: "Monitore produtos com primeira movimentação no mês e notifique via Chatwoot.",
+    icon: <PackageSearch className="w-8 h-8" />,
+    route: "/primeira-movimentacao",
+    color: "from-lime-500/20 to-lime-600/10 border-lime-500/30 hover:border-lime-500/60",
+  },
+  {
+    title: "Inventário FULL API",
+    description: "Verifique estoques FULL nos marketplaces (ML, Shopee, Amazon) e gere inventário.",
+    icon: <ShoppingCart className="w-8 h-8" />,
+    route: "/inventario-full-api",
+    color: "from-indigo-500/20 to-indigo-600/10 border-indigo-500/30 hover:border-indigo-500/60",
+  },
+  {
+    title: "Prospecção",
+    description: "Consulte a cobertura da base por região: % de clientes na base e oportunidades por estado e cidade.",
+    icon: <Search className="w-8 h-8" />,
+    route: "/prospeccao",
+    color: "from-teal-500/20 to-cyan-600/10 border-teal-500/30 hover:border-teal-500/60",
+  },
+  {
+    title: "Estoque Mínimo",
+    description: "Alerta de produtos da base SJC com saldo abaixo do estoque mínimo cadastrado no Microsys.",
+    icon: <AlertTriangle className="w-8 h-8" />,
+    route: "/estoque-minimo",
+    color: "from-amber-500/20 to-red-600/10 border-amber-500/30 hover:border-amber-500/60",
+  },
+  {
+    title: "Notas Fiscais Amazon",
+    description: "Importe o ZIP do Faturador Amazon FBA Classic e concilie as notas fiscais com os pedidos.",
+    icon: <FileText className="w-8 h-8" />,
+    route: "/notas-fiscais-amazon",
+    color: "from-blue-500/20 to-indigo-600/10 border-blue-500/30 hover:border-blue-500/60",
+  },
 ];
 
 const APP_BY_ROUTE: Record<string, keyof AuthManagedUser["apps"]> = {
@@ -156,8 +191,13 @@ const APP_BY_ROUTE: Record<string, keyof AuthManagedUser["apps"]> = {
   "/ecommerce-disparo": "ecommercedisparo",
   "/sugestao-compras": "sugestaocompras",
   "/sales-compass": "salescompass",
-  "/relatorio-custos": "disparo",
+  "/relatorio-custos": "relatoriocustos",
   "/comissao": "painelcomissao",
+  "/primeira-movimentacao": "primeiramov",
+  "/inventario-full-api": "invfull",
+  "/prospeccao": "prospeccao",
+  "/estoque-minimo": "estoqueminimo",
+  "/notas-fiscais-amazon": "notasfiscaisamazon",
 };
 
 // ─── Rep Selector (Sales Compass) ────────────────────────────────────────────
@@ -200,7 +240,7 @@ function RepSelectorCell({
         scVendCache[lojaKey] = list;
         setOptions(list);
       })
-      .catch(() => {})
+      .catch((err) => console.error("[RepSelectorCell] falha ao buscar vendedores:", err))
       .finally(() => setLoading(false));
   }, [lojaKey]);
 
@@ -280,11 +320,20 @@ export default function Hub() {
     role: "viewer", setores: [], nome_vendedor: "",
   });
   const [openingPainel, setOpeningPainel] = useState(false);
+  const [estoqueMinimoCount, setEstoqueMinimoCount] = useState(0);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
     localStorage.setItem("dovale_theme", dark ? "dark" : "light");
   }, [dark]);
+
+  useEffect(() => {
+    if (!user?.apps.estoqueminimo?.canAccess) return;
+    fetch(`${API_BASE}/estoque-minimo/status`)
+      .then((r) => r.json())
+      .then((data: { count?: number }) => setEstoqueMinimoCount(data.count ?? 0))
+      .catch(() => {});
+  }, [user?.apps.estoqueminimo?.canAccess]);
 
   const isAdmin = user?.hubRole === "admin";
   const firstFromUser = user?.usuario.split(".")[0] ?? "";
@@ -511,8 +560,13 @@ export default function Hub() {
               <button
                 key={app.route}
                 onClick={() => openApp(app)}
-                className={`text-left p-6 rounded-2xl border bg-gradient-to-br ${app.color} transition-all duration-200 hover:scale-[1.02] hover:shadow-lg group`}
+                className={`relative text-left p-6 rounded-2xl border bg-gradient-to-br ${app.color} transition-all duration-200 hover:scale-[1.02] hover:shadow-lg group`}
               >
+                {app.route === "/estoque-minimo" && estoqueMinimoCount > 0 && (
+                  <span className="absolute top-3 right-3 inline-flex items-center justify-center min-w-[1.5rem] h-6 px-1.5 rounded-full bg-destructive text-destructive-foreground text-xs font-semibold">
+                    {estoqueMinimoCount}
+                  </span>
+                )}
                 <div className="text-primary mb-4 group-hover:scale-110 transition-transform duration-200">
                   {app.icon}
                 </div>
@@ -577,7 +631,7 @@ export default function Hub() {
             </div>
 
             <div className="rounded-xl border border-border overflow-x-auto">
-              <table className="w-full text-sm min-w-[2280px]">
+              <table className="w-full text-sm min-w-[2900px]">
                 <thead>
                   <tr className="border-b border-border bg-muted/50">
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Usuário</th>
@@ -604,10 +658,18 @@ export default function Hub() {
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Inv.</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Loja Inv.</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Usr Sistema</th>
+                    <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Prospecção</th>
+                    <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Prosp.</th>
                     <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Score</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Score</th>
                     <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Cobrança</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Cobr.</th>
+                    <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Rel. Custos</th>
+                    <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Rel.C.</th>
+                    <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Est. Mínimo</th>
+                    <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Est.Min.</th>
+                    <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">NF Amazon</th>
+                    <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role NF Amazon</th>
                     <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Ecommerce</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role EC</th>
                     <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Sug. Compras</th>
@@ -617,19 +679,25 @@ export default function Hub() {
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Loja SCmp</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Rep SCmp</th>
                     <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Painel Comis.</th>
+                    <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Onboarding</th>
+                    <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Onb.</th>
+                    <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">1ª Mov.</th>
+                    <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role 1ª Mov.</th>
+                    <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Inv. FULL</th>
+                    <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Inv.FULL</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {usersLoading ? (
                     <tr>
-                      <td colSpan={36} className="px-4 py-8 text-center text-muted-foreground">
+                      <td colSpan={50} className="px-4 py-8 text-center text-muted-foreground">
                         <Loader2 className="w-5 h-5 animate-spin mx-auto" />
                       </td>
                     </tr>
                   ) : filteredManagedUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={36} className="px-4 py-8 text-center text-muted-foreground text-xs">
+                      <td colSpan={48} className="px-4 py-8 text-center text-muted-foreground text-xs">
                         {appUserFilter === "all"
                           ? "Nenhum usuário encontrado para a busca informada."
                           : "Nenhum usuário habilitado no Hub e no app selecionado."}</td></tr>
@@ -681,6 +749,10 @@ export default function Hub() {
                                     ...u.apps.onboarding,
                                     can_access: enabled ? u.apps.onboarding.can_access : false,
                                   },
+                                  prospeccao: {
+                                    ...(u.apps as any).prospeccao,
+                                    can_access: enabled ? ((u.apps as any).prospeccao?.can_access ?? false) : false,
+                                  },
                                   score: {
                                     ...u.apps.score,
                                     can_access: enabled ? u.apps.score.can_access : false,
@@ -688,6 +760,18 @@ export default function Hub() {
                                   cobranca: {
                                     ...u.apps.cobranca,
                                     can_access: enabled ? u.apps.cobranca.can_access : false,
+                                  },
+                                  relatoriocustos: {
+                                    ...(u.apps as any).relatoriocustos,
+                                    can_access: enabled ? ((u.apps as any).relatoriocustos?.can_access ?? false) : false,
+                                  },
+                                  estoqueminimo: {
+                                    ...(u.apps as any).estoqueminimo,
+                                    can_access: enabled ? ((u.apps as any).estoqueminimo?.can_access ?? false) : false,
+                                  },
+                                  notasfiscaisamazon: {
+                                    ...(u.apps as any).notasfiscaisamazon,
+                                    can_access: enabled ? ((u.apps as any).notasfiscaisamazon?.can_access ?? false) : false,
                                   },
                                   ecommercedisparo: {
                                     ...u.apps.ecommercedisparo,
@@ -704,6 +788,14 @@ export default function Hub() {
                                   painelcomissao: {
                                     ...(u.apps as any).painelcomissao,
                                     can_access: enabled ? ((u.apps as any).painelcomissao?.can_access ?? false) : false,
+                                  },
+                                  primeiramov: {
+                                    ...u.apps.primeiramov,
+                                    can_access: enabled ? u.apps.primeiramov.can_access : false,
+                                  },
+                                  invfull: {
+                                    ...u.apps.invfull,
+                                    can_access: enabled ? u.apps.invfull.can_access : false,
                                   },
                                 } as any,
                                 can_access_dashboard: enabled ? u.apps.dashboard.can_access : false,
@@ -1262,6 +1354,57 @@ export default function Hub() {
                         <td className="px-4 py-3 text-center">
                           <input
                             type="checkbox"
+                            checked={(u.apps as any).prospeccao?.can_access ?? false}
+                            onChange={async (e) => {
+                              const next: AuthManagedUser = {
+                                ...u,
+                                apps: {
+                                  ...u.apps,
+                                  prospeccao: {
+                                    ...u.apps.prospeccao,
+                                    can_access: e.target.checked,
+                                  },
+                                },
+                              };
+                              updateManagedUser(u.usuario, () => next);
+                              await persistUser(next);
+                            }}
+                            disabled={savingUser === u.usuario || !u.can_access_hub}
+                            className="h-4 w-4 rounded border-border bg-muted text-primary focus:ring-primary/50 disabled:opacity-40"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="relative inline-block">
+                            <select
+                              value={(u.apps as any).prospeccao?.role ?? "viewer"}
+                              onChange={async (e) => {
+                                const nextRole = e.target.value as Role;
+                                const next: AuthManagedUser = {
+                                  ...u,
+                                  apps: {
+                                    ...u.apps,
+                                    prospeccao: {
+                                      ...u.apps.prospeccao,
+                                      role: nextRole,
+                                    },
+                                  },
+                                };
+                                updateManagedUser(u.usuario, () => next);
+                                await persistUser(next);
+                              }}
+                              disabled={savingUser === u.usuario || !u.can_access_hub}
+                              className="appearance-none rounded-lg border border-border bg-muted px-3 py-1.5 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40"
+                            >
+                              {(Object.keys(ROLE_LABELS) as Role[]).map((r) => (
+                                <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                              ))}
+                            </select>
+                            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <input
+                            type="checkbox"
                             checked={u.apps.score.can_access}
                             onChange={async (e) => {
                               const next: AuthManagedUser = {
@@ -1347,6 +1490,177 @@ export default function Hub() {
                                       role: nextRole,
                                     },
                                   },
+                                };
+                                updateManagedUser(u.usuario, () => next);
+                                await persistUser(next);
+                              }}
+                              disabled={savingUser === u.usuario || !u.can_access_hub}
+                              className="appearance-none rounded-lg border border-border bg-muted px-3 py-1.5 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40"
+                            >
+                              {(Object.keys(ROLE_LABELS) as Role[]).map((r) => (
+                                <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                              ))}
+                            </select>
+                            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={u.apps.relatoriocustos?.can_access ?? false}
+                            onChange={async (e) => {
+                              const next: AuthManagedUser = {
+                                ...u,
+                                apps: {
+                                  ...u.apps,
+                                  relatoriocustos: {
+                                    ...(u.apps as any).relatoriocustos,
+                                    app_key: "relatoriocustos",
+                                    role: u.apps.relatoriocustos?.role ?? "viewer",
+                                    loja: null,
+                                    can_access: e.target.checked,
+                                  },
+                                } as any,
+                              };
+                              updateManagedUser(u.usuario, () => next);
+                              await persistUser(next);
+                            }}
+                            disabled={savingUser === u.usuario || !u.can_access_hub}
+                            className="h-4 w-4 rounded border-border bg-muted text-primary focus:ring-primary/50 disabled:opacity-40"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="relative inline-block">
+                            <select
+                              value={u.apps.relatoriocustos?.role ?? "viewer"}
+                              onChange={async (e) => {
+                                const nextRole = e.target.value as Role;
+                                const next: AuthManagedUser = {
+                                  ...u,
+                                  apps: {
+                                    ...u.apps,
+                                    relatoriocustos: {
+                                      ...(u.apps as any).relatoriocustos,
+                                      app_key: "relatoriocustos",
+                                      loja: null,
+                                      can_access: u.apps.relatoriocustos?.can_access ?? false,
+                                      role: nextRole,
+                                    },
+                                  } as any,
+                                };
+                                updateManagedUser(u.usuario, () => next);
+                                await persistUser(next);
+                              }}
+                              disabled={savingUser === u.usuario || !u.can_access_hub}
+                              className="appearance-none rounded-lg border border-border bg-muted px-3 py-1.5 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40"
+                            >
+                              {(Object.keys(ROLE_LABELS) as Role[]).map((r) => (
+                                <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                              ))}
+                            </select>
+                            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={u.apps.estoqueminimo?.can_access ?? false}
+                            onChange={async (e) => {
+                              const next: AuthManagedUser = {
+                                ...u,
+                                apps: {
+                                  ...u.apps,
+                                  estoqueminimo: {
+                                    ...(u.apps as any).estoqueminimo,
+                                    app_key: "estoqueminimo",
+                                    role: u.apps.estoqueminimo?.role ?? "viewer",
+                                    loja: null,
+                                    can_access: e.target.checked,
+                                  },
+                                } as any,
+                              };
+                              updateManagedUser(u.usuario, () => next);
+                              await persistUser(next);
+                            }}
+                            disabled={savingUser === u.usuario || !u.can_access_hub}
+                            className="h-4 w-4 rounded border-border bg-muted text-primary focus:ring-primary/50 disabled:opacity-40"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="relative inline-block">
+                            <select
+                              value={u.apps.estoqueminimo?.role ?? "viewer"}
+                              onChange={async (e) => {
+                                const nextRole = e.target.value as Role;
+                                const next: AuthManagedUser = {
+                                  ...u,
+                                  apps: {
+                                    ...u.apps,
+                                    estoqueminimo: {
+                                      ...(u.apps as any).estoqueminimo,
+                                      app_key: "estoqueminimo",
+                                      loja: null,
+                                      can_access: u.apps.estoqueminimo?.can_access ?? false,
+                                      role: nextRole,
+                                    },
+                                  } as any,
+                                };
+                                updateManagedUser(u.usuario, () => next);
+                                await persistUser(next);
+                              }}
+                              disabled={savingUser === u.usuario || !u.can_access_hub}
+                              className="appearance-none rounded-lg border border-border bg-muted px-3 py-1.5 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40"
+                            >
+                              {(Object.keys(ROLE_LABELS) as Role[]).map((r) => (
+                                <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                              ))}
+                            </select>
+                            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={u.apps.notasfiscaisamazon?.can_access ?? false}
+                            onChange={async (e) => {
+                              const next: AuthManagedUser = {
+                                ...u,
+                                apps: {
+                                  ...u.apps,
+                                  notasfiscaisamazon: {
+                                    ...(u.apps as any).notasfiscaisamazon,
+                                    app_key: "notasfiscaisamazon",
+                                    role: u.apps.notasfiscaisamazon?.role ?? "viewer",
+                                    loja: null,
+                                    can_access: e.target.checked,
+                                  },
+                                } as any,
+                              };
+                              updateManagedUser(u.usuario, () => next);
+                              await persistUser(next);
+                            }}
+                            disabled={savingUser === u.usuario || !u.can_access_hub}
+                            className="h-4 w-4 rounded border-border bg-muted text-primary focus:ring-primary/50 disabled:opacity-40"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="relative inline-block">
+                            <select
+                              value={u.apps.notasfiscaisamazon?.role ?? "viewer"}
+                              onChange={async (e) => {
+                                const nextRole = e.target.value as Role;
+                                const next: AuthManagedUser = {
+                                  ...u,
+                                  apps: {
+                                    ...u.apps,
+                                    notasfiscaisamazon: {
+                                      ...(u.apps as any).notasfiscaisamazon,
+                                      app_key: "notasfiscaisamazon",
+                                      loja: null,
+                                      can_access: u.apps.notasfiscaisamazon?.can_access ?? false,
+                                      role: nextRole,
+                                    },
+                                  } as any,
                                 };
                                 updateManagedUser(u.usuario, () => next);
                                 await persistUser(next);
@@ -1601,6 +1915,159 @@ export default function Hub() {
                               <Settings2 className="w-3 h-3" />
                               {PAINEL_ROLE_LABELS[u.apps.painelcomissao?.role ?? "viewer"]}
                             </button>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={u.apps.onboarding.can_access}
+                            onChange={async (e) => {
+                              const next: AuthManagedUser = {
+                                ...u,
+                                apps: {
+                                  ...u.apps,
+                                  onboarding: {
+                                    ...u.apps.onboarding,
+                                    can_access: e.target.checked,
+                                  },
+                                },
+                              };
+                              updateManagedUser(u.usuario, () => next);
+                              await persistUser(next);
+                            }}
+                            disabled={savingUser === u.usuario || !u.can_access_hub}
+                            className="h-4 w-4 rounded border-border bg-muted text-primary focus:ring-primary/50 disabled:opacity-40"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="relative inline-block">
+                            <select
+                              value={u.apps.onboarding.role}
+                              onChange={async (e) => {
+                                const nextRole = e.target.value as Role;
+                                const next: AuthManagedUser = {
+                                  ...u,
+                                  apps: {
+                                    ...u.apps,
+                                    onboarding: {
+                                      ...u.apps.onboarding,
+                                      role: nextRole,
+                                    },
+                                  },
+                                };
+                                updateManagedUser(u.usuario, () => next);
+                                await persistUser(next);
+                              }}
+                              disabled={savingUser === u.usuario || !u.can_access_hub}
+                              className="appearance-none rounded-lg border border-border bg-muted px-3 py-1.5 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40"
+                            >
+                              {(Object.keys(ROLE_LABELS) as Role[]).map((r) => (
+                                <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                              ))}
+                            </select>
+                            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={u.apps.primeiramov.can_access}
+                            onChange={async (e) => {
+                              const next: AuthManagedUser = {
+                                ...u,
+                                apps: {
+                                  ...u.apps,
+                                  primeiramov: {
+                                    ...u.apps.primeiramov,
+                                    can_access: e.target.checked,
+                                  },
+                                },
+                              };
+                              updateManagedUser(u.usuario, () => next);
+                              await persistUser(next);
+                            }}
+                            disabled={savingUser === u.usuario || !u.can_access_hub}
+                            className="h-4 w-4 rounded border-border bg-muted text-primary focus:ring-primary/50 disabled:opacity-40"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="relative inline-block">
+                            <select
+                              value={u.apps.primeiramov.role}
+                              onChange={async (e) => {
+                                const nextRole = e.target.value as Role;
+                                const next: AuthManagedUser = {
+                                  ...u,
+                                  apps: {
+                                    ...u.apps,
+                                    primeiramov: {
+                                      ...u.apps.primeiramov,
+                                      role: nextRole,
+                                    },
+                                  },
+                                };
+                                updateManagedUser(u.usuario, () => next);
+                                await persistUser(next);
+                              }}
+                              disabled={savingUser === u.usuario || !u.can_access_hub}
+                              className="appearance-none rounded-lg border border-border bg-muted px-3 py-1.5 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40"
+                            >
+                              {(Object.keys(ROLE_LABELS) as Role[]).map((r) => (
+                                <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                              ))}
+                            </select>
+                            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={u.apps.invfull.can_access}
+                            onChange={async (e) => {
+                              const next: AuthManagedUser = {
+                                ...u,
+                                apps: {
+                                  ...u.apps,
+                                  invfull: {
+                                    ...u.apps.invfull,
+                                    can_access: e.target.checked,
+                                  },
+                                },
+                              };
+                              updateManagedUser(u.usuario, () => next);
+                              await persistUser(next);
+                            }}
+                            disabled={savingUser === u.usuario || !u.can_access_hub}
+                            className="h-4 w-4 rounded border-border bg-muted text-primary focus:ring-primary/50 disabled:opacity-40"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="relative inline-block">
+                            <select
+                              value={u.apps.invfull.role}
+                              onChange={async (e) => {
+                                const nextRole = e.target.value as Role;
+                                const next: AuthManagedUser = {
+                                  ...u,
+                                  apps: {
+                                    ...u.apps,
+                                    invfull: {
+                                      ...u.apps.invfull,
+                                      role: nextRole,
+                                    },
+                                  },
+                                };
+                                updateManagedUser(u.usuario, () => next);
+                                await persistUser(next);
+                              }}
+                              disabled={savingUser === u.usuario || !u.can_access_hub}
+                              className="appearance-none rounded-lg border border-border bg-muted px-3 py-1.5 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40"
+                            >
+                              {(Object.keys(ROLE_LABELS) as Role[]).map((r) => (
+                                <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                              ))}
+                            </select>
+                            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
                           </div>
                         </td>
                         <td className="px-4 py-3 text-xs">

@@ -3,6 +3,7 @@ import { queryMySQL } from './mysql-ext';
 import { getPool } from '../../db/sqlserver';
 import sql from 'mssql';
 import { fbSJC, fbSPM, fbLockeyMG, fbLockey, fbLockeyRJ, fbLockeyBH, myLockeyRS, myNiteroi } from './db-externas';
+import { FALHA_TTL_MS, ehFalhaDeConexao } from './timeouts';
 import { SETORES_ATIVOS } from './setores';
 import { ensureDistTables } from './distribuidores-tables';
 
@@ -28,11 +29,18 @@ export interface RecebRow {
   DATABAIXA: Date | null;
 }
 
-// ─── Cache em memória (5 min por ano) ────────────────────────────────────────
-
-const TTL = 15 * 60 * 1000;
-const _cv = new Map<number, { rows: VendaRow[]; ts: number }>();
-const _cr = new Map<number, { rows: RecebRow[]; ts: number }>();
+// ─── Cache em memória (2 min por ano) ────────────────────────────────────────
+// Vendas continuam entrando o dia inteiro — um cache longo faz o painel ficar
+// sistematicamente atrás de qualquer conferência feita "na hora" numa fonte externa,
+// parecendo erro sem ser. 2 min equilibra isso sem bater as 8 bases externas a cada clique.
+// Se alguma fonte falhou nessa busca, o resultado fica incompleto — não pode ficar
+// memoizado nem esses 2 min (um blip de rede de alguns segundos não pode custar minutos
+// de números errados para todo mundo). Nesse caso o cache expira ainda mais rápido, pra
+// próxima request tentar de novo em breve em vez de repetir o valor incompleto.
+const TTL = 2 * 60 * 1000;
+const TTL_INCOMPLETO = 20 * 1000;
+const _cv = new Map<number, { rows: VendaRow[]; ts: number; ttl: number }>();
+const _cr = new Map<number, { rows: RecebRow[]; ts: number; ttl: number }>();
 // In-flight deduplication: evita múltiplas queries simultâneas para o mesmo ano
 const _inFlightV = new Map<number, Promise<VendaRow[]>>();
 const _inFlightR = new Map<number, Promise<RecebRow[]>>();
@@ -297,6 +305,19 @@ export async function getVendedoresNomesRaw(): Promise<string[]> {
 
 // ─── EP (SQL Server principal) ───────────────────────────────────────────────
 
+// A EP não tem uma coluna de setor — o setor é inferido pelo prefixo do nome do vendedor
+// (mesmo critério do WHERE da query abaixo). Antes isso vinha fixo como 'DISTRIBUIDORES'
+// para toda a EP, o que classificaria errado um eventual vendedor FERRAGENS/TELEVENDAS.
+function rvsFromVendedorEP(vendedor: string | null): string | null {
+  if (!vendedor) return null;
+  const upper = vendedor.toUpperCase();
+  if (upper.startsWith('TELEVENDAS MG')) return 'TELEVENDAS MG';
+  if (upper.startsWith('TELEVENDAS')) return 'TELEVENDAS';
+  if (upper.startsWith('FERRAGENS')) return 'FERRAGENS';
+  if (upper.startsWith('DISTRIBUIDOR')) return 'DISTRIBUIDORES';
+  return null;
+}
+
 async function queryEPVendas(ano: number): Promise<VendaRow[]> {
   try {
     const pool = await getPool();
@@ -324,22 +345,78 @@ async function queryEPVendas(ano: number): Promise<VendaRow[]> {
         GROUP BY e.VENDEDOR, p.GRUPO, p.SUBGRUPO, p.FAMILIA, e.[DATA]
       `);
 
-    return result.recordset.map((r: Record<string, unknown>) => ({
-      EMP: 'EP',
-      PDV_DATA: toDate(r.pdv_data) ?? new Date(0),
-      ETA_DESCRICAO: null,
-      USU_NOME: str(r.usu_nome)?.toUpperCase() ?? null,
-      GRUPO: str(r.grupo),
-      SUBGRUPO: str(r.subgrupo),
-      FAMILIA: str(r.familia),
-      QTDE: Number(r.qtde ?? 0),
-      RVS_NOME: 'DISTRIBUIDORES',
-      SUM: Number(r.total ?? 0),
-    }));
+    return result.recordset.map((r: Record<string, unknown>) => {
+      const usuNome = str(r.usu_nome)?.toUpperCase() ?? null;
+      return {
+        EMP: 'EP',
+        PDV_DATA: toDate(r.pdv_data) ?? new Date(0),
+        ETA_DESCRICAO: null,
+        USU_NOME: usuNome,
+        GRUPO: str(r.grupo),
+        SUBGRUPO: str(r.subgrupo),
+        FAMILIA: str(r.familia),
+        QTDE: Number(r.qtde ?? 0),
+        RVS_NOME: rvsFromVendedorEP(usuNome),
+        SUM: Number(r.total ?? 0),
+      };
+    });
   } catch (err) {
     console.error('[dados-externos] EP vendas:', (err as Error)?.message ?? err);
     return [];
   }
+}
+
+// ─── Circuit breaker por base externa ────────────────────────────────────────
+// Uma base fora do ar (ex.: Lockey BH quando a VPN cai) não pode custar o timeout de
+// conexão em toda request: depois da primeira falha de conexão ela é ignorada por
+// FALHA_TTL_MS. Falhas de consulta (base viva, query lenta) não abrem o breaker.
+
+interface Falha { fonte: string; erro: string; ts: number }
+const _falhas = new Map<string, Falha>();
+
+// Instabilidade de rede/VPN de alguns segundos não deveria custar 15 min de dados
+// incompletos — tenta mais uma vez antes de declarar a fonte fora do ar.
+const RETRY_DELAY_MS = 1_000;
+
+async function comBreaker<T>(
+  fonte: string,
+  host: string,
+  fn: () => Promise<T[]>,
+): Promise<T[]> {
+  const chave = host || fonte;
+  const falha = _falhas.get(chave);
+  if (falha && Date.now() - falha.ts < FALHA_TTL_MS) {
+    throw new Error(`${fonte} ignorada (falha recente de conexão: ${falha.erro})`);
+  }
+  try {
+    const rows = await fn();
+    _falhas.delete(chave);
+    return rows;
+  } catch (err) {
+    if (!ehFalhaDeConexao(err)) {
+      throw new Error(`${fonte}: ${(err as Error).message}`);
+    }
+    // Falha de conexão: pode ser um blip passageiro — tenta mais uma vez antes de abrir o breaker.
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+    try {
+      const rows = await fn();
+      _falhas.delete(chave);
+      return rows;
+    } catch (err2) {
+      if (ehFalhaDeConexao(err2)) {
+        _falhas.set(chave, { fonte, erro: (err2 as Error).message, ts: Date.now() });
+      }
+      throw new Error(`${fonte}: ${(err2 as Error).message}`);
+    }
+  }
+}
+
+/** Bases externas indisponíveis agora — usado para avisar na tela que faltam dados. */
+export function fontesIndisponiveis(): { fonte: string; erro: string }[] {
+  const agora = Date.now();
+  return [..._falhas.values()]
+    .filter(f => agora - f.ts < FALHA_TTL_MS)
+    .map(f => ({ fonte: f.fonte, erro: f.erro }));
 }
 
 // ─── Fetch + cache ────────────────────────────────────────────────────────────
@@ -347,81 +424,98 @@ async function queryEPVendas(ano: number): Promise<VendaRow[]> {
 // aplicado na leitura (getVendas/getRecebimentos), assim uma alteração no vínculo tem
 // efeito imediato sem precisar invalidar/refazer as consultas nos bancos externos.
 
-function getVendasBrutas(ano: number): Promise<VendaRow[]> {
+function getVendasBrutas(ano: number, forcarFresco = false): Promise<VendaRow[]> {
   const hit = _cv.get(ano);
-  if (hit && Date.now() - hit.ts < TTL) return Promise.resolve(hit.rows);
+  if (!forcarFresco && hit && Date.now() - hit.ts < hit.ttl) return Promise.resolve(hit.rows);
 
   const inflight = _inFlightV.get(ano);
   if (inflight) return inflight;
 
   const promise = (async () => {
-    const [settled, epRows] = await Promise.all([
-      Promise.allSettled([
-        queryFirebird(fbSJC, fbVendas('SJC', ano)),
-        queryFirebird(fbSPM, fbVendas('SPM', ano)),
-        queryFirebird(fbLockeyMG, fbVendas('LOCKEY MG', ano)),
-        queryFirebird(fbLockey, fbVendasLockey(ano)),
-        queryFirebird(fbLockeyRJ, fbVendas('Rio de Janeiro', ano)),
-        queryFirebird(fbLockeyBH, fbVendas('Belo Horizonte', ano)),
-        queryMySQL(myLockeyRS, mysqlVendas('LOCKEY RS', ano)),
-        queryMySQL(myNiteroi, mysqlVendas('NITEROI', ano)),
-      ]),
-      queryEPVendas(ano),
-    ]);
+    try {
+      const [settled, epRows] = await Promise.all([
+        Promise.allSettled([
+          comBreaker('SJC', fbSJC.host, () => queryFirebird(fbSJC, fbVendas('SJC', ano))),
+          comBreaker('SPM', fbSPM.host, () => queryFirebird(fbSPM, fbVendas('SPM', ano))),
+          comBreaker('LOCKEY MG', fbLockeyMG.host, () => queryFirebird(fbLockeyMG, fbVendas('LOCKEY MG', ano))),
+          comBreaker('LOCKEY SP/FAST', fbLockey.host, () => queryFirebird(fbLockey, fbVendasLockey(ano))),
+          comBreaker('Rio de Janeiro', fbLockeyRJ.host, () => queryFirebird(fbLockeyRJ, fbVendas('Rio de Janeiro', ano))),
+          comBreaker('Belo Horizonte', fbLockeyBH.host, () => queryFirebird(fbLockeyBH, fbVendas('Belo Horizonte', ano))),
+          comBreaker('LOCKEY RS', myLockeyRS.host, () => queryMySQL(myLockeyRS, mysqlVendas('LOCKEY RS', ano))),
+          comBreaker('NITEROI', myNiteroi.host, () => queryMySQL(myNiteroi, mysqlVendas('NITEROI', ano))),
+        ]),
+        queryEPVendas(ano),
+      ]);
 
-    const raw: Record<string, unknown>[] = [];
-    settled.forEach(r => {
-      if (r.status === 'fulfilled') raw.push(...r.value);
-      else console.error('[dados-externos] vendas:', (r.reason as Error)?.message ?? r.reason);
-    });
+      const raw: Record<string, unknown>[] = [];
+      let incompleto = false;
+      settled.forEach(r => {
+        if (r.status === 'fulfilled') raw.push(...r.value);
+        else {
+          incompleto = true;
+          console.error('[dados-externos] vendas:', (r.reason as Error)?.message ?? r.reason);
+        }
+      });
 
-    const rows = [...normalizeVendas(raw), ...epRows];
-    _cv.set(ano, { rows, ts: Date.now() });
-    _inFlightV.delete(ano);
-    return rows;
+      const rows = [...normalizeVendas(raw), ...epRows];
+      _cv.set(ano, { rows, ts: Date.now(), ttl: incompleto ? TTL_INCOMPLETO : TTL });
+      return rows;
+    } finally {
+      _inFlightV.delete(ano);
+    }
   })();
 
   _inFlightV.set(ano, promise);
   return promise;
 }
 
-function getRecebimentosBrutos(ano: number): Promise<RecebRow[]> {
+function getRecebimentosBrutos(ano: number, forcarFresco = false): Promise<RecebRow[]> {
   const hit = _cr.get(ano);
-  if (hit && Date.now() - hit.ts < TTL) return Promise.resolve(hit.rows);
+  if (!forcarFresco && hit && Date.now() - hit.ts < hit.ttl) return Promise.resolve(hit.rows);
 
   const inflight = _inFlightR.get(ano);
   if (inflight) return inflight;
 
   const promise = (async () => {
-    const settled = await Promise.allSettled([
-      queryFirebird(fbSJC, fbReceb('SJC', ano)),
-      queryFirebird(fbSPM, fbReceb('SPM', ano)),
-      queryFirebird(fbLockeyMG, fbReceb('LOCKEY MG', ano)),
-      queryFirebird(fbLockey, fbRecebLockey(ano)),
-      queryFirebird(fbLockeyRJ, fbReceb('Rio de Janeiro', ano)),
-      queryFirebird(fbLockeyBH, fbReceb('Belo Horizonte', ano)),
-      queryMySQL(myLockeyRS, mysqlReceb('LOCKEY RS', ano)),
-      queryMySQL(myNiteroi, mysqlReceb('NITEROI', ano)),
-    ]);
+    try {
+      const settled = await Promise.allSettled([
+        comBreaker('SJC', fbSJC.host, () => queryFirebird(fbSJC, fbReceb('SJC', ano))),
+        comBreaker('SPM', fbSPM.host, () => queryFirebird(fbSPM, fbReceb('SPM', ano))),
+        comBreaker('LOCKEY MG', fbLockeyMG.host, () => queryFirebird(fbLockeyMG, fbReceb('LOCKEY MG', ano))),
+        comBreaker('LOCKEY SP/FAST', fbLockey.host, () => queryFirebird(fbLockey, fbRecebLockey(ano))),
+        comBreaker('Rio de Janeiro', fbLockeyRJ.host, () => queryFirebird(fbLockeyRJ, fbReceb('Rio de Janeiro', ano))),
+        comBreaker('Belo Horizonte', fbLockeyBH.host, () => queryFirebird(fbLockeyBH, fbReceb('Belo Horizonte', ano))),
+        comBreaker('LOCKEY RS', myLockeyRS.host, () => queryMySQL(myLockeyRS, mysqlReceb('LOCKEY RS', ano))),
+        comBreaker('NITEROI', myNiteroi.host, () => queryMySQL(myNiteroi, mysqlReceb('NITEROI', ano))),
+      ]);
 
-    const raw: Record<string, unknown>[] = [];
-    settled.forEach(r => {
-      if (r.status === 'fulfilled') raw.push(...r.value);
-      else console.error('[dados-externos] recebimentos:', (r.reason as Error)?.message ?? r.reason);
-    });
+      const raw: Record<string, unknown>[] = [];
+      let incompleto = false;
+      settled.forEach(r => {
+        if (r.status === 'fulfilled') raw.push(...r.value);
+        else {
+          incompleto = true;
+          console.error('[dados-externos] recebimentos:', (r.reason as Error)?.message ?? r.reason);
+        }
+      });
 
-    const rows = normalizeReceb(raw);
-    _cr.set(ano, { rows, ts: Date.now() });
-    _inFlightR.delete(ano);
-    return rows;
+      const rows = normalizeReceb(raw);
+      _cr.set(ano, { rows, ts: Date.now(), ttl: incompleto ? TTL_INCOMPLETO : TTL });
+      return rows;
+    } finally {
+      _inFlightR.delete(ano);
+    }
   })();
 
   _inFlightR.set(ano, promise);
   return promise;
 }
 
-export async function getVendas(ano: number): Promise<VendaRow[]> {
-  const [rows, vinculos] = await Promise.all([getVendasBrutas(ano), getVinculosDistribuidoresMap()]);
+// forcarFresco=true ignora o cache em memória e busca direto nas 8 bases externas.
+// Usado na tela individual do vendedor, onde o número precisa refletir a venda que
+// acabou de entrar, não o que foi buscado há até 2 min por outra pessoa.
+export async function getVendas(ano: number, forcarFresco = false): Promise<VendaRow[]> {
+  const [rows, vinculos] = await Promise.all([getVendasBrutas(ano, forcarFresco), getVinculosDistribuidoresMap()]);
   if (Object.keys(vinculos).length === 0) return rows;
   return rows.map(r => {
     const usu = aplicarVinculo(r.USU_NOME, vinculos);
@@ -429,8 +523,8 @@ export async function getVendas(ano: number): Promise<VendaRow[]> {
   });
 }
 
-export async function getRecebimentos(ano: number): Promise<RecebRow[]> {
-  const [rows, vinculos] = await Promise.all([getRecebimentosBrutos(ano), getVinculosDistribuidoresMap()]);
+export async function getRecebimentos(ano: number, forcarFresco = false): Promise<RecebRow[]> {
+  const [rows, vinculos] = await Promise.all([getRecebimentosBrutos(ano, forcarFresco), getVinculosDistribuidoresMap()]);
   if (Object.keys(vinculos).length === 0) return rows;
   return rows.map(r => {
     const rep = aplicarVinculo(r.REP_NOME, vinculos);

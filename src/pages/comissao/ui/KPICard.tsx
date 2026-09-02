@@ -2,6 +2,7 @@ interface KPICardProps {
   title: string;
   value: string;
   subtitle?: string;
+  extra?: string;
   icon: React.ReactNode;
   accent?: boolean;
   trend?: { value: number; label: string };
@@ -11,6 +12,7 @@ export default function KPICard({
   title,
   value,
   subtitle,
+  extra,
   icon,
   accent = false,
   trend,
@@ -50,6 +52,14 @@ export default function KPICard({
         >
           {value}
         </p>
+        {extra && (
+          <p
+            className="text-xs mt-1 font-medium"
+            style={{ color: accent ? '#00205C' : '#64748b' }}
+          >
+            {extra}
+          </p>
+        )}
         {subtitle && (
           <p
             className="text-xs mt-0.5"

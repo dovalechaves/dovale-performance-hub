@@ -280,7 +280,10 @@ async function fetchLoteAnalytics(
     }
     const nextUrl = json?.template_analytics?.paging?.next ?? null;
     if (dpCount > 0 && nextUrl) console.log(`[meta-api] paginando lote ${loteIdx + 1}...`);
-    url = nextUrl;
+    // A Meta devolve o access_token como "--sanitized--" dentro do link de paginação
+    // (paging.next) — precisamos religar o token real, senão a próxima página cai
+    // com 401 "Authentication Error".
+    url = nextUrl ? nextUrl.replace(/access_token=[^&]*/, `access_token=${encodeURIComponent(getAccessToken())}`) : null;
   }
   return { items: [...parcial.values()], error: "" };
 }

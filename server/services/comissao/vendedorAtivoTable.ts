@@ -13,3 +13,13 @@ export async function ensureVendedorAtivoTable(): Promise<void> {
     )
   `);
 }
+
+// Nomes de vendedores marcados como inativos (vale para todos os setores).
+export async function getVendedoresInativos(): Promise<Set<string>> {
+  await ensureVendedorAtivoTable();
+  const pool = await getPool();
+  const r = await pool.request().query(
+    `SELECT nome_vendedor FROM [TI-PAINELCOMISSAO_VENDEDOR_ATIVO] WHERE ativo = 0`
+  );
+  return new Set(r.recordset.map((row: { nome_vendedor: string }) => row.nome_vendedor));
+}

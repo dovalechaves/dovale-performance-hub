@@ -8,12 +8,168 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, LabelList,
 } from 'recharts';
-import { ChevronDown, Download, Filter } from 'lucide-react';
+import { ChevronDown, Download, Filter, TrendingUp, X } from 'lucide-react';
 import { useComissaoUser as useUser, useComissaoApi } from './_shared/hooks';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { toast } from 'sonner';
 
 const ANO_ATUAL = new Date().getFullYear();
 const ANOS = [ANO_ATUAL, ANO_ATUAL - 1, ANO_ATUAL - 2];
+
+// Dias úteis (seg–sex) no mês, ou até um dia específico (para ritmo/projeção)
+function contarDiasUteis(ano: number, mes: number, ate?: number): number {
+  const totalDias = new Date(ano, mes, 0).getDate();
+  const limite = ate ?? totalDias;
+  let count = 0;
+  for (let d = 1; d <= limite; d++) {
+    const dow = new Date(ano, mes - 1, d).getDay();
+    if (dow !== 0 && dow !== 6) count++;
+  }
+  return count;
+}
+
+interface EvolucaoMes {
+  ano: number;
+  mes: number;
+  total_vendas: number;
+  valor_pa: number;
+}
+
+function EvolucaoVendedorModal({ vendedor, isTelevendas, ano, mes, onClose }: {
+  vendedor: string;
+  isTelevendas: boolean;
+  ano: number;
+  mes: number | null;
+  onClose: () => void;
+}) {
+  const api = useComissaoApi();
+  const [dados, setDados] = useState<EvolucaoMes[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    setErro(false);
+    const params = new URLSearchParams({ ano: ano.toString() });
+    if (mes) params.set('mes', mes.toString());
+    api(`/vendedor/${encodeURIComponent(vendedor)}/evolucao?${params}`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((d: { evolucao?: EvolucaoMes[] }) => setDados(d.evolucao ?? []))
+      .catch(() => setErro(true))
+      .finally(() => setLoading(false));
+  }, [api, vendedor, ano, mes]);
+
+  const grafico = (dados ?? []).map((d) => ({
+    name: `${MESES[d.mes - 1].slice(0, 3)}/${String(d.ano).slice(2)}`,
+    Total: d.total_vendas,
+    PA: d.valor_pa,
+  }));
+
+  const mediaTotal = grafico.length > 0 ? grafico.reduce((s, d) => s + d.Total, 0) / grafico.length : 0;
+  const mediaPA = grafico.length > 0 ? grafico.reduce((s, d) => s + d.PA, 0) / grafico.length : 0;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(10,22,40,0.55)' }}
+      onClick={onClose}
+    >
+      <div
+        className="rounded-xl shadow-2xl w-full max-w-2xl"
+        style={{ background: '#ffffff' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: '1px solid #e2e8f0' }}>
+          <div>
+            <h3 className="text-sm font-bold" style={{ color: '#00205C' }}>{vendedor}</h3>
+            <p className="text-xs" style={{ color: '#64748b' }}>Evolução — últimos 6 meses</p>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1.5 transition-colors" style={{ color: '#64748b' }}>
+            <X size={18} />
+          </button>
+        </div>
+        <div className="p-5">
+          {loading ? (
+            <div className="h-64 flex items-center justify-center text-sm" style={{ color: '#94a3b8' }}>Carregando...</div>
+          ) : erro || !dados || dados.length === 0 ? (
+            <div className="h-64 flex items-center justify-center text-sm" style={{ color: '#94a3b8' }}>
+              Não foi possível carregar os dados
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-4 mb-3">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-3 h-3 rounded-sm" style={{ background: '#00205C' }} />
+                  <span className="text-xs" style={{ color: '#64748b' }}>{isTelevendas ? 'Venda Geral' : 'Vendas'}</span>
+                </div>
+                {isTelevendas && (
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-3 h-3 rounded-sm" style={{ background: '#FFD700' }} />
+                    <span className="text-xs" style={{ color: '#64748b' }}>Venda PA</span>
+                  </div>
+                )}
+              </div>
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={grafico} barCategoryGap="25%" barGap={3}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} />
+                  <YAxis
+                    tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`}
+                    tick={{ fontSize: 10, fill: '#64748b' }}
+                    domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.18 / 10000) * 10000]}
+                  />
+                  <Tooltip
+                    formatter={(v, name) => [formatBRL(Number(v)), String(name)]}
+                    contentStyle={{ background: '#0a1628', border: 'none', borderRadius: 8 }}
+                    labelStyle={{ color: '#ffffff' }}
+                    itemStyle={{ color: '#ffffff' }}
+                  />
+                  <Bar dataKey="Total" fill="#00205C" radius={[3, 3, 0, 0]}>
+                    <LabelList
+                      dataKey="Total"
+                      position="insideTop"
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      formatter={(v: any) => v > 0 ? `${(Number(v) / 1000).toFixed(0)}k` : ''}
+                      style={{ fontSize: 9, fill: '#ffffff', fontWeight: 600 }}
+                    />
+                  </Bar>
+                  {isTelevendas && (
+                    <Bar dataKey="PA" fill="#FFD700" radius={[3, 3, 0, 0]}>
+                      <LabelList
+                        dataKey="PA"
+                        position="insideTop"
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        formatter={(v: any) => v > 0 ? `${(Number(v) / 1000).toFixed(0)}k` : ''}
+                        style={{ fontSize: 9, fill: '#00205C', fontWeight: 600 }}
+                      />
+                    </Bar>
+                  )}
+                </BarChart>
+              </ResponsiveContainer>
+
+              <div className={`mt-4 grid gap-3 ${isTelevendas ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                <div className="rounded-lg p-3" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                  <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: '#64748b' }}>
+                    Média {isTelevendas ? 'Geral' : ''} — 6 meses
+                  </p>
+                  <p className="text-lg font-bold mt-1" style={{ color: '#00205C' }}>{formatBRL(mediaTotal)}</p>
+                </div>
+                {isTelevendas && (
+                  <div className="rounded-lg p-3" style={{ background: '#fffbeb', border: '1px solid #fde68a' }}>
+                    <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: '#92400e' }}>
+                      Média PA — 6 meses
+                    </p>
+                    <p className="text-lg font-bold mt-1" style={{ color: '#92400e' }}>{formatBRL(mediaPA)}</p>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 interface ResumoVendedor {
   vendedor: string;
@@ -57,6 +213,7 @@ interface DistVendedorMeta {
   meta1_valor: number; meta1_percentual: number;
   meta2_valor: number; meta2_percentual: number;
   meta3_valor: number; meta3_percentual: number;
+  meta4_valor: number; meta4_percentual: number;
   metadesafio_valor: number; metadesafio_percentual: number;
   percentual_sem_meta: number;
 }
@@ -66,11 +223,13 @@ interface DistVendedorBonus {
   bonus1_valor: number;
   bonus2_valor: number;
   bonus3_valor: number;
+  bonus4_valor: number;
   bonusdesafio_valor: number;
 }
 
 export default function ComissaoGestor() {
   const usuario = useUser();
+  const isAdm = usuario && usuario !== 'loading' && usuario.cargo === 'ADM';
   const api = useComissaoApi();
   const navigate = useNavigate();
   const [vendedores, setVendedores] = useState<ResumoVendedor[]>([]);
@@ -79,8 +238,32 @@ export default function ComissaoGestor() {
   const [empresas, setEmpresas] = useState<string[]>([]);
   const [filtroSetor, setFiltroSetor] = useState('');
   const [filtroEmpresa, setFiltroEmpresa] = useState('');
-  const [ano, setAno] = useState(ANO_ATUAL);
-  const [mes, setMes] = useState<number | null>(new Date().getMonth() + 1);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [ano, setAnoState] = useState(() => {
+    const a = parseInt(searchParams.get('ano') ?? '', 10);
+    return a >= 2000 && a <= 2100 ? a : ANO_ATUAL;
+  });
+  const [mes, setMesState] = useState<number | null>(() => {
+    if (searchParams.get('mes') === '') return null;
+    const m = parseInt(searchParams.get('mes') ?? '', 10);
+    return m >= 1 && m <= 12 ? m : new Date().getMonth() + 1;
+  });
+  const setAno = (a: number) => {
+    setAnoState(a);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('ano', String(a));
+      return next;
+    }, { replace: true });
+  };
+  const setMes = (m: number | null) => {
+    setMesState(m);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('mes', m === null ? '' : String(m));
+      return next;
+    }, { replace: true });
+  };
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState('');
   const [bonusConfig, setBonusConfig] = useState<BonusConfig | null>(null);
@@ -91,6 +274,7 @@ export default function ComissaoGestor() {
   const [distMetasMap, setDistMetasMap] = useState<Record<string, DistVendedorMeta>>({});
   const [distBonusMap, setDistBonusMap] = useState<Record<string, DistVendedorBonus>>({});
   const [distCarregado, setDistCarregado] = useState(false);
+  const [vendedorEvolucao, setVendedorEvolucao] = useState<{ nome: string; isTelevendas: boolean } | null>(null);
 
   useEffect(() => {
     if (usuario && usuario !== 'loading' && usuario.cargo === 'VENDEDOR') {
@@ -108,7 +292,10 @@ export default function ComissaoGestor() {
     api('/bonus-config')
       .then((r) => r.json())
       .then(setBonusConfig)
-      .catch(() => {});
+      .catch((err) => {
+        console.error('[gestor] bonus-config:', err);
+        toast.warning('O bônus global ainda não carregou. Tentando novamente em breve.');
+      });
   }, []);
 
   useEffect(() => {
@@ -122,7 +309,10 @@ export default function ComissaoGestor() {
         list.forEach((m) => { map[m.nome_vendedor] = m; });
         setMetasMap(map);
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.error('[gestor] metas:', err);
+        toast.warning('As metas ainda não carregaram. Os valores exibidos podem estar desatualizados — tentando novamente em breve.');
+      });
   }, [ano, mes]);
 
   useEffect(() => {
@@ -142,6 +332,7 @@ export default function ComissaoGestor() {
       })
       .catch(err => {
         console.error('[gestor] ferragens/config:', err);
+        toast.warning('Os dados de Ferragens ainda não carregaram. Tentando novamente em breve.');
         setFerrCarregado(true);
       });
   }, [ano, mes]);
@@ -162,6 +353,7 @@ export default function ComissaoGestor() {
       })
       .catch(err => {
         console.error('[gestor] distribuidores/config:', err);
+        toast.warning('Os dados de Distribuidores ainda não carregaram. Tentando novamente em breve.');
         setDistCarregado(true);
       });
   }, [ano, mes]);
@@ -176,7 +368,10 @@ export default function ComissaoGestor() {
     api(`/vendedores?${params}`, { cache: 'no-store' })
       .then((r) => r.json())
       .then(setVendedores)
-      .catch(console.error)
+      .catch((err) => {
+        console.error(err);
+        toast.warning('A lista de vendedores ainda não atualizou. Tentando novamente em breve.');
+      })
       .finally(() => setLoading(false));
   };
 
@@ -264,6 +459,7 @@ export default function ComissaoGestor() {
       meta1_valor: Number(mRec.meta1_valor), meta1_percentual: Number(mRec.meta1_percentual),
       meta2_valor: Number(mRec.meta2_valor), meta2_percentual: Number(mRec.meta2_percentual),
       meta3_valor: Number(mRec.meta3_valor), meta3_percentual: Number(mRec.meta3_percentual),
+      meta4_valor: Number(mRec.meta4_valor), meta4_percentual: Number(mRec.meta4_percentual),
       metadesafio_valor: Number(mRec.metadesafio_valor), metadesafio_percentual: Number(mRec.metadesafio_percentual),
       percentual_sem_meta: Number(mRec.percentual_sem_meta ?? 0),
     };
@@ -271,6 +467,7 @@ export default function ComissaoGestor() {
       bonus1_valor: Number(bRec.bonus1_valor),
       bonus2_valor: Number(bRec.bonus2_valor),
       bonus3_valor: Number(bRec.bonus3_valor),
+      bonus4_valor: Number(bRec.bonus4_valor),
       bonusdesafio_valor: Number(bRec.bonusdesafio_valor),
     } : null;
     return calcularComissaoDistribuidores(v.total_vendas, v.total_recebido, metaCfg, bonusCfg);
@@ -282,15 +479,22 @@ export default function ComissaoGestor() {
 
   const totalVendas = vendedoresFiltrados.reduce((s, v) => s + v.total_vendas, 0);
   const totalPA = vendedoresFiltrados.reduce((s, v) => s + (v.setor === 'FERRAGENS' ? 0 : (v.valor_pa ?? 0)), 0);
-  const todasTelevendas = vendedoresFiltrados.length > 0 && vendedoresFiltrados.every((v) => v.is_televendas);
   const algumaTelevendas = vendedoresFiltrados.some((v) => v.is_televendas);
-  const totalEquipeExibido = todasTelevendas ? totalPA : totalVendas;
   const totalComissoes = vendedoresFiltrados.reduce((s, v) => {
     if (v.setor === 'FERRAGENS') return s + (getComissaoFerr(v)?.comissao_total ?? 0);
     if (v.setor === 'DISTRIBUIDORES') return s + (getComissaoDist(v)?.comissao_total ?? 0);
     if (v.is_televendas) return s + (getComissaoTV(v)?.comissao_total ?? 0);
     return s + (getFaixa(v.vendedor, v.total_vendas)?.comissao ?? 0);
   }, 0);
+
+  // Projeção do mês — ritmo em dias úteis (seg–sex) decorridos vs total do mês
+  const hoje = new Date();
+  const isMesAtual = mes === hoje.getMonth() + 1 && ano === hoje.getFullYear();
+  const diasUteisNoMes = mes ? contarDiasUteis(ano, mes) : 0;
+  const diasUteisDecorridos = mes ? (isMesAtual ? contarDiasUteis(ano, mes, hoje.getDate()) : diasUteisNoMes) : 0;
+  const temProjecao = !!mes && vendedoresFiltrados.length > 0 && diasUteisDecorridos > 0;
+  const projecaoVendas = temProjecao ? (totalVendas / diasUteisDecorridos) * diasUteisNoMes : 0;
+  const projecaoPA = temProjecao ? (totalPA / diasUteisDecorridos) * diasUteisNoMes : 0;
 
   // Remove o prefixo do setor (primeira palavra) e trunca o restante
   const nomeAbrev = (vendedor: string) => {
@@ -372,19 +576,27 @@ export default function ComissaoGestor() {
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             {/* Filtros */}
-            <div className="relative">
-              <select
-                value={filtroSetor}
-                onChange={(e) => setFiltroSetor(e.target.value)}
-                className="appearance-none rounded-lg pl-8 pr-8 py-2 text-sm font-medium cursor-pointer"
-                style={{ background: '#ffffff', border: '1px solid #e2e8f0', color: '#00205C' }}
-              >
-                <option value="">Todos os setores</option>
-                {setores.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-              <Filter size={13} className="absolute left-2.5 top-3 pointer-events-none" style={{ color: '#64748b' }} />
-              <ChevronDown size={14} className="absolute right-2 top-3 pointer-events-none" style={{ color: '#64748b' }} />
-            </div>
+            {isAdm ? (
+              <div className="relative">
+                <select
+                  value={filtroSetor}
+                  onChange={(e) => setFiltroSetor(e.target.value)}
+                  className="appearance-none rounded-lg pl-8 pr-8 py-2 text-sm font-medium cursor-pointer"
+                  style={{ background: '#ffffff', border: '1px solid #e2e8f0', color: '#00205C' }}
+                >
+                  <option value="">Todos os setores</option>
+                  {setores.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+                <Filter size={13} className="absolute left-2.5 top-3 pointer-events-none" style={{ color: '#64748b' }} />
+                <ChevronDown size={14} className="absolute right-2 top-3 pointer-events-none" style={{ color: '#64748b' }} />
+              </div>
+            ) : setores.length > 0 && (
+              <div className="flex items-center gap-1.5 rounded-lg pl-3 pr-3 py-2 text-sm font-medium"
+                style={{ background: '#ffffff', border: '1px solid #e2e8f0', color: '#00205C' }}>
+                <Filter size={13} style={{ color: '#64748b' }} />
+                {setores.join(' / ')}
+              </div>
+            )}
 
             <div className="relative">
               <select
@@ -436,21 +648,37 @@ export default function ComissaoGestor() {
         </div>
 
         {/* KPI resumo */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className={`grid gap-4 ${temProjecao ? 'grid-cols-4' : 'grid-cols-3'}`}>
           <div className="rounded-xl p-5 shadow-sm" style={{ background: '#00205C' }}>
             <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: '#94a3b8' }}>
-              {todasTelevendas ? 'Total PA (Equipe)' : algumaTelevendas ? 'Total Vendas / PA (Equipe)' : 'Total Vendas (Equipe)'}
+              Venda Geral (Equipe)
             </p>
-            <p className="text-2xl font-bold mt-2 text-white">{formatBRL(totalEquipeExibido)}</p>
-            {algumaTelevendas && !todasTelevendas && (
+            <p className="text-2xl font-bold mt-2 text-white">{formatBRL(totalVendas)}</p>
+            {algumaTelevendas && (
               <p className="text-xs mt-0.5" style={{ color: '#94a3b8' }}>
-                PA: {formatBRL(totalPA)}
+                Venda PA: {formatBRL(totalPA)}
               </p>
             )}
             <p className="text-xs mt-1" style={{ color: '#FFD700' }}>
               {filtroSetor || 'Todos os setores'} — {ano}{mes ? ` / ${MESES[mes - 1]}` : ''}
             </p>
           </div>
+          {temProjecao && (
+            <div className="rounded-xl p-5 shadow-sm" style={{ background: '#ffffff', border: '1px solid #e2e8f0' }}>
+              <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: '#64748b' }}>
+                Projeção do Mês
+              </p>
+              <p className="text-2xl font-bold mt-2" style={{ color: '#00205C' }}>{formatBRL(projecaoVendas)}</p>
+              {algumaTelevendas && (
+                <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>
+                  PA: {formatBRL(projecaoPA)}
+                </p>
+              )}
+              <p className="text-xs mt-1" style={{ color: '#94a3b8' }}>
+                Ritmo: {diasUteisDecorridos}/{diasUteisNoMes} dias úteis
+              </p>
+            </div>
+          )}
           <div className="rounded-xl p-5 shadow-sm" style={{ background: '#FFD700' }}>
             <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: '#00205C' }}>
               Total Comissões Estimadas
@@ -593,6 +821,7 @@ export default function ComissaoGestor() {
                       <div>
                         <span className="font-semibold" style={{ color: '#00205C' }}>{formatBRL(v.valor_pa)}</span>
                         <span className="ml-1 text-xs font-normal px-1 rounded" style={{ background: '#eff6ff', color: '#1d4ed8' }}>PA</span>
+                        <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Geral: {formatBRL(v.total_vendas)}</p>
                         {v.total_recebido > 0 && (
                           <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Rec: {formatBRL(v.total_recebido)}</p>
                         )}
@@ -608,7 +837,7 @@ export default function ComissaoGestor() {
                     const temMetaCadastrada = isFerragens
                       ? !!(mFerr && (mFerr.meta1_valor > 0 || mFerr.meta2_valor > 0 || mFerr.meta3_valor > 0 || mFerr.metadesafio_valor > 0))
                       : isDist
-                        ? !!(mDist && (mDist.meta1_valor > 0 || mDist.meta2_valor > 0 || mDist.meta3_valor > 0 || mDist.metadesafio_valor > 0))
+                        ? !!(mDist && (mDist.meta1_valor > 0 || mDist.meta2_valor > 0 || mDist.meta3_valor > 0 || mDist.meta4_valor > 0 || mDist.metadesafio_valor > 0))
                         : !!(mTV && (mTV.meta1_valor > 0 || mTV.meta2_valor > 0 || mTV.meta3_valor > 0));
                     const metaLabel = isFerragens ? cferr?.meta_atingida?.label : isDist ? cdist?.meta_atingida?.label : v.is_televendas ? ctv?.meta_atingida?.label : f?.atingida?.label;
                     const metaValor = isFerragens ? cferr?.meta_atingida?.valor : isDist ? cdist?.meta_atingida?.valor : v.is_televendas ? ctv?.meta_atingida?.valor : f?.atingida?.valor;
@@ -648,7 +877,15 @@ export default function ComissaoGestor() {
                           {i + 1}
                         </td>
                         <td className="px-4 py-3 font-medium" style={{ color: '#0a1628', maxWidth: 200 }}>
-                          {v.vendedor}
+                          <button
+                            onClick={() => setVendedorEvolucao({ nome: v.vendedor, isTelevendas: v.is_televendas })}
+                            title="Ver evolução dos últimos 6 meses"
+                            className="flex items-center gap-1.5 text-left hover:underline"
+                            style={{ color: '#0a1628' }}
+                          >
+                            <span>{v.vendedor}</span>
+                            <TrendingUp size={14} className="shrink-0" style={{ color: '#94a3b8' }} />
+                          </button>
                         </td>
                         <td className="px-4 py-3" style={{ color: '#64748b' }}>{v.setor}</td>
                         <td className="px-4 py-3 text-center">
@@ -695,6 +932,16 @@ export default function ComissaoGestor() {
           </div>
         </div>
       </div>
+
+      {vendedorEvolucao && (
+        <EvolucaoVendedorModal
+          vendedor={vendedorEvolucao.nome}
+          isTelevendas={vendedorEvolucao.isTelevendas}
+          ano={ano}
+          mes={mes}
+          onClose={() => setVendedorEvolucao(null)}
+        />
+      )}
     </AppShell>
   );
 }

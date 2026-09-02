@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Sun, Moon, UserPlus, Loader2, CheckCircle2, AlertCircle,
-  ChevronDown, Copy, History, ChevronLeft, RefreshCw,
+  ChevronDown, Copy, History, ChevronLeft, RefreshCw, LogOut,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import logoBlue from "@/assets/logo-blue.png";
@@ -25,6 +25,13 @@ interface ADUser {
   displayName: string;
   dn: string;
   groups: string[];
+}
+
+interface MicrosysUser {
+  nome: string;
+  codigo: number;
+  nomeCompleto: string;
+  grupo: number;
 }
 
 interface HistEntry {
@@ -60,6 +67,10 @@ export default function Onboarding() {
   const [loadingSetores, setLoadingSetores] = useState(false);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [sistemas, setSistemas] = useState<{ ad: boolean; microsys: boolean }>({ ad: true, microsys: true });
+  const [msysUsers, setMsysUsers] = useState<MicrosysUser[]>([]);
+  const [copiarDeMsys, setCopiarDeMsys] = useState<MicrosysUser | null>(null);
+  const [loadingMsysUsers, setLoadingMsysUsers] = useState(false);
 
   // Result state
   const [result, setResult] = useState<any>(null);
@@ -118,6 +129,21 @@ export default function Onboarding() {
     })();
   }, [selectedSetor]);
 
+  // Load Microsys users when microsys is enabled
+  useEffect(() => {
+    if (!sistemas.microsys) { setMsysUsers([]); setCopiarDeMsys(null); return; }
+    if (msysUsers.length > 0) return; // already loaded
+    (async () => {
+      setLoadingMsysUsers(true);
+      try {
+        const res = await fetch(`${BASE}/onboarding/microsys/usuarios`);
+        const data = await res.json();
+        if (Array.isArray(data)) setMsysUsers(data);
+      } catch { /* ignore */ }
+      finally { setLoadingMsysUsers(false); }
+    })();
+  }, [sistemas.microsys]);
+
   const fetchHistorico = useCallback(async () => {
     setLoadingHist(true);
     try {
@@ -152,7 +178,9 @@ export default function Onboarding() {
           cargo: cargo.trim() || null,
           setor_dn: selectedSetor.dn,
           copiar_de_dn: copiarDe?.dn || null,
+          copiar_de_microsys: copiarDeMsys?.nome || null,
           criado_por: user?.usuario || "sistema",
+          sistemas,
         }),
       });
       const data = await res.json();
@@ -172,30 +200,66 @@ export default function Onboarding() {
     setSelectedLocal(null);
     setSelectedSetor(null);
     setCopiarDe(null);
+    setCopiarDeMsys(null);
+    setSistemas({ ad: true, microsys: true });
     setResult(null);
     setView("form");
   };
 
-  const logo = dark ? logoWhite : logoBlue;
+  const { logout } = useAuth();
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       {/* Header */}
-      <header className="sticky top-0 z-50 backdrop-blur-xl bg-background/80 border-b border-border">
-        <div className="container mx-auto px-4 h-14 flex items-center justify-between">
+      <header className="border-b border-border bg-gradient-card">
+        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <button onClick={() => navigate("/hub")} className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors">
+            <button
+              onClick={() => navigate("/hub")}
+              className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors"
+              title="Voltar ao Hub"
+            >
               <ArrowLeft className="w-4 h-4" />
             </button>
-            <img src={logo} alt="Dovale" className="h-7" />
-            <span className="text-sm font-semibold text-foreground">Onboarding</span>
+            <div className="h-6 w-px bg-border" />
+            <button
+              onClick={() => navigate("/hub")}
+              className="relative h-9 w-36 overflow-hidden"
+              title="Ir para o Hub"
+            >
+              <img src={logoBlue} alt="Dovale" className={`absolute inset-0 h-full w-auto object-contain transition-all duration-700 ease-in-out ${dark ? 'opacity-0 scale-90 blur-sm rotate-3' : 'opacity-100 scale-100 blur-0 rotate-0'}`} />
+              <img src={logoWhite} alt="Dovale" className={`absolute inset-0 h-full w-auto object-contain transition-all duration-700 ease-in-out ${dark ? 'opacity-100 scale-100 blur-0 rotate-0' : 'opacity-0 scale-90 blur-sm -rotate-3'}`} />
+            </button>
+            <div className="h-6 w-px bg-border" />
+            <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground font-medium">Onboarding</p>
           </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setView(view === "historico" ? "form" : "historico")} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${view === "historico" ? "bg-cyan-500 text-white" : "bg-secondary text-muted-foreground hover:text-foreground"}`}>
+
+          <div className="flex items-center gap-3">
+            {user && (
+              <div className="hidden sm:flex flex-col items-end">
+                <span className="text-xs font-semibold text-foreground leading-tight">{user.usuario}</span>
+                <span className="text-[10px] uppercase tracking-widest text-primary">{user.roleLabel}</span>
+              </div>
+            )}
+            <button
+              onClick={() => setView(view === "historico" ? "form" : "historico")}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${view === "historico" ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground hover:text-foreground hover:bg-primary/10"}`}
+            >
               <History className="w-3.5 h-3.5" /> Histórico
             </button>
-            <button onClick={() => setDark(!dark)} className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors">
+            <button
+              onClick={() => setDark(!dark)}
+              className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors"
+              title="Alternar tema"
+            >
               {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+            <button
+              onClick={() => { logout(); navigate("/login"); }}
+              className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+              title="Sair"
+            >
+              <LogOut className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -226,6 +290,31 @@ export default function Onboarding() {
                     Username: <span className="font-mono text-cyan-500">{generatedUsername}</span>
                   </p>
                 )}
+              </div>
+
+              {/* Sistemas */}
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Criar em *</label>
+                <div className="mt-1.5 flex gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={sistemas.ad}
+                      onChange={(e) => setSistemas((s) => ({ ...s, ad: e.target.checked }))}
+                      className="rounded border-border accent-cyan-500"
+                    />
+                    <span className="text-sm text-foreground font-medium">Active Directory</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={sistemas.microsys}
+                      onChange={(e) => setSistemas((s) => ({ ...s, microsys: e.target.checked }))}
+                      className="rounded border-border accent-cyan-500"
+                    />
+                    <span className="text-sm text-foreground font-medium">Microsys</span>
+                  </label>
+                </div>
               </div>
 
               {/* Cargo */}
@@ -284,19 +373,19 @@ export default function Onboarding() {
                 </div>
               )}
 
-              {/* Copiar permissões */}
-              {selectedSetor && (
+              {/* Copiar permissões AD */}
+              {selectedSetor && sistemas.ad && (
                 <div>
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Copiar Permissões De (opcional)</label>
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Copiar Permissões AD De (opcional)</label>
                   {loadingUsers ? (
-                    <div className="flex items-center gap-2 mt-1.5 text-xs text-muted-foreground"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Carregando usuários...</div>
+                    <div className="flex items-center gap-2 mt-1.5 text-xs text-muted-foreground"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Carregando usuários AD...</div>
                   ) : (
                     <select
                       value={copiarDe?.dn || ""}
                       onChange={(e) => setCopiarDe(adUsers.find((u) => u.dn === e.target.value) || null)}
                       className="mt-1.5 w-full rounded-lg border border-border bg-muted px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
                     >
-                      <option value="">Nenhum (sem cópia de grupos)</option>
+                      <option value="">Nenhum (sem cópia de grupos AD)</option>
                       {adUsers.map((u) => (
                         <option key={u.dn} value={u.dn}>
                           {u.displayName} ({u.username}) — {u.groups.length} grupo(s)
@@ -306,7 +395,7 @@ export default function Onboarding() {
                   )}
                   {copiarDe && copiarDe.groups.length > 0 && (
                     <div className="mt-2 rounded-lg border border-border bg-muted/50 p-3">
-                      <p className="text-[11px] font-semibold text-muted-foreground mb-1.5">Grupos que serão copiados:</p>
+                      <p className="text-[11px] font-semibold text-muted-foreground mb-1.5">Grupos AD que serão copiados:</p>
                       <div className="flex flex-wrap gap-1.5">
                         {copiarDe.groups.map((g, i) => (
                           <span key={i} className="px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-500 text-[10px] font-medium border border-cyan-500/20">
@@ -314,6 +403,36 @@ export default function Onboarding() {
                           </span>
                         ))}
                       </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Copiar permissões Microsys */}
+              {sistemas.microsys && (
+                <div>
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Copiar Permissões Microsys De (opcional)</label>
+                  {loadingMsysUsers ? (
+                    <div className="flex items-center gap-2 mt-1.5 text-xs text-muted-foreground"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Carregando usuários Microsys...</div>
+                  ) : (
+                    <select
+                      value={copiarDeMsys?.nome || ""}
+                      onChange={(e) => setCopiarDeMsys(msysUsers.find((u) => u.nome === e.target.value) || null)}
+                      className="mt-1.5 w-full rounded-lg border border-border bg-muted px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                    >
+                      <option value="">Nenhum (grupo padrão 0)</option>
+                      {msysUsers.map((u) => (
+                        <option key={u.nome} value={u.nome}>
+                          {u.nomeCompleto || u.nome} (cód. {u.codigo}) — grupo {u.grupo}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {copiarDeMsys && (
+                    <div className="mt-2 rounded-lg border border-border bg-muted/50 p-3">
+                      <p className="text-[11px] text-muted-foreground">
+                        Grupo <span className="font-semibold text-cyan-500">{copiarDeMsys.grupo}</span> será copiado de <span className="font-semibold text-foreground">{copiarDeMsys.nomeCompleto || copiarDeMsys.nome}</span>
+                      </p>
                     </div>
                   )}
                 </div>
@@ -329,8 +448,10 @@ export default function Onboarding() {
                     {cargo && <p><span className="text-muted-foreground">Cargo:</span> {cargo}</p>}
                     <p><span className="text-muted-foreground">Local:</span> {selectedLocal?.nome}</p>
                     <p><span className="text-muted-foreground">Setor:</span> {selectedSetor.nome}</p>
+                    <p><span className="text-muted-foreground">Sistemas:</span> {[sistemas.ad && "AD", sistemas.microsys && "Microsys"].filter(Boolean).join(", ") || "Nenhum"}</p>
                     <p><span className="text-muted-foreground">Senha:</span> <span className="font-mono">@Dovale123</span> (troca obrigatória)</p>
-                    {copiarDe && <p><span className="text-muted-foreground">Copiar de:</span> {copiarDe.displayName} ({copiarDe.groups.length} grupos)</p>}
+                    {copiarDe && <p><span className="text-muted-foreground">Copiar AD de:</span> {copiarDe.displayName} ({copiarDe.groups.length} grupos)</p>}
+                    {copiarDeMsys && <p><span className="text-muted-foreground">Copiar Microsys de:</span> {copiarDeMsys.nomeCompleto || copiarDeMsys.nome} (grupo {copiarDeMsys.grupo})</p>}
                   </div>
                 </div>
               )}
@@ -338,11 +459,11 @@ export default function Onboarding() {
               {/* Submit */}
               <button
                 onClick={handleSubmit}
-                disabled={!nomeCompleto.trim() || !selectedSetor || submitting}
+                disabled={!nomeCompleto.trim() || !selectedSetor || submitting || (!sistemas.ad && !sistemas.microsys)}
                 className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-500 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-600 transition-colors disabled:opacity-40"
               >
                 {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
-                {submitting ? "Criando usuário..." : "Criar Usuário no AD"}
+                {submitting ? "Criando usuário..." : `Criar Usuário ${[sistemas.ad && "AD", sistemas.microsys && "Microsys"].filter(Boolean).join(" + ")}`}
               </button>
             </div>
           </div>

@@ -1,6 +1,12 @@
 import { useCallback, useMemo } from 'react';
+import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { API_BASE } from '@/services/api';
+
+// No máximo 1 toast de "fonte indisponível" por minuto, mesmo com várias chamadas
+// em paralelo — evita empilhar avisos repetidos na tela.
+const AVISO_FONTES_TTL_MS = 60_000;
+let _ultimoAvisoFontes = 0;
 
 export type Cargo = 'ADM' | 'GESTOR' | 'VENDEDOR';
 
@@ -53,6 +59,15 @@ export function useComissaoApi() {
       const headers = new Headers(init.headers);
       headers.set('X-Dovale-Usuario', usuario);
       const res = await fetch(`${API_BASE}/comissao${path}`, { ...init, headers });
+
+      const fontes = res.headers.get('X-Fontes-Indisponiveis');
+      if (fontes && Date.now() - _ultimoAvisoFontes > AVISO_FONTES_TTL_MS) {
+        _ultimoAvisoFontes = Date.now();
+        toast.warning(
+          `Alguns dados ainda não carregaram (sem conexão com ${fontes.split('|').join(', ')} no momento). Isso não é um erro do painel — tente novamente em alguns minutos.`
+        );
+      }
+
       (res as unknown as { json: () => Promise<unknown> }).json = async () => {
         const texto = await res.text();
         if (!texto) return {};

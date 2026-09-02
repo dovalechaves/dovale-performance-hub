@@ -184,18 +184,10 @@ export async function processarDisparo(disparoId: number, inboxId: number) {
     } catch {}
   }
 
-  // Garante que o template está sincronizado no Chatwoot. Templates recém-criados/aprovados
-  // não entram na lista do Chatwoot automaticamente (sync a cada ~3h); sem isso o Chatwoot
-  // monta o payload errado e a Meta devolve #132012.
-  let sincronizado = await cw.templateSincronizado(dData.template_nome, inboxId);
-  if (!sincronizado) {
-    console.log(`[Disparo ${disparoId}] Template '${dData.template_nome}' não sincronizado — disparando sync no Chatwoot...`);
-    await cw.sincronizarTemplates(inboxId);
-    for (let tentativa = 0; tentativa < 6 && !sincronizado; tentativa++) {
-      await new Promise((r) => setTimeout(r, 5000));
-      sincronizado = await cw.templateSincronizado(dData.template_nome, inboxId);
-    }
-  }
+  // Rede de segurança: o POST /disparar já garantiu o sync, mas a aprovação pode sair
+  // bem depois do pedido (e o webhook de aprovação não respeita o timeout). Sem o
+  // template na lista do Chatwoot o payload sai errado e a Meta devolve #132012.
+  const sincronizado = await cw.garantirTemplateSincronizado(dData.template_nome, inboxId, 6, 5000);
   if (!sincronizado) {
     const erroMsg = `Template '${dData.template_nome}' não sincronizado no Chatwoot. Verifique se está APROVADO na Meta e sincronize os templates no inbox.`;
     console.error(`[Disparo ${disparoId}] ${erroMsg}`);

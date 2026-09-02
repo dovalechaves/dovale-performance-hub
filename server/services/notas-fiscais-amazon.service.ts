@@ -4,6 +4,8 @@ import { querySqlServer } from "../db/sqlserver";
 
 const TABELA_NOTAS = "dbo.TI_NotasAmazonFull_95";
 const TABELA_ITENS = "dbo.TI_NotasAmazonFullItens_95";
+/** Tabela de relatório de ecommerce já existente (hoje alimentada por Shopee) — vendas AMAZON FULL entram aqui também */
+const TABELA_NFE_ECOMMERCE = "dbo.[TI-MARKETING_95-NFeEcommerce]";
 
 // parseTagValue: false é essencial — o default (true) converte texto numérico em number,
 // o que corrompe CPF/CNPJ/CEP com zero à esquerda (ex: "08937521776" virava 8937521776).
@@ -69,6 +71,7 @@ export interface NotaFiscalParseada {
   cnpjDestinatario: string | null;
   nomeDestinatario: string | null;
   ufDestino: string | null;
+  municipioDestino: string | null;
   naturezaOperacao: string | null;
   tipoOperacao: TipoOperacao;
   itens: NotaFiscalItem[];
@@ -168,6 +171,7 @@ function parseNfe(raiz: any): NotaFiscalParseada {
     cnpjDestinatario: strOrNull(dest.CNPJ ?? dest.CPF),
     nomeDestinatario: strOrNull(dest.xNome),
     ufDestino: strOrNull(dest.enderDest?.UF),
+    municipioDestino: strOrNull(dest.enderDest?.xMun),
     naturezaOperacao,
     tipoOperacao: classificarTipoOperacao(naturezaOperacao),
     itens,
@@ -208,7 +212,50 @@ export interface ResultadoImportacao {
   notasNovas: number;
   notasDuplicadas: number;
   cancelamentosAplicados: number;
+  enviadasParaRelatorioEcommerce: number;
   erros: { arquivo: string; motivo: string }[];
+}
+
+const soma = (valores: (number | null)[]): number =>
+  valores.reduce((acc: number, v) => acc + (v ?? 0), 0);
+
+/**
+ * Insere UMA linha por nota (não por item) na tabela de relatório de ecommerce já
+ * existente (hoje alimentada por Shopee, via PEDIDO_SHOPEE). Só chamada pra notas
+ * TipoOperacao = 'VENDA'. Campos de cadastro de produto (PRO_CODIGO, GRUPO,
+ * SUBGRUPO, FAMILIA, SECAO, TBP_CUSTO, NVI_NUMERO, NVI_UNITARIO) ficam em branco —
+ * não dá pra cruzar o código de produto da Amazon com o Microsys sem mais contexto.
+ */
+async function inserirNFeEcommerce(nota: NotaFiscalParseada): Promise<void> {
+  const municipioUf = [nota.municipioDestino, nota.ufDestino].filter(Boolean).join("/") || null;
+  const primeiroItem = nota.itens[0];
+
+  await querySqlServer(
+    `INSERT INTO ${TABELA_NFE_ECOMMERCE}
+      (NTV_DATA, MUN_UF, PRO_RESUMO, NVI_QUANTIDADE, VALORTOTAL,
+       NVI_IPIVALOR, NVI_ICMSVALOR, NVI_PISVALOR, NVI_COFINSVALOR,
+       NVI_SUBSTICMS, DIFAL, FCP, EMP, PEDIDO_SHOPEE)
+     VALUES
+      (@ntvData, @munUf, @proResumo, @quantidade, @valorTotal,
+       @ipiValor, @icmsValor, @pisValor, @cofinsValor,
+       @substIcms, @difal, @fcp, @emp, @pedido)`,
+    {
+      ntvData: dateOrNull(nota.dataEmissao),
+      munUf: municipioUf,
+      proResumo: nota.itens.length > 1 ? `${primeiroItem?.descricao ?? ""} (+${nota.itens.length - 1} item(ns))` : primeiroItem?.descricao ?? null,
+      quantidade: soma(nota.itens.map((i) => i.quantidade)) || null,
+      valorTotal: nota.valorTotal,
+      ipiValor: soma(nota.itens.map((i) => i.valorIpi)) || null,
+      icmsValor: soma(nota.itens.map((i) => i.valorIcms)) || null,
+      pisValor: soma(nota.itens.map((i) => i.valorPis)) || null,
+      cofinsValor: soma(nota.itens.map((i) => i.valorCofins)) || null,
+      substIcms: soma(nota.itens.map((i) => i.valorIcmsSt)) || null,
+      difal: soma(nota.itens.map((i) => i.valorDifal)) || null,
+      fcp: soma(nota.itens.map((i) => i.valorFcpUfDest)) || null,
+      emp: "AMAZON FULL",
+      pedido: nota.numeroPedidoAmazon,
+    }
+  );
 }
 
 /** Lê o .zip do Faturador Amazon, faz parse de cada XML e grava no banco evitando duplicidade por ChaveAcesso */
@@ -224,6 +271,7 @@ export async function importarZipNotasFiscais(
     notasNovas: 0,
     notasDuplicadas: 0,
     cancelamentosAplicados: 0,
+    enviadasParaRelatorioEcommerce: 0,
     erros: [],
   };
 
@@ -244,11 +292,21 @@ export async function importarZipNotasFiscais(
     if (parseado.tipo === "cancelamento") {
       const isCancelamento = parseado.evento.tipoEvento === "110111";
       if (!isCancelamento || !parseado.evento.chaveAcesso) continue;
-      const rows = await querySqlServer<{ n: number }>(
-        `UPDATE ${TABELA_NOTAS} SET Situacao = 'CANCELADA' OUTPUT 1 AS n WHERE ChaveAcesso = @chave`,
+      const rows = await querySqlServer<{ NumeroPedidoAmazon: string | null }>(
+        `UPDATE ${TABELA_NOTAS} SET Situacao = 'CANCELADA' OUTPUT INSERTED.NumeroPedidoAmazon WHERE ChaveAcesso = @chave`,
         { chave: parseado.evento.chaveAcesso }
       );
-      if (rows.length > 0) resultado.cancelamentosAplicados++;
+      if (rows.length > 0) {
+        resultado.cancelamentosAplicados++;
+        // Remove do relatório de ecommerce também, se essa nota tinha sido enviada como venda
+        const pedido = rows[0].NumeroPedidoAmazon;
+        if (pedido) {
+          await querySqlServer(
+            `DELETE FROM ${TABELA_NFE_ECOMMERCE} WHERE EMP = 'AMAZON FULL' AND PEDIDO_SHOPEE = @pedido`,
+            { pedido }
+          );
+        }
+      }
       continue;
     }
 
@@ -303,6 +361,11 @@ export async function importarZipNotasFiscais(
     }
 
     resultado.notasNovas++;
+
+    if (nota.tipoOperacao === "VENDA") {
+      await inserirNFeEcommerce(nota);
+      resultado.enviadasParaRelatorioEcommerce++;
+    }
   }
 
   return resultado;

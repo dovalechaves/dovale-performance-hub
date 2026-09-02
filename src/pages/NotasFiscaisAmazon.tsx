@@ -59,6 +59,7 @@ interface ResultadoImportacao {
   notasNovas: number;
   notasDuplicadas: number;
   cancelamentosAplicados: number;
+  enviadasParaRelatorioEcommerce: number;
   erros: { arquivo: string; motivo: string }[];
 }
 
@@ -230,10 +231,11 @@ export default function NotasFiscaisAmazon() {
               </label>
 
               {ultimoResultado && (
-                <div className="grid gap-3 sm:grid-cols-4">
+                <div className="grid gap-3 sm:grid-cols-5">
                   <ResumoCard icon={<FileText className="w-4 h-4" />} label="XMLs no ZIP" value={ultimoResultado.totalArquivosXml} />
                   <ResumoCard icon={<CheckCircle2 className="w-4 h-4 text-emerald-500" />} label="Novas" value={ultimoResultado.notasNovas} />
                   <ResumoCard icon={<AlertTriangle className="w-4 h-4 text-amber-500" />} label="Já existiam" value={ultimoResultado.notasDuplicadas} />
+                  <ResumoCard icon={<UploadCloud className="w-4 h-4 text-blue-500" />} label="Enviadas p/ relatório" value={ultimoResultado.enviadasParaRelatorioEcommerce} />
                   <ResumoCard icon={<XCircle className="w-4 h-4 text-destructive" />} label="Com erro" value={ultimoResultado.erros.length} />
                 </div>
               )}

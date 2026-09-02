@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import { BarChart3, Calculator, LogOut, Sun, Moon, Users, RefreshCw, Loader2, ChevronDown, Settings2, Send, Archive, Bot, Database, ClipboardList, UserPlus, PackageSearch, ShieldCheck, BellRing, ShoppingCart, Sparkles, Compass, TrendingDown, Coins, Search, X, AlertTriangle } from "lucide-react";
+import { BarChart3, Calculator, LogOut, Sun, Moon, Users, RefreshCw, Loader2, ChevronDown, Settings2, Send, Archive, Bot, Database, ClipboardList, UserPlus, PackageSearch, ShieldCheck, BellRing, ShoppingCart, Sparkles, Compass, TrendingDown, Coins, Search, X, AlertTriangle, FileText } from "lucide-react";
 import logoBlue from "@/assets/logo-blue.png";
 import logoWhite from "@/assets/logo-white.png";
 import { API_BASE, LOJAS, getAuthUsers, updateAuthUserRole, type AuthManagedUser } from "@/services/api";
@@ -168,6 +168,13 @@ const APPS: AppCard[] = [
     route: "/estoque-minimo",
     color: "from-amber-500/20 to-red-600/10 border-amber-500/30 hover:border-amber-500/60",
   },
+  {
+    title: "Notas Fiscais Amazon",
+    description: "Importe o ZIP do Faturador Amazon FBA Classic e concilie as notas fiscais com os pedidos.",
+    icon: <FileText className="w-8 h-8" />,
+    route: "/notas-fiscais-amazon",
+    color: "from-blue-500/20 to-indigo-600/10 border-blue-500/30 hover:border-blue-500/60",
+  },
 ];
 
 const APP_BY_ROUTE: Record<string, keyof AuthManagedUser["apps"]> = {
@@ -190,6 +197,7 @@ const APP_BY_ROUTE: Record<string, keyof AuthManagedUser["apps"]> = {
   "/inventario-full-api": "invfull",
   "/prospeccao": "prospeccao",
   "/estoque-minimo": "estoqueminimo",
+  "/notas-fiscais-amazon": "notasfiscaisamazon",
 };
 
 // ─── Rep Selector (Sales Compass) ────────────────────────────────────────────
@@ -660,6 +668,8 @@ export default function Hub() {
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Rel.C.</th>
                     <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Est. Mínimo</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role Est.Min.</th>
+                    <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">NF Amazon</th>
+                    <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role NF Amazon</th>
                     <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Ecommerce</th>
                     <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-muted-foreground">Role EC</th>
                     <th className="px-4 py-3 text-center text-[10px] uppercase tracking-widest text-muted-foreground">Sug. Compras</th>
@@ -681,13 +691,13 @@ export default function Hub() {
                 <tbody>
                   {usersLoading ? (
                     <tr>
-                      <td colSpan={48} className="px-4 py-8 text-center text-muted-foreground">
+                      <td colSpan={50} className="px-4 py-8 text-center text-muted-foreground">
                         <Loader2 className="w-5 h-5 animate-spin mx-auto" />
                       </td>
                     </tr>
                   ) : filteredManagedUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={46} className="px-4 py-8 text-center text-muted-foreground text-xs">
+                      <td colSpan={48} className="px-4 py-8 text-center text-muted-foreground text-xs">
                         {appUserFilter === "all"
                           ? "Nenhum usuário encontrado para a busca informada."
                           : "Nenhum usuário habilitado no Hub e no app selecionado."}</td></tr>
@@ -758,6 +768,10 @@ export default function Hub() {
                                   estoqueminimo: {
                                     ...(u.apps as any).estoqueminimo,
                                     can_access: enabled ? ((u.apps as any).estoqueminimo?.can_access ?? false) : false,
+                                  },
+                                  notasfiscaisamazon: {
+                                    ...(u.apps as any).notasfiscaisamazon,
+                                    can_access: enabled ? ((u.apps as any).notasfiscaisamazon?.can_access ?? false) : false,
                                   },
                                   ecommercedisparo: {
                                     ...u.apps.ecommercedisparo,
@@ -1587,6 +1601,63 @@ export default function Hub() {
                                       app_key: "estoqueminimo",
                                       loja: null,
                                       can_access: u.apps.estoqueminimo?.can_access ?? false,
+                                      role: nextRole,
+                                    },
+                                  } as any,
+                                };
+                                updateManagedUser(u.usuario, () => next);
+                                await persistUser(next);
+                              }}
+                              disabled={savingUser === u.usuario || !u.can_access_hub}
+                              className="appearance-none rounded-lg border border-border bg-muted px-3 py-1.5 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-40"
+                            >
+                              {(Object.keys(ROLE_LABELS) as Role[]).map((r) => (
+                                <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                              ))}
+                            </select>
+                            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={u.apps.notasfiscaisamazon?.can_access ?? false}
+                            onChange={async (e) => {
+                              const next: AuthManagedUser = {
+                                ...u,
+                                apps: {
+                                  ...u.apps,
+                                  notasfiscaisamazon: {
+                                    ...(u.apps as any).notasfiscaisamazon,
+                                    app_key: "notasfiscaisamazon",
+                                    role: u.apps.notasfiscaisamazon?.role ?? "viewer",
+                                    loja: null,
+                                    can_access: e.target.checked,
+                                  },
+                                } as any,
+                              };
+                              updateManagedUser(u.usuario, () => next);
+                              await persistUser(next);
+                            }}
+                            disabled={savingUser === u.usuario || !u.can_access_hub}
+                            className="h-4 w-4 rounded border-border bg-muted text-primary focus:ring-primary/50 disabled:opacity-40"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="relative inline-block">
+                            <select
+                              value={u.apps.notasfiscaisamazon?.role ?? "viewer"}
+                              onChange={async (e) => {
+                                const nextRole = e.target.value as Role;
+                                const next: AuthManagedUser = {
+                                  ...u,
+                                  apps: {
+                                    ...u.apps,
+                                    notasfiscaisamazon: {
+                                      ...(u.apps as any).notasfiscaisamazon,
+                                      app_key: "notasfiscaisamazon",
+                                      loja: null,
+                                      can_access: u.apps.notasfiscaisamazon?.can_access ?? false,
                                       role: nextRole,
                                     },
                                   } as any,

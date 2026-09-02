@@ -46,7 +46,7 @@ function classificarTipoOperacao(natOp: string | null): TipoOperacao {
   if (n.includes("devolu")) return "DEVOLUCAO";
   if (n.includes("venda")) return "VENDA";
   if (n.includes("retorno simb")) return "RETORNO_SIMBOLICO";
-  if (n.includes("nao entregue") || n.includes("não entregue")) return "RETORNO_NAO_ENTREGUE";
+  if (n.includes("nao entregue") || n.includes("não entregue") || n.includes("recusa") || n.includes("nao localiza") || n.includes("não localiza")) return "RETORNO_NAO_ENTREGUE";
   if (n.includes("remessa")) return "REMESSA";
   return "OUTRO";
 }
@@ -93,6 +93,18 @@ const numOrNull = (v: unknown): number | null => {
 const strOrNull = (v: unknown): string | null => {
   if (v === undefined || v === null || v === "") return null;
   return String(v);
+};
+
+/**
+ * Converte a data ISO da NF-e (ex: "2026-08-01T21:42:17-03:00") em Date real antes de
+ * mandar pro SQL Server — passar string crua faz o driver mandar como NVarChar e a
+ * conversão implícita do SQL Server pra DATETIME falha dependendo do locale da sessão
+ * ("Conversion failed when converting date and/or time from character string").
+ */
+const dateOrNull = (v: string | null): Date | null => {
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
 };
 
 /** Extrai os dados de uma NF-e (nfeProc ou NFe solto) já convertida em objeto pelo fast-xml-parser */
@@ -264,7 +276,7 @@ export async function importarZipNotasFiscais(
         numeroPedidoAmazon: nota.numeroPedidoAmazon,
         numero: nota.numero,
         serie: nota.serie,
-        dataEmissao: nota.dataEmissao,
+        dataEmissao: dateOrNull(nota.dataEmissao),
         valorTotal: nota.valorTotal,
         cnpjEmitente: nota.cnpjEmitente,
         cnpjDestinatario: nota.cnpjDestinatario,

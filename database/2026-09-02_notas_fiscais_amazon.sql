@@ -18,7 +18,7 @@ BEGIN
     CREATE TABLE dbo.[TI-FISCAL_900-NotasFiscaisAmazon] (
         Id                  INT IDENTITY(1,1) PRIMARY KEY,
         ChaveAcesso         CHAR(44)        NOT NULL,
-        NumeroPedidoAmazon  VARCHAR(50)     NULL,       -- AmazonOrderId, quando identificado no XML (xPed) — usado na conciliação
+        NumeroPedidoAmazon  VARCHAR(50)     NULL,       -- AmazonOrderId, extraído do texto livre em infCpl ("Numero do pedido da compra: ...") — usado na conciliação
         Numero              VARCHAR(20)     NULL,
         Serie               VARCHAR(10)     NULL,
         DataEmissao         DATETIME        NULL,
@@ -27,6 +27,8 @@ BEGIN
         CnpjDestinatario    VARCHAR(14)     NULL,
         NomeDestinatario    VARCHAR(200)    NULL,
         UfDestino           CHAR(2)         NULL,
+        NaturezaOperacao    VARCHAR(150)    NULL,       -- ide/natOp cru (ex: "Venda de Mercadoria destinada a nao contribuinte")
+        TipoOperacao        VARCHAR(25)     NULL,       -- classificação: VENDA | DEVOLUCAO | REMESSA | RETORNO_SIMBOLICO | RETORNO_NAO_ENTREGUE | OUTRO
         Situacao            VARCHAR(20)     NOT NULL DEFAULT 'AUTORIZADA',  -- AUTORIZADA | CANCELADA
         XmlConteudo         NVARCHAR(MAX)   NOT NULL,
         ArquivoOrigemZip    VARCHAR(255)    NULL,
@@ -41,6 +43,9 @@ BEGIN
 
     CREATE INDEX IX_NotasFiscaisAmazon_DataEmissao
         ON dbo.[TI-FISCAL_900-NotasFiscaisAmazon] (DataEmissao);
+
+    CREATE INDEX IX_NotasFiscaisAmazon_TipoOperacao
+        ON dbo.[TI-FISCAL_900-NotasFiscaisAmazon] (TipoOperacao);
 END
 GO
 
@@ -64,6 +69,8 @@ BEGIN
         ValorIpi        DECIMAL(18,2)   NULL,
         ValorPis        DECIMAL(18,2)   NULL,
         ValorCofins     DECIMAL(18,2)   NULL,
+        ValorDifal      DECIMAL(18,2)   NULL,   -- ICMSUFDest.vICMSUFDest — já vem calculado pelo emissor
+        ValorFcpUfDest  DECIMAL(18,2)   NULL,   -- ICMSUFDest.vFCPUFDest — já vem calculado pelo emissor
 
         CONSTRAINT FK_NotasFiscaisAmazonItens_Nota
             FOREIGN KEY (ChaveAcesso)

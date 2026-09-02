@@ -31,6 +31,8 @@ import { useAuth } from "@/context/AuthContext";
 import logoBlue from "@/assets/logo-blue.png";
 import logoWhite from "@/assets/logo-white.png";
 
+type TipoOperacao = "VENDA" | "DEVOLUCAO" | "REMESSA" | "RETORNO_SIMBOLICO" | "RETORNO_NAO_ENTREGUE" | "OUTRO";
+
 interface NotaFiscal {
   ChaveAcesso: string;
   NumeroPedidoAmazon: string | null;
@@ -39,8 +41,18 @@ interface NotaFiscal {
   DataEmissao: string | null;
   ValorTotal: number | null;
   Situacao: string;
+  TipoOperacao: TipoOperacao;
   DataImportacao: string;
 }
+
+const TIPO_LABELS: Record<TipoOperacao, string> = {
+  VENDA: "Venda",
+  DEVOLUCAO: "Devolução",
+  REMESSA: "Remessa p/ CD",
+  RETORNO_SIMBOLICO: "Retorno simbólico",
+  RETORNO_NAO_ENTREGUE: "Não entregue",
+  OUTRO: "Outro",
+};
 
 interface ResultadoImportacao {
   totalArquivosXml: number;
@@ -188,7 +200,9 @@ export default function NotasFiscaisAmazon() {
                 <p className="text-xs text-muted-foreground mt-1">
                   No Seller Central, vá em <span className="font-medium">Reports → Faturador</span>, filtre o período
                   desejado e baixe o ZIP com os XMLs. Depois arraste o arquivo aqui — notas já importadas (mesma
-                  chave de acesso) são ignoradas automaticamente, sem duplicar.
+                  chave de acesso) são ignoradas automaticamente, sem duplicar. O ZIP traz tipos diferentes de nota
+                  (venda, devolução, remessa e retorno simbólico para o CD da Amazon) — todas são importadas, e a
+                  coluna "Tipo" na lista abaixo indica qual é qual.
                 </p>
               </div>
 
@@ -264,6 +278,7 @@ export default function NotasFiscaisAmazon() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Chave de acesso</TableHead>
+                      <TableHead>Tipo</TableHead>
                       <TableHead>Pedido Amazon</TableHead>
                       <TableHead>Número/Série</TableHead>
                       <TableHead>Emissão</TableHead>
@@ -275,13 +290,13 @@ export default function NotasFiscaisAmazon() {
                   <TableBody>
                     {carregando ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center py-8">
+                        <TableCell colSpan={8} className="text-center py-8">
                           <Loader2 className="w-5 h-5 animate-spin mx-auto text-muted-foreground" />
                         </TableCell>
                       </TableRow>
                     ) : notas.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center py-8 text-xs text-muted-foreground">
+                        <TableCell colSpan={8} className="text-center py-8 text-xs text-muted-foreground">
                           Nenhuma nota importada ainda.
                         </TableCell>
                       </TableRow>
@@ -289,6 +304,11 @@ export default function NotasFiscaisAmazon() {
                       notas.map((n) => (
                         <TableRow key={n.ChaveAcesso}>
                           <TableCell className="font-mono text-[11px]">{n.ChaveAcesso}</TableCell>
+                          <TableCell>
+                            <Badge variant={n.TipoOperacao === "VENDA" ? "default" : "outline"} className="text-[10px]">
+                              {TIPO_LABELS[n.TipoOperacao] ?? n.TipoOperacao}
+                            </Badge>
+                          </TableCell>
                           <TableCell className="text-xs">{n.NumeroPedidoAmazon ?? "—"}</TableCell>
                           <TableCell className="text-xs">{n.Numero ?? "—"}{n.Serie ? `/${n.Serie}` : ""}</TableCell>
                           <TableCell className="text-xs">{formatarData(n.DataEmissao)}</TableCell>

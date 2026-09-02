@@ -9,23 +9,42 @@ essas notas por API, e essa role foi negada repetidas vezes. Este app existe
 como caminho alternativo: a pessoa baixa o ZIP manualmente no Faturador e
 arrasta aqui — sem depender de nenhuma API bloqueada.
 
-## ⚠️ Antes de rodar — 2 coisas para confirmar
+## ⚠️ Antes de rodar — falta confirmar
 
-1. **Número da área da tabela**: o script SQL usa `TI-FISCAL_900-...` como
-   placeholder, seguindo o padrão existente (`TI-FINANCEIRO_131-...`,
-   `TI-MARKETING_95-...`, `TI-COMERCIAL_45-...`). Ninguém confirmou qual
-   número é o correto para o setor Fiscal — troque `900` (find & replace) em
-   `database/2026-09-02_notas_fiscais_amazon.sql` **e** nas duas constantes
-   no topo de `server/services/notas-fiscais-amazon.service.ts`
-   (`TABELA_NOTAS`, `TABELA_ITENS`) antes de rodar em produção.
+**Número da área da tabela**: o script SQL usa `TI-FISCAL_900-...` como
+placeholder, seguindo o padrão existente (`TI-FINANCEIRO_131-...`,
+`TI-MARKETING_95-...`, `TI-COMERCIAL_45-...`). Ninguém confirmou qual
+número é o correto para o setor Fiscal — troque `900` (find & replace) em
+`database/2026-09-02_notas_fiscais_amazon.sql` **e** nas duas constantes
+no topo de `server/services/notas-fiscais-amazon.service.ts`
+(`TABELA_NOTAS`, `TABELA_ITENS`) antes de rodar em produção.
 
-2. **Campo do número do pedido no XML**: o parser assume que o número do
-   pedido Amazon vem no campo padrão `xPed` (grupo `det/prod` do layout
-   NF-e, usado por marketplaces para referenciar o pedido de origem). Isso
-   ainda não foi validado contra uma nota real do Faturador Amazon — ao
-   testar com o primeiro ZIP real, confirme se `NumeroPedidoAmazon` está
-   vindo preenchido corretamente na tabela. Se não vier, ajuste
-   `parseNfe()` em `notas-fiscais-amazon.service.ts`.
+## Validado contra um ZIP real do Faturador (29 XMLs, ago/2026)
+
+O parser foi testado contra um ZIP de exemplo baixado direto da conta.
+Achados importantes que mudaram o desenho original:
+
+- **O ZIP não traz só nota de venda.** Traz uma mistura de 4 tipos de
+  documento, todos ligados ao ciclo fiscal do FBA: `VENDA` (venda ao
+  consumidor final — a que interessa pra GNRE), `DEVOLUCAO`, `REMESSA`
+  (remessa da DOVALE pro CD da Amazon) e `RETORNO_SIMBOLICO` (retorno
+  simbólico do CD confirmando recebimento). O app importa e guarda todos,
+  classificados no campo `TipoOperacao` (coluna "Tipo" na tela).
+- **Não existe `xPed` nos XMLs da Amazon.** O número do pedido
+  (`701-XXXXXXX-XXXXXXX`) vem como texto solto dentro de
+  `infAdic.infCpl`, tipo "...Numero do pedido da compra: 701-...". O
+  parser extrai isso por regex — já validado, bate certinho com o
+  `AmazonOrderId` da Orders API.
+- **Bug real encontrado e corrigido**: o `fast-xml-parser`, por padrão,
+  converte texto numérico em `number` — isso destruía CPF/CNPJ/CEP com
+  zero à esquerda (`08937521776` virava `8937521776`). Corrigido com
+  `parseTagValue: false` no parser + conversão manual só nos campos que
+  são de fato numéricos.
+- **DIFAL e FCP já vêm calculados no XML** (bloco `ICMSUFDest` de cada
+  item, só presente nas notas de `VENDA`/`DEVOLUCAO`) — gravados em
+  `ValorDifal` e `ValorFcpUfDest` na tabela de itens. Isso simplifica
+  bastante o futuro motor de GNRE: pra notas interestaduais, o valor já
+  está pronto no próprio documento, não precisa recalcular do zero.
 
 ## Setup
 
@@ -66,12 +85,14 @@ arrasta aqui — sem depender de nenhuma API bloqueada.
 
 - **Reconciliação com o pedido Amazon**: a Orders API (`AmazonOrderId`,
   `FulfillmentChannel=AFN`) já foi validada e funciona sem restrição
-  nenhuma, mas a ligação pedido ↔ nota aqui depende do campo `xPed` do
-  item 2 acima. Isso é o próximo passo natural depois que o campo for
-  confirmado.
+  nenhuma, e o `NumeroPedidoAmazon` já é extraído corretamente do XML
+  (ver acima) — falta só o passo de fato ligar as duas tabelas
+  (`AmazonOrderId = NumeroPedidoAmazon`) numa consulta/tela própria.
 - **Motor de cálculo de GNRE**: a tabela de itens já guarda ICMS, ICMS-ST,
-  FCP, IPI, PIS, COFINS por item — mas o cálculo do valor da guia em si
-  (regras por UF/NCM/CFOP) ainda não foi implementado.
+  FCP, DIFAL (`ValorDifal`/`ValorFcpUfDest`, já calculados pelo emissor),
+  IPI, PIS, COFINS por item, filtrável por `TipoOperacao = 'VENDA'` — mas
+  a consolidação num valor de guia GNRE por UF/período ainda não foi
+  implementada.
 - **Backfill automático**: para meses anteriores (ex: agosto), o ZIP
   precisa ser baixado manualmente no Faturador — não há automação
   retroativa por enquanto.

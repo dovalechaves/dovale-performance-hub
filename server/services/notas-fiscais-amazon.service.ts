@@ -6,7 +6,10 @@ import { querySqlServer } from "../db/sqlserver";
 const TABELA_NOTAS = "dbo.[TI-FISCAL_900-NotasFiscaisAmazon]";
 const TABELA_ITENS = "dbo.[TI-FISCAL_900-NotasFiscaisAmazonItens]";
 
-const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
+// parseTagValue: false é essencial — o default (true) converte texto numérico em number,
+// o que corrompe CPF/CNPJ/CEP com zero à esquerda (ex: "08937521776" virava 8937521776).
+// Convertemos pra number manualmente (numOrNull) só nos campos que realmente são numéricos.
+const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_", parseTagValue: false });
 
 const asArray = <T>(v: T | T[] | undefined): T[] => (v == null ? [] : Array.isArray(v) ? v : [v]);
 
@@ -25,6 +28,35 @@ export interface NotaFiscalItem {
   valorIpi: number | null;
   valorPis: number | null;
   valorCofins: number | null;
+  /** DIFAL — ICMSUFDest.vICMSUFDest, já calculado pelo emissor */
+  valorDifal: number | null;
+  /** FCP da UF de destino — ICMSUFDest.vFCPUFDest, já calculado pelo emissor */
+  valorFcpUfDest: number | null;
+}
+
+/**
+ * Tipos de operação observados num ZIP real do Faturador Amazon (não é só nota de venda):
+ * VENDA/DEVOLUCAO = fluxo com o consumidor final (interessa pra GNRE).
+ * REMESSA/RETORNO_SIMBOLICO = fluxo interno vendedor <-> depósito Amazon (armazenagem FBA).
+ */
+export type TipoOperacao = "VENDA" | "DEVOLUCAO" | "REMESSA" | "RETORNO_SIMBOLICO" | "RETORNO_NAO_ENTREGUE" | "OUTRO";
+
+function classificarTipoOperacao(natOp: string | null): TipoOperacao {
+  if (!natOp) return "OUTRO";
+  const n = natOp.toLowerCase();
+  if (n.includes("devolu")) return "DEVOLUCAO";
+  if (n.includes("venda")) return "VENDA";
+  if (n.includes("retorno simb")) return "RETORNO_SIMBOLICO";
+  if (n.includes("nao entregue") || n.includes("não entregue")) return "RETORNO_NAO_ENTREGUE";
+  if (n.includes("remessa")) return "REMESSA";
+  return "OUTRO";
+}
+
+/** Amazon não usa xPed — o número do pedido vem como texto livre dentro de infCpl */
+function extrairNumeroPedido(infCpl: string | null): string | null {
+  if (!infCpl) return null;
+  const m = infCpl.match(/N[uú]mero do pedido da compra:\s*([\d-]+)/i);
+  return m ? m[1] : null;
 }
 
 export interface NotaFiscalParseada {
@@ -38,6 +70,8 @@ export interface NotaFiscalParseada {
   cnpjDestinatario: string | null;
   nomeDestinatario: string | null;
   ufDestino: string | null;
+  naturezaOperacao: string | null;
+  tipoOperacao: TipoOperacao;
   itens: NotaFiscalItem[];
 }
 
@@ -75,16 +109,18 @@ function parseNfe(raiz: any): NotaFiscalParseada {
 
   const dets = asArray(infNFe.det);
 
-  // xPed = "Número do Pedido de Compra" — campo padrão do layout NF-e (grupo I01),
-  // usado por marketplaces para referenciar o pedido de origem. Confirmar contra
-  // uma nota real da Amazon antes de confiar 100% neste campo.
-  const numeroPedidoAmazon =
-    dets.map((d) => strOrNull(d?.prod?.xPed)).find((v) => v != null) ?? null;
+  // A Amazon não preenche xPed (campo padrão do layout NF-e pra número de pedido) —
+  // o número do pedido vem como texto solto dentro de infAdic.infCpl, ex:
+  // "...Numero do pedido da compra: 701-3915314-6833059". Confirmado contra ZIP real.
+  const infCpl = strOrNull(infNFe.infAdic?.infCpl);
+  const numeroPedidoAmazon = extrairNumeroPedido(infCpl);
+  const naturezaOperacao = strOrNull(ide.natOp);
 
   const itens: NotaFiscalItem[] = dets.map((d) => {
     const prod = d?.prod ?? {};
     const imposto = d?.imposto ?? {};
     const icms = imposto.ICMS ? Object.values(imposto.ICMS)[0] as any : {};
+    const icmsUfDest = imposto.ICMSUFDest ?? {};
     const ipi = imposto.IPI?.IPITrib ?? {};
     const pis = imposto.PIS?.PISAliq ?? imposto.PIS?.PISNT ?? imposto.PIS?.PISOutr ?? {};
     const cofins = imposto.COFINS?.COFINSAliq ?? imposto.COFINS?.COFINSNT ?? imposto.COFINS?.COFINSOutr ?? {};
@@ -104,6 +140,9 @@ function parseNfe(raiz: any): NotaFiscalParseada {
       valorIpi: numOrNull(ipi?.vIPI),
       valorPis: numOrNull(pis?.vPIS),
       valorCofins: numOrNull(cofins?.vCOFINS),
+      // Já vêm calculados pelo emissor — é o valor que efetivamente compõe a GNRE
+      valorDifal: numOrNull(icmsUfDest?.vICMSUFDest),
+      valorFcpUfDest: numOrNull(icmsUfDest?.vFCPUFDest),
     };
   });
 
@@ -118,6 +157,8 @@ function parseNfe(raiz: any): NotaFiscalParseada {
     cnpjDestinatario: strOrNull(dest.CNPJ ?? dest.CPF),
     nomeDestinatario: strOrNull(dest.xNome),
     ufDestino: strOrNull(dest.enderDest?.UF),
+    naturezaOperacao,
+    tipoOperacao: classificarTipoOperacao(naturezaOperacao),
     itens,
   };
 }
@@ -213,10 +254,12 @@ export async function importarZipNotasFiscais(
     await querySqlServer(
       `INSERT INTO ${TABELA_NOTAS}
         (ChaveAcesso, NumeroPedidoAmazon, Numero, Serie, DataEmissao, ValorTotal,
-         CnpjEmitente, CnpjDestinatario, NomeDestinatario, UfDestino, XmlConteudo, ArquivoOrigemZip, ImportadoPor)
+         CnpjEmitente, CnpjDestinatario, NomeDestinatario, UfDestino, NaturezaOperacao, TipoOperacao,
+         XmlConteudo, ArquivoOrigemZip, ImportadoPor)
        VALUES
         (@chaveAcesso, @numeroPedidoAmazon, @numero, @serie, @dataEmissao, @valorTotal,
-         @cnpjEmitente, @cnpjDestinatario, @nomeDestinatario, @ufDestino, @xmlConteudo, @arquivoOrigemZip, @importadoPor)`,
+         @cnpjEmitente, @cnpjDestinatario, @nomeDestinatario, @ufDestino, @naturezaOperacao, @tipoOperacao,
+         @xmlConteudo, @arquivoOrigemZip, @importadoPor)`,
       {
         chaveAcesso: nota.chaveAcesso,
         numeroPedidoAmazon: nota.numeroPedidoAmazon,
@@ -228,6 +271,8 @@ export async function importarZipNotasFiscais(
         cnpjDestinatario: nota.cnpjDestinatario,
         nomeDestinatario: nota.nomeDestinatario,
         ufDestino: nota.ufDestino,
+        naturezaOperacao: nota.naturezaOperacao,
+        tipoOperacao: nota.tipoOperacao,
         xmlConteudo: conteudo,
         arquivoOrigemZip: contexto.arquivoOrigemZip,
         importadoPor: contexto.importadoPor,
@@ -238,10 +283,10 @@ export async function importarZipNotasFiscais(
       await querySqlServer(
         `INSERT INTO ${TABELA_ITENS}
           (ChaveAcesso, NumeroItem, CodigoProduto, Descricao, Ncm, Cfop, Quantidade, ValorUnitario, ValorTotal,
-           ValorIcms, ValorIcmsSt, ValorFcp, ValorIpi, ValorPis, ValorCofins)
+           ValorIcms, ValorIcmsSt, ValorFcp, ValorIpi, ValorPis, ValorCofins, ValorDifal, ValorFcpUfDest)
          VALUES
           (@chaveAcesso, @numeroItem, @codigoProduto, @descricao, @ncm, @cfop, @quantidade, @valorUnitario, @valorTotal,
-           @valorIcms, @valorIcmsSt, @valorFcp, @valorIpi, @valorPis, @valorCofins)`,
+           @valorIcms, @valorIcmsSt, @valorFcp, @valorIpi, @valorPis, @valorCofins, @valorDifal, @valorFcpUfDest)`,
         { chaveAcesso: nota.chaveAcesso, ...item }
       );
     }
@@ -260,6 +305,7 @@ export interface NotaFiscalListItem {
   DataEmissao: string | null;
   ValorTotal: number | null;
   Situacao: string;
+  TipoOperacao: TipoOperacao;
   DataImportacao: string;
 }
 
@@ -272,7 +318,7 @@ export async function listarNotasFiscais(params: { busca?: string; pagina: numbe
   const buscaParam = busca ? `%${busca}%` : undefined;
 
   const dados = await querySqlServer<NotaFiscalListItem>(
-    `SELECT ChaveAcesso, NumeroPedidoAmazon, Numero, Serie, DataEmissao, ValorTotal, Situacao, DataImportacao
+    `SELECT ChaveAcesso, NumeroPedidoAmazon, Numero, Serie, DataEmissao, ValorTotal, Situacao, TipoOperacao, DataImportacao
      FROM ${TABELA_NOTAS}
      ${filtro}
      ORDER BY DataImportacao DESC

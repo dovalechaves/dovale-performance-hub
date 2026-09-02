@@ -70,6 +70,22 @@ Achados importantes que mudaram o desenho original:
    duplicar nada.
 5. A tela mostra um resumo (novas / já existiam / com erro) depois de cada
    upload, e uma lista com busca por chave, pedido ou número da nota.
+6. Toda nota `TipoOperacao = 'VENDA'` que nasce `Situacao = 'AUTORIZADA'`
+   também grava uma linha em `dbo.[TI-MARKETING_95-NFeEcommerce]`
+   (`EMP = 'AMAZON FULL'`, `PEDIDO_SHOPEE` = número do pedido Amazon) —
+   a mesma tabela de relatório já usada por ML/Shopee/SJC/etc.
+
+## ⚠️ A NFeEcommerce é limpa por um ETL externo, fora deste código
+
+Confirmado com o time: existe um **ETL fora deste repositório que apaga/
+reconstrói `TI-MARKETING_95-NFeEcommerce` periodicamente**. Isso significa
+que as linhas `EMP = 'AMAZON FULL'` que este app insere **podem
+desaparecer** quando esse ETL rodar de novo — não é um bug daqui, é
+comportamento esperado de um processo externo que este código não
+controla e não tenta compensar. Se um relatório que lê essa tabela
+parecer "sem dados da Amazon", a causa mais provável é essa, não uma
+falha na importação (confira em `dbo.TI_NotasAmazonFull_95`, que é a
+fonte de verdade e não é tocada por esse ETL).
 
 ## O que NÃO está incluso ainda
 

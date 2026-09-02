@@ -220,13 +220,26 @@ const soma = (valores: (number | null)[]): number =>
   valores.reduce((acc: number, v) => acc + (v ?? 0), 0);
 
 /**
- * Insere UMA linha por nota (não por item) na tabela de relatório de ecommerce já
- * existente (hoje alimentada por Shopee, via PEDIDO_SHOPEE). Só chamada pra notas
- * TipoOperacao = 'VENDA'. Campos de cadastro de produto (PRO_CODIGO, GRUPO,
- * SUBGRUPO, FAMILIA, SECAO, TBP_CUSTO, NVI_NUMERO, NVI_UNITARIO) ficam em branco —
- * não dá pra cruzar o código de produto da Amazon com o Microsys sem mais contexto.
+ * Garante que a nota está espelhada na tabela de relatório de ecommerce já existente
+ * (hoje alimentada por Shopee, via PEDIDO_SHOPEE) — uma linha por nota (não por item).
+ * Idempotente: checa se já existe (EMP + PEDIDO_SHOPEE) antes de inserir, então é
+ * seguro chamar de novo pra uma nota já sincronizada — inclusive depois que o ETL
+ * externo que limpa essa tabela periodicamente apagar a linha, reimportar o mesmo
+ * ZIP repõe ela sozinho. Só deve ser chamada pra notas TipoOperacao='VENDA' e
+ * Situacao='AUTORIZADA'. Campos de cadastro de produto (PRO_CODIGO, GRUPO, SUBGRUPO,
+ * FAMILIA, SECAO, TBP_CUSTO, NVI_NUMERO, NVI_UNITARIO) ficam em branco — não dá pra
+ * cruzar o código de produto da Amazon com o Microsys sem mais contexto.
+ * Retorna true se inseriu (nova), false se já existia (nada mudou).
  */
-async function inserirNFeEcommerce(nota: NotaFiscalParseada): Promise<void> {
+async function garantirNFeEcommerce(nota: NotaFiscalParseada): Promise<boolean> {
+  if (!nota.numeroPedidoAmazon) return false;
+
+  const existente = await querySqlServer<{ n: number }>(
+    `SELECT 1 AS n FROM ${TABELA_NFE_ECOMMERCE} WHERE EMP = 'AMAZON FULL' AND PEDIDO_SHOPEE = @pedido`,
+    { pedido: nota.numeroPedidoAmazon }
+  );
+  if (existente.length > 0) return false;
+
   const municipioUf = [nota.municipioDestino, nota.ufDestino].filter(Boolean).join("/") || null;
   const primeiroItem = nota.itens[0];
 
@@ -256,6 +269,7 @@ async function inserirNFeEcommerce(nota: NotaFiscalParseada): Promise<void> {
       pedido: nota.numeroPedidoAmazon,
     }
   );
+  return true;
 }
 
 /** Lê o .zip do Faturador Amazon, faz parse de cada XML e grava no banco evitando duplicidade por ChaveAcesso */
@@ -306,12 +320,18 @@ export async function importarZipNotasFiscais(
 
   // Passo 2: grava as notas, já sabendo se alguma delas nasce cancelada dentro deste lote
   for (const { conteudo, nota } of notasParaGravar) {
-    const existente = await querySqlServer<{ ChaveAcesso: string }>(
-      `SELECT ChaveAcesso FROM ${TABELA_NOTAS} WHERE ChaveAcesso = @chave`,
+    const existente = await querySqlServer<{ ChaveAcesso: string; Situacao: string }>(
+      `SELECT ChaveAcesso, Situacao FROM ${TABELA_NOTAS} WHERE ChaveAcesso = @chave`,
       { chave: nota.chaveAcesso }
     );
     if (existente.length > 0) {
       resultado.notasDuplicadas++;
+      // Nota já existia — mesmo assim garante que ela está espelhada na NFeEcommerce,
+      // já que um ETL externo pode ter apagado a linha desde a última importação.
+      if (nota.tipoOperacao === "VENDA" && existente[0].Situacao === "AUTORIZADA") {
+        const inseriu = await garantirNFeEcommerce(nota);
+        if (inseriu) resultado.enviadasParaRelatorioEcommerce++;
+      }
       continue;
     }
 
@@ -362,8 +382,8 @@ export async function importarZipNotasFiscais(
 
     // Só vai pro relatório se for venda E já nascer autorizada (nunca manda venda cancelada)
     if (nota.tipoOperacao === "VENDA" && situacaoInicial === "AUTORIZADA") {
-      await inserirNFeEcommerce(nota);
-      resultado.enviadasParaRelatorioEcommerce++;
+      const inseriu = await garantirNFeEcommerce(nota);
+      if (inseriu) resultado.enviadasParaRelatorioEcommerce++;
     }
   }
 

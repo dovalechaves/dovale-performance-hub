@@ -2,9 +2,8 @@ import AdmZip from "adm-zip";
 import { XMLParser } from "fast-xml-parser";
 import { querySqlServer } from "../db/sqlserver";
 
-// ⚠️ Confira o número de área da tabela (ver database/2026-09-02_notas_fiscais_amazon.sql)
-const TABELA_NOTAS = "dbo.[TI-FISCAL_900-NotasFiscaisAmazon]";
-const TABELA_ITENS = "dbo.[TI-FISCAL_900-NotasFiscaisAmazonItens]";
+const TABELA_NOTAS = "dbo.TI_NotasAmazonFull_95";
+const TABELA_ITENS = "dbo.TI_NotasAmazonFullItens_95";
 
 // parseTagValue: false é essencial — o default (true) converte texto numérico em number,
 // o que corrompe CPF/CNPJ/CEP com zero à esquerda (ex: "08937521776" virava 8937521776).

@@ -9,16 +9,6 @@ essas notas por API, e essa role foi negada repetidas vezes. Este app existe
 como caminho alternativo: a pessoa baixa o ZIP manualmente no Faturador e
 arrasta aqui — sem depender de nenhuma API bloqueada.
 
-## ⚠️ Antes de rodar — falta confirmar
-
-**Número da área da tabela**: o script SQL usa `TI-FISCAL_900-...` como
-placeholder, seguindo o padrão existente (`TI-FINANCEIRO_131-...`,
-`TI-MARKETING_95-...`, `TI-COMERCIAL_45-...`). Ninguém confirmou qual
-número é o correto para o setor Fiscal — troque `900` (find & replace) em
-`database/2026-09-02_notas_fiscais_amazon.sql` **e** nas duas constantes
-no topo de `server/services/notas-fiscais-amazon.service.ts`
-(`TABELA_NOTAS`, `TABELA_ITENS`) antes de rodar em produção.
-
 ## Validado contra um ZIP real do Faturador (29 XMLs, ago/2026)
 
 O parser foi testado contra um ZIP de exemplo baixado direto da conta.
@@ -51,9 +41,9 @@ Achados importantes que mudaram o desenho original:
 1. Rode o script SQL em `database/2026-09-02_notas_fiscais_amazon.sql`
    contra o banco `DOVALE` (mesmo SQL Server já usado pelo hub —
    `DB_SQLSERVER_HOST` no `.env`). Cria duas tabelas:
-   - `TI-FISCAL_900-NotasFiscaisAmazon` (uma linha por nota, com o XML
+   - `TI_NotasAmazonFull_95` (uma linha por nota, com o XML
      completo guardado em `XmlConteudo` para auditoria).
-   - `TI-FISCAL_900-NotasFiscaisAmazonItens` (itens/tributos por nota —
+   - `TI_NotasAmazonFullItens_95` (itens/tributos por nota —
      base para o futuro motor de cálculo de GNRE).
 2. **Nenhuma credencial nova é necessária** — o backend reaproveita o pool
    de conexão SQL Server já configurado (`server/db/sqlserver.ts`), o mesmo

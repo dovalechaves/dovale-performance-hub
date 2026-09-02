@@ -1,21 +1,15 @@
 -- ============================================================================
 -- Feature: Notas Fiscais Amazon FBA Classic
 -- Banco: DOVALE (SQL Server interno, 10.13.x — mesmo host de DB_SQLSERVER_HOST)
---
--- ⚠️ CONFIRME ANTES DE RODAR:
---   O prefixo "TI-FISCAL_900-" usa "900" como placeholder, seguindo o padrão
---   já existente (ex: TI-FINANCEIRO_131-..., TI-MARKETING_95-..., TI-COMERCIAL_45-...).
---   Ninguém confirmou qual número de área é o correto para o setor Fiscal —
---   troque "900" abaixo (find & replace) pelo número certo antes de executar.
 -- ============================================================================
 
 USE DOVALE;
 GO
 
 -- Nota fiscal (uma linha por NF-e importada do ZIP do Faturador Amazon)
-IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'TI-FISCAL_900-NotasFiscaisAmazon')
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'TI_NotasAmazonFull_95')
 BEGIN
-    CREATE TABLE dbo.[TI-FISCAL_900-NotasFiscaisAmazon] (
+    CREATE TABLE dbo.TI_NotasAmazonFull_95 (
         Id                  INT IDENTITY(1,1) PRIMARY KEY,
         ChaveAcesso         CHAR(44)        NOT NULL,
         NumeroPedidoAmazon  VARCHAR(50)     NULL,       -- AmazonOrderId, extraído do texto livre em infCpl ("Numero do pedido da compra: ...") — usado na conciliação
@@ -35,24 +29,24 @@ BEGIN
         ImportadoPor        VARCHAR(100)    NULL,       -- X-Dovale-Usuario de quem fez o upload
         DataImportacao      DATETIME        NOT NULL DEFAULT GETDATE(),
 
-        CONSTRAINT UQ_NotasFiscaisAmazon_ChaveAcesso UNIQUE (ChaveAcesso)
+        CONSTRAINT UQ_NotasAmazonFull_ChaveAcesso UNIQUE (ChaveAcesso)
     );
 
-    CREATE INDEX IX_NotasFiscaisAmazon_NumeroPedido
-        ON dbo.[TI-FISCAL_900-NotasFiscaisAmazon] (NumeroPedidoAmazon);
+    CREATE INDEX IX_NotasAmazonFull_NumeroPedido
+        ON dbo.TI_NotasAmazonFull_95 (NumeroPedidoAmazon);
 
-    CREATE INDEX IX_NotasFiscaisAmazon_DataEmissao
-        ON dbo.[TI-FISCAL_900-NotasFiscaisAmazon] (DataEmissao);
+    CREATE INDEX IX_NotasAmazonFull_DataEmissao
+        ON dbo.TI_NotasAmazonFull_95 (DataEmissao);
 
-    CREATE INDEX IX_NotasFiscaisAmazon_TipoOperacao
-        ON dbo.[TI-FISCAL_900-NotasFiscaisAmazon] (TipoOperacao);
+    CREATE INDEX IX_NotasAmazonFull_TipoOperacao
+        ON dbo.TI_NotasAmazonFull_95 (TipoOperacao);
 END
 GO
 
 -- Itens da nota (tributos por item — base para o futuro motor de cálculo de GNRE)
-IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'TI-FISCAL_900-NotasFiscaisAmazonItens')
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'TI_NotasAmazonFullItens_95')
 BEGIN
-    CREATE TABLE dbo.[TI-FISCAL_900-NotasFiscaisAmazonItens] (
+    CREATE TABLE dbo.TI_NotasAmazonFullItens_95 (
         Id              INT IDENTITY(1,1) PRIMARY KEY,
         ChaveAcesso     CHAR(44)        NOT NULL,
         NumeroItem      INT             NULL,
@@ -72,12 +66,12 @@ BEGIN
         ValorDifal      DECIMAL(18,2)   NULL,   -- ICMSUFDest.vICMSUFDest — já vem calculado pelo emissor
         ValorFcpUfDest  DECIMAL(18,2)   NULL,   -- ICMSUFDest.vFCPUFDest — já vem calculado pelo emissor
 
-        CONSTRAINT FK_NotasFiscaisAmazonItens_Nota
+        CONSTRAINT FK_NotasAmazonFullItens_Nota
             FOREIGN KEY (ChaveAcesso)
-            REFERENCES dbo.[TI-FISCAL_900-NotasFiscaisAmazon] (ChaveAcesso)
+            REFERENCES dbo.TI_NotasAmazonFull_95 (ChaveAcesso)
     );
 
-    CREATE INDEX IX_NotasFiscaisAmazonItens_ChaveAcesso
-        ON dbo.[TI-FISCAL_900-NotasFiscaisAmazonItens] (ChaveAcesso);
+    CREATE INDEX IX_NotasAmazonFullItens_ChaveAcesso
+        ON dbo.TI_NotasAmazonFullItens_95 (ChaveAcesso);
 END
 GO

@@ -280,37 +280,32 @@ export async function importarZipNotasFiscais(
     return resultado;
   }
 
+  // Passo 1: parse de tudo primeiro (sem tocar no banco), pra saber ANTES de inserir
+  // se alguma nota deste mesmo ZIP já tem cancelamento junto (ordem dos arquivos dentro
+  // do ZIP não é garantida — sem isso, uma nota poderia ser inserida como AUTORIZADA e
+  // mandada pro relatório antes do cancelamento "alcançar" ela).
+  const notasParaGravar: { conteudo: string; nota: NotaFiscalParseada }[] = [];
+  const cancelamentos: EventoCancelamento[] = [];
+
   for (const entrada of entradasXml) {
     const conteudo = entrada.getData().toString("utf-8");
     const parseado = parseArquivoXml(entrada.entryName, conteudo);
 
     if (parseado.tipo === "erro") {
       resultado.erros.push({ arquivo: parseado.arquivo, motivo: parseado.motivo });
-      continue;
-    }
-
-    if (parseado.tipo === "cancelamento") {
-      const isCancelamento = parseado.evento.tipoEvento === "110111";
-      if (!isCancelamento || !parseado.evento.chaveAcesso) continue;
-      const rows = await querySqlServer<{ NumeroPedidoAmazon: string | null }>(
-        `UPDATE ${TABELA_NOTAS} SET Situacao = 'CANCELADA' OUTPUT INSERTED.NumeroPedidoAmazon WHERE ChaveAcesso = @chave`,
-        { chave: parseado.evento.chaveAcesso }
-      );
-      if (rows.length > 0) {
-        resultado.cancelamentosAplicados++;
-        // Remove do relatório de ecommerce também, se essa nota tinha sido enviada como venda
-        const pedido = rows[0].NumeroPedidoAmazon;
-        if (pedido) {
-          await querySqlServer(
-            `DELETE FROM ${TABELA_NFE_ECOMMERCE} WHERE EMP = 'AMAZON FULL' AND PEDIDO_SHOPEE = @pedido`,
-            { pedido }
-          );
-        }
+    } else if (parseado.tipo === "cancelamento") {
+      if (parseado.evento.tipoEvento === "110111" && parseado.evento.chaveAcesso) {
+        cancelamentos.push(parseado.evento);
       }
-      continue;
+    } else {
+      notasParaGravar.push({ conteudo, nota: parseado.nota });
     }
+  }
 
-    const nota = parseado.nota;
+  const chavesCanceladasNoLote = new Set(cancelamentos.map((c) => c.chaveAcesso));
+
+  // Passo 2: grava as notas, já sabendo se alguma delas nasce cancelada dentro deste lote
+  for (const { conteudo, nota } of notasParaGravar) {
     const existente = await querySqlServer<{ ChaveAcesso: string }>(
       `SELECT ChaveAcesso FROM ${TABELA_NOTAS} WHERE ChaveAcesso = @chave`,
       { chave: nota.chaveAcesso }
@@ -320,14 +315,16 @@ export async function importarZipNotasFiscais(
       continue;
     }
 
+    const situacaoInicial = chavesCanceladasNoLote.has(nota.chaveAcesso) ? "CANCELADA" : "AUTORIZADA";
+
     await querySqlServer(
       `INSERT INTO ${TABELA_NOTAS}
         (ChaveAcesso, NumeroPedidoAmazon, Numero, Serie, DataEmissao, ValorTotal,
-         CnpjEmitente, CnpjDestinatario, NomeDestinatario, UfDestino, NaturezaOperacao, TipoOperacao,
+         CnpjEmitente, CnpjDestinatario, NomeDestinatario, UfDestino, NaturezaOperacao, TipoOperacao, Situacao,
          XmlConteudo, ArquivoOrigemZip, ImportadoPor)
        VALUES
         (@chaveAcesso, @numeroPedidoAmazon, @numero, @serie, @dataEmissao, @valorTotal,
-         @cnpjEmitente, @cnpjDestinatario, @nomeDestinatario, @ufDestino, @naturezaOperacao, @tipoOperacao,
+         @cnpjEmitente, @cnpjDestinatario, @nomeDestinatario, @ufDestino, @naturezaOperacao, @tipoOperacao, @situacao,
          @xmlConteudo, @arquivoOrigemZip, @importadoPor)`,
       {
         chaveAcesso: nota.chaveAcesso,
@@ -342,6 +339,7 @@ export async function importarZipNotasFiscais(
         ufDestino: nota.ufDestino,
         naturezaOperacao: nota.naturezaOperacao,
         tipoOperacao: nota.tipoOperacao,
+        situacao: situacaoInicial,
         xmlConteudo: conteudo,
         arquivoOrigemZip: contexto.arquivoOrigemZip,
         importadoPor: contexto.importadoPor,
@@ -362,9 +360,28 @@ export async function importarZipNotasFiscais(
 
     resultado.notasNovas++;
 
-    if (nota.tipoOperacao === "VENDA") {
+    // Só vai pro relatório se for venda E já nascer autorizada (nunca manda venda cancelada)
+    if (nota.tipoOperacao === "VENDA" && situacaoInicial === "AUTORIZADA") {
       await inserirNFeEcommerce(nota);
       resultado.enviadasParaRelatorioEcommerce++;
+    }
+  }
+
+  // Passo 3: aplica cancelamentos que referem notas de uploads anteriores (já no banco)
+  for (const evento of cancelamentos) {
+    const rows = await querySqlServer<{ NumeroPedidoAmazon: string | null }>(
+      `UPDATE ${TABELA_NOTAS} SET Situacao = 'CANCELADA' OUTPUT INSERTED.NumeroPedidoAmazon WHERE ChaveAcesso = @chave AND Situacao <> 'CANCELADA'`,
+      { chave: evento.chaveAcesso }
+    );
+    if (rows.length > 0) {
+      resultado.cancelamentosAplicados++;
+      const pedido = rows[0].NumeroPedidoAmazon;
+      if (pedido) {
+        await querySqlServer(
+          `DELETE FROM ${TABELA_NFE_ECOMMERCE} WHERE EMP = 'AMAZON FULL' AND PEDIDO_SHOPEE = @pedido`,
+          { pedido }
+        );
+      }
     }
   }
 

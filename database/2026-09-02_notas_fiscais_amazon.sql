@@ -4,7 +4,6 @@
 -- ============================================================================
 
 USE DOVALE;
-GO
 
 -- Nota fiscal (uma linha por NF-e importada do ZIP do Faturador Amazon)
 IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'TI_NotasAmazonFull_95')
@@ -41,7 +40,6 @@ BEGIN
     CREATE INDEX IX_NotasAmazonFull_TipoOperacao
         ON dbo.TI_NotasAmazonFull_95 (TipoOperacao);
 END
-GO
 
 -- Itens da nota (tributos por item — base para o futuro motor de cálculo de GNRE)
 IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'TI_NotasAmazonFullItens_95')
@@ -74,4 +72,3 @@ BEGIN
     CREATE INDEX IX_NotasAmazonFullItens_ChaveAcesso
         ON dbo.TI_NotasAmazonFullItens_95 (ChaveAcesso);
 END
-GO

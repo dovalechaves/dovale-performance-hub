@@ -32,13 +32,15 @@ router.post("/importar", upload.single("arquivo"), async (req, res) => {
   }
 });
 
-/** GET /api/notas-fiscais-amazon?busca=&pagina=&limite= — lista notas já importadas */
+/** GET /api/notas-fiscais-amazon?busca=&pagina=&limite=&ordenarPor=&direcao= — lista notas já importadas (só vendas) */
 router.get("/", async (req, res) => {
   try {
     const pagina = Math.max(1, Number(req.query.pagina) || 1);
     const limite = Math.min(200, Math.max(1, Number(req.query.limite) || 50));
     const busca = typeof req.query.busca === "string" ? req.query.busca.trim() : "";
-    const resultado = await listarNotasFiscais({ busca: busca || undefined, pagina, limite });
+    const ordenarPor = typeof req.query.ordenarPor === "string" ? req.query.ordenarPor : undefined;
+    const direcao = typeof req.query.direcao === "string" ? req.query.direcao : undefined;
+    const resultado = await listarNotasFiscais({ busca: busca || undefined, pagina, limite, ordenarPor, direcao });
     res.json(resultado);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

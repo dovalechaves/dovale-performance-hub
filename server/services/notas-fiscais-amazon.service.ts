@@ -400,19 +400,36 @@ export interface NotaFiscalListItem {
   DataImportacao: string;
 }
 
-export async function listarNotasFiscais(params: { busca?: string; pagina: number; limite: number }): Promise<{ dados: NotaFiscalListItem[]; total: number }> {
+// Whitelist — ordenarPor/direcao viram texto cru na query, nunca aceitar direto do request
+const COLUNAS_ORDENAVEIS = ["DataEmissao", "ValorTotal", "DataImportacao"] as const;
+type ColunaOrdenavel = typeof COLUNAS_ORDENAVEIS[number];
+
+export async function listarNotasFiscais(params: {
+  busca?: string;
+  pagina: number;
+  limite: number;
+  ordenarPor?: string;
+  direcao?: string;
+}): Promise<{ dados: NotaFiscalListItem[]; total: number }> {
   const { busca, pagina, limite } = params;
   const offset = (pagina - 1) * limite;
+  const coluna: ColunaOrdenavel = (COLUNAS_ORDENAVEIS as readonly string[]).includes(params.ordenarPor ?? "")
+    ? (params.ordenarPor as ColunaOrdenavel)
+    : "DataImportacao";
+  const direcao = params.direcao === "asc" ? "ASC" : "DESC";
+
+  // A tela só mostra vendas — remessa/retorno simbólico/devolução são movimentação
+  // interna com o depósito da Amazon, não interessam pra quem usa essa lista no dia a dia.
   const filtro = busca
-    ? `WHERE ChaveAcesso LIKE @busca OR NumeroPedidoAmazon LIKE @busca OR Numero LIKE @busca`
-    : "";
+    ? `WHERE TipoOperacao = 'VENDA' AND (ChaveAcesso LIKE @busca OR NumeroPedidoAmazon LIKE @busca OR Numero LIKE @busca)`
+    : `WHERE TipoOperacao = 'VENDA'`;
   const buscaParam = busca ? `%${busca}%` : undefined;
 
   const dados = await querySqlServer<NotaFiscalListItem>(
     `SELECT ChaveAcesso, NumeroPedidoAmazon, Numero, Serie, DataEmissao, ValorTotal, Situacao, TipoOperacao, DataImportacao
      FROM ${TABELA_NOTAS}
      ${filtro}
-     ORDER BY DataImportacao DESC
+     ORDER BY ${coluna} ${direcao}
      OFFSET @offset ROWS FETCH NEXT @limite ROWS ONLY`,
     { busca: buscaParam, offset, limite }
   );

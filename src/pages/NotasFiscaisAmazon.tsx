@@ -13,6 +13,11 @@ import {
   CheckCircle2,
   AlertTriangle,
   XCircle,
+  ChevronUp,
+  ChevronDown,
+  ChevronsUpDown,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,8 +36,6 @@ import { useAuth } from "@/context/AuthContext";
 import logoBlue from "@/assets/logo-blue.png";
 import logoWhite from "@/assets/logo-white.png";
 
-type TipoOperacao = "VENDA" | "DEVOLUCAO" | "REMESSA" | "RETORNO_SIMBOLICO" | "RETORNO_NAO_ENTREGUE" | "OUTRO";
-
 interface NotaFiscal {
   ChaveAcesso: string;
   NumeroPedidoAmazon: string | null;
@@ -41,18 +44,8 @@ interface NotaFiscal {
   DataEmissao: string | null;
   ValorTotal: number | null;
   Situacao: string;
-  TipoOperacao: TipoOperacao;
   DataImportacao: string;
 }
-
-const TIPO_LABELS: Record<TipoOperacao, string> = {
-  VENDA: "Venda",
-  DEVOLUCAO: "Devolução",
-  REMESSA: "Remessa p/ CD",
-  RETORNO_SIMBOLICO: "Retorno simbólico",
-  RETORNO_NAO_ENTREGUE: "Não entregue",
-  OUTRO: "Outro",
-};
 
 interface ResultadoImportacao {
   totalArquivosXml: number;
@@ -62,6 +55,14 @@ interface ResultadoImportacao {
   enviadasParaRelatorioEcommerce: number;
   erros: { arquivo: string; motivo: string }[];
 }
+
+type ColunaOrdenavel = "DataEmissao" | "ValorTotal" | "DataImportacao";
+interface Ordenacao {
+  campo: ColunaOrdenavel;
+  direcao: "asc" | "desc";
+}
+
+const LIMITE_POR_PAGINA = 25;
 
 export default function NotasFiscaisAmazon() {
   const navigate = useNavigate();
@@ -73,16 +74,26 @@ export default function NotasFiscaisAmazon() {
   const [enviando, setEnviando] = useState(false);
   const [arrastando, setArrastando] = useState(false);
   const [ultimoResultado, setUltimoResultado] = useState<ResultadoImportacao | null>(null);
+  const [pagina, setPagina] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [ordenacao, setOrdenacaoState] = useState<Ordenacao>({ campo: "DataImportacao", direcao: "desc" });
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
     localStorage.setItem("dovale_theme", dark ? "dark" : "light");
   }, [dark]);
 
-  const carregar = useCallback((termo?: string) => {
+  const carregar = useCallback((termo: string | undefined, paginaAtual: number, ord: Ordenacao) => {
     setCarregando(true);
-    const qs = termo ? `?busca=${encodeURIComponent(termo)}` : "";
-    fetch(`${API_BASE}/notas-fiscais-amazon${qs}`)
+    const params = new URLSearchParams({
+      pagina: String(paginaAtual),
+      limite: String(LIMITE_POR_PAGINA),
+      ordenarPor: ord.campo,
+      direcao: ord.direcao,
+    });
+    if (termo) params.set("busca", termo);
+
+    fetch(`${API_BASE}/notas-fiscais-amazon?${params.toString()}`)
       .then(async (r) => {
         if (!r.ok) {
           const data = await r.json().catch(() => null);
@@ -90,20 +101,40 @@ export default function NotasFiscaisAmazon() {
         }
         return r.json();
       })
-      .then((data: { dados: NotaFiscal[]; total: number }) => setNotas(data.dados ?? []))
+      .then((data: { dados: NotaFiscal[]; total: number }) => {
+        setNotas(data.dados ?? []);
+        setTotal(data.total ?? 0);
+      })
       .catch((err: Error) => toast.error(err.message || "Falha ao carregar notas."))
       .finally(() => setCarregando(false));
   }, []);
 
+  // Busca com debounce — sempre volta pra página 1 (uma busca nova invalida a página atual)
   useEffect(() => {
-    carregar();
-  }, [carregar]);
-
-  useEffect(() => {
-    const t = setTimeout(() => carregar(busca || undefined), 400);
+    const t = setTimeout(() => {
+      setPagina(1);
+      carregar(busca || undefined, 1, ordenacao);
+    }, 400);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [busca]);
+
+  // Recarrega quando a página ou a ordenação mudam (sem debounce, é ação direta do usuário)
+  useEffect(() => {
+    carregar(busca || undefined, pagina, ordenacao);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pagina, ordenacao]);
+
+  const alternarOrdenacao = (campo: ColunaOrdenavel) => {
+    setPagina(1);
+    setOrdenacaoState((atual) =>
+      atual.campo === campo
+        ? { campo, direcao: atual.direcao === "asc" ? "desc" : "asc" }
+        : { campo, direcao: "desc" }
+    );
+  };
+
+  const totalPaginas = Math.max(1, Math.ceil(total / LIMITE_POR_PAGINA));
 
   const enviarArquivo = (file: File) => {
     if (!file.name.toLowerCase().endsWith(".zip")) {
@@ -128,7 +159,8 @@ export default function NotasFiscaisAmazon() {
       .then((resultado) => {
         setUltimoResultado(resultado);
         toast.success(`Importação concluída: ${resultado.notasNovas} nova(s), ${resultado.notasDuplicadas} já existiam.`);
-        carregar(busca || undefined);
+        setPagina(1);
+        carregar(busca || undefined, 1, ordenacao);
       })
       .catch((err: Error) => toast.error(err.message || "Falha ao importar o arquivo."))
       .finally(() => setEnviando(false));
@@ -201,9 +233,9 @@ export default function NotasFiscaisAmazon() {
                 <p className="text-xs text-muted-foreground mt-1">
                   No Seller Central, vá em <span className="font-medium">Reports → Faturador</span>, filtre o período
                   desejado e baixe o ZIP com os XMLs. Depois arraste o arquivo aqui — notas já importadas (mesma
-                  chave de acesso) são ignoradas automaticamente, sem duplicar. O ZIP traz tipos diferentes de nota
-                  (venda, devolução, remessa e retorno simbólico para o CD da Amazon) — todas são importadas, e a
-                  coluna "Tipo" na lista abaixo indica qual é qual.
+                  chave de acesso) são ignoradas automaticamente, sem duplicar. O ZIP traz outros tipos de documento
+                  além de venda (remessa e retorno simbólico para o CD da Amazon, devolução) — eles são guardados no
+                  banco, mas não aparecem na lista abaixo, que mostra só as vendas.
                 </p>
               </div>
 
@@ -269,7 +301,7 @@ export default function NotasFiscaisAmazon() {
                       className="pl-8"
                     />
                   </div>
-                  <Button variant="outline" size="sm" onClick={() => carregar(busca || undefined)} disabled={carregando}>
+                  <Button variant="outline" size="sm" onClick={() => carregar(busca || undefined, pagina, ordenacao)} disabled={carregando}>
                     <RefreshCw className={`h-3.5 w-3.5 ${carregando ? "animate-spin" : ""}`} />
                   </Button>
                 </div>
@@ -280,11 +312,10 @@ export default function NotasFiscaisAmazon() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Chave de acesso</TableHead>
-                      <TableHead>Tipo</TableHead>
                       <TableHead>Pedido Amazon</TableHead>
                       <TableHead>Número/Série</TableHead>
-                      <TableHead>Emissão</TableHead>
-                      <TableHead>Valor</TableHead>
+                      <SortableHead campo="DataEmissao" ordenacao={ordenacao} onOrdenar={alternarOrdenacao}>Emissão</SortableHead>
+                      <SortableHead campo="ValorTotal" ordenacao={ordenacao} onOrdenar={alternarOrdenacao}>Valor</SortableHead>
                       <TableHead>Situação</TableHead>
                       <TableHead>Importada em</TableHead>
                     </TableRow>
@@ -292,13 +323,13 @@ export default function NotasFiscaisAmazon() {
                   <TableBody>
                     {carregando ? (
                       <TableRow>
-                        <TableCell colSpan={8} className="text-center py-8">
+                        <TableCell colSpan={7} className="text-center py-8">
                           <Loader2 className="w-5 h-5 animate-spin mx-auto text-muted-foreground" />
                         </TableCell>
                       </TableRow>
                     ) : notas.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={8} className="text-center py-8 text-xs text-muted-foreground">
+                        <TableCell colSpan={7} className="text-center py-8 text-xs text-muted-foreground">
                           Nenhuma nota importada ainda.
                         </TableCell>
                       </TableRow>
@@ -306,11 +337,6 @@ export default function NotasFiscaisAmazon() {
                       notas.map((n) => (
                         <TableRow key={n.ChaveAcesso}>
                           <TableCell className="font-mono text-[11px]">{n.ChaveAcesso}</TableCell>
-                          <TableCell>
-                            <Badge variant={n.TipoOperacao === "VENDA" ? "default" : "outline"} className="text-[10px]">
-                              {TIPO_LABELS[n.TipoOperacao] ?? n.TipoOperacao}
-                            </Badge>
-                          </TableCell>
                           <TableCell className="text-xs">{n.NumeroPedidoAmazon ?? "—"}</TableCell>
                           <TableCell className="text-xs">{n.Numero ?? "—"}{n.Serie ? `/${n.Serie}` : ""}</TableCell>
                           <TableCell className="text-xs">{formatarData(n.DataEmissao)}</TableCell>
@@ -327,11 +353,53 @@ export default function NotasFiscaisAmazon() {
                   </TableBody>
                 </Table>
               </div>
+
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>{total} nota(s) no total</span>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" disabled={pagina <= 1 || carregando} onClick={() => setPagina((p) => Math.max(1, p - 1))}>
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </Button>
+                  <span>Página {pagina} de {totalPaginas}</span>
+                  <Button variant="outline" size="sm" disabled={pagina >= totalPaginas || carregando} onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}>
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>
       </main>
     </div>
+  );
+}
+
+function SortableHead({
+  campo,
+  ordenacao,
+  onOrdenar,
+  children,
+}: {
+  campo: ColunaOrdenavel;
+  ordenacao: Ordenacao;
+  onOrdenar: (campo: ColunaOrdenavel) => void;
+  children: React.ReactNode;
+}) {
+  const ativo = ordenacao.campo === campo;
+  return (
+    <TableHead>
+      <button
+        onClick={() => onOrdenar(campo)}
+        className={`inline-flex items-center gap-1 hover:text-foreground transition-colors ${ativo ? "text-foreground font-semibold" : ""}`}
+      >
+        {children}
+        {ativo ? (
+          ordenacao.direcao === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
+        ) : (
+          <ChevronsUpDown className="h-3 w-3 opacity-40" />
+        )}
+      </button>
+    </TableHead>
   );
 }
 

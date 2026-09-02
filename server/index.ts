@@ -24,6 +24,7 @@ import relatorioCustosRouter from "./routes/relatorio-custos";
 import comissaoRouter from "./routes/comissao";
 import productFirstMovementRouter from "./routes/product-first-movement";
 import estoqueMinimoRouter from "./routes/estoque-minimo";
+import notasFiscaisAmazonRouter from "./routes/notas-fiscais-amazon";
 import { startSyncJob } from "./jobs/syncJob";
 import { startStockSnapshotJob, runStockSnapshotManual, getStockSnapshotStatus } from "./jobs/stockSnapshotJob";
 import { startMultiPrecoJob } from "./jobs/multiPrecoJob";
@@ -67,6 +68,7 @@ app.use("/api/relatorio-custos",  relatorioCustosRouter);
 app.use("/api/comissao",          comissaoRouter);
 app.use("/api/product-first-movement", productFirstMovementRouter);
 app.use("/api/estoque-minimo",    estoqueMinimoRouter);
+app.use("/api/notas-fiscais-amazon", notasFiscaisAmazonRouter);
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });

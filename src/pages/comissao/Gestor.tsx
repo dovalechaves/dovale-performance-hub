@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import AppShell from './layout/AppShell';
 import { formatBRL, formatNumber, MESES, CORES_GRAFICO } from './_shared/format';
 import { calcularComissaoTelevendas, type MetaConfig, type BonusConfig } from './_shared/commission';
@@ -509,6 +509,108 @@ export default function ComissaoGestor() {
     !busca || v.vendedor.toLowerCase().includes(busca.toLowerCase())
   );
 
+  // Cálculo de comissão/meta por linha é relativamente pesado (roda 3-4 funções
+  // de faixa por vendedor) — memoizado pra não recalcular a cada tecla digitada
+  // em "Buscar vendedor" ou outro re-render que não mude os dados em si.
+  const linhasCalculadas = useMemo(() => {
+    return vendedoresFiltrados.map((v, i) => {
+      const isFerragens = v.setor === 'FERRAGENS';
+      const isDist = v.setor === 'DISTRIBUIDORES';
+      const cferr = isFerragens ? getComissaoFerr(v) : null;
+      const cdist = isDist ? getComissaoDist(v) : null;
+      const ctv = !isFerragens && !isDist && v.is_televendas ? getComissaoTV(v) : null;
+      const f = !isFerragens && !isDist && !v.is_televendas ? getFaixa(v.vendedor, v.total_vendas) : null;
+
+      // Coluna "Total Vendas"
+      const vendaCell = isFerragens || isDist ? (
+        <div>
+          <span className="font-semibold" style={{ color: '#00205C' }}>{formatBRL(v.total_vendas)}</span>
+          {v.total_recebido > 0 && (
+            <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Rec: {formatBRL(v.total_recebido)}</p>
+          )}
+        </div>
+      ) : v.is_televendas ? (
+        <div>
+          <span className="font-semibold" style={{ color: '#00205C' }}>{formatBRL(v.valor_pa)}</span>
+          <span className="ml-1 text-xs font-normal px-1 rounded" style={{ background: '#eff6ff', color: '#1d4ed8' }}>PA</span>
+          <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Geral: {formatBRL(v.total_vendas)}</p>
+          {v.total_recebido > 0 && (
+            <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Rec: {formatBRL(v.total_recebido)}</p>
+          )}
+        </div>
+      ) : (
+        <span className="font-semibold" style={{ color: '#00205C' }}>{formatBRL(v.total_vendas)}</span>
+      );
+
+      // Meta atingida — só considera "cadastrada" se tiver ao menos um valor real > 0
+      const mTV = !isFerragens && !isDist ? metasMap[v.vendedor] : undefined;
+      const mFerr = isFerragens ? ferrMetasMap[v.vendedor] : undefined;
+      const mDist = isDist ? distMetasMap[v.vendedor] : undefined;
+      const temMetaCadastrada = isFerragens
+        ? !!(mFerr && (mFerr.meta1_valor > 0 || mFerr.meta2_valor > 0 || mFerr.meta3_valor > 0 || mFerr.metadesafio_valor > 0))
+        : isDist
+          ? !!(mDist && (mDist.meta1_valor > 0 || mDist.meta2_valor > 0 || mDist.meta3_valor > 0 || mDist.meta4_valor > 0 || mDist.metadesafio_valor > 0))
+          : !!(mTV && (mTV.meta1_valor > 0 || mTV.meta2_valor > 0 || mTV.meta3_valor > 0));
+      const metaLabel = isFerragens ? cferr?.meta_atingida?.label : isDist ? cdist?.meta_atingida?.label : v.is_televendas ? ctv?.meta_atingida?.label : f?.atingida?.label;
+      const metaValor = isFerragens ? cferr?.meta_atingida?.valor : isDist ? cdist?.meta_atingida?.valor : v.is_televendas ? ctv?.meta_atingida?.valor : f?.atingida?.valor;
+
+      // Próxima meta ainda não batida (para a nova coluna "Próxima Meta")
+      const proximaMeta = isFerragens
+        ? getProximaMeta([
+            { label: 'Meta 1', valor: Number(mFerr?.meta1_valor) || 0 },
+            { label: 'Meta 2', valor: Number(mFerr?.meta2_valor) || 0 },
+            { label: 'Meta 3', valor: Number(mFerr?.meta3_valor) || 0 },
+            { label: 'Meta Desafio', valor: Number(mFerr?.metadesafio_valor) || 0 },
+          ], v.total_vendas)
+        : isDist
+          ? getProximaMeta([
+              { label: 'Meta 1', valor: Number(mDist?.meta1_valor) || 0 },
+              { label: 'Meta 2', valor: Number(mDist?.meta2_valor) || 0 },
+              { label: 'Meta 3', valor: Number(mDist?.meta3_valor) || 0 },
+              { label: 'Meta 4', valor: Number(mDist?.meta4_valor) || 0 },
+              { label: 'Meta Desafio', valor: Number(mDist?.metadesafio_valor) || 0 },
+            ], v.total_vendas)
+          : v.is_televendas
+            ? getProximaMeta([
+                { label: 'Meta PA 1', valor: Number(mTV?.meta1_valor) || 0 },
+                { label: 'Meta PA 2', valor: Number(mTV?.meta2_valor) || 0 },
+                { label: 'Meta PA 3', valor: Number(mTV?.meta3_valor) || 0 },
+              ], v.valor_pa)
+            : getProximaMeta([
+                { label: 'Meta 1', valor: Number(mTV?.meta1_valor) || 0 },
+                { label: 'Meta 2', valor: Number(mTV?.meta2_valor) || 0 },
+                { label: 'Meta 3', valor: Number(mTV?.meta3_valor) || 0 },
+              ], v.total_vendas);
+
+      // Comissão estimada — sem meta = 0; com meta sem faixa = percentual_sem_meta
+      const comissaoDisplay = !temMetaCadastrada
+        ? 0
+        : isFerragens
+          ? (cferr?.comissao_total ?? 0)
+          : isDist
+            ? (cdist?.comissao_total ?? 0)
+            : v.is_televendas
+              ? (ctv?.comissao_total ?? 0)
+              : f?.comissao != null
+                ? f.comissao
+                : (Number(mTV?.percentual_sem_meta ?? 0) / 100) * v.total_vendas;
+
+      // Atingimento (barra de progresso)
+      const metaRef = isFerragens
+        ? (Number(ferrMetasMap[v.vendedor]?.meta1_valor) || 0)
+        : isDist
+          ? (Number(distMetasMap[v.vendedor]?.meta1_valor) || 0)
+          : v.is_televendas
+            ? (Number(metasMap[v.vendedor]?.meta1_valor) || 0)
+            : (f?.referencia ?? 0);
+      const realizado = isFerragens || isDist ? v.total_vendas : v.is_televendas ? v.valor_pa : v.total_vendas;
+      const pct = metaRef > 0 ? Math.min((realizado / metaRef) * 100, 100) : 0;
+
+      return { v, i, vendaCell, metaLabel, metaValor, proximaMeta, temMetaCadastrada, comissaoDisplay, ctv, metaRef, pct };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vendedoresFiltrados, metasMap, ferrMetasMap, ferrBonusMap, ferrMetaGrupo, distMetasMap, distBonusMap, bonusConfig, percentualRecorrencia, vendasSetorFerragens]);
+
   const totalVendas = vendedoresFiltrados.reduce((s, v) => s + v.total_vendas, 0);
   const totalPA = vendedoresFiltrados.reduce((s, v) => s + (v.setor === 'FERRAGENS' ? 0 : (v.valor_pa ?? 0)), 0);
   const algumaTelevendas = vendedoresFiltrados.some((v) => v.is_televendas);
@@ -857,99 +959,7 @@ export default function ComissaoGestor() {
                     <td colSpan={8} className="text-center py-8" style={{ color: '#94a3b8' }}>Nenhum vendedor encontrado</td>
                   </tr>
                 ) : (
-                  vendedoresFiltrados.map((v, i) => {
-                    const isFerragens = v.setor === 'FERRAGENS';
-                    const isDist = v.setor === 'DISTRIBUIDORES';
-                    const cferr = isFerragens ? getComissaoFerr(v) : null;
-                    const cdist = isDist ? getComissaoDist(v) : null;
-                    const ctv = !isFerragens && !isDist && v.is_televendas ? getComissaoTV(v) : null;
-                    const f = !isFerragens && !isDist && !v.is_televendas ? getFaixa(v.vendedor, v.total_vendas) : null;
-
-                    // Coluna "Total Vendas"
-                    const vendaCell = isFerragens || isDist ? (
-                      <div>
-                        <span className="font-semibold" style={{ color: '#00205C' }}>{formatBRL(v.total_vendas)}</span>
-                        {v.total_recebido > 0 && (
-                          <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Rec: {formatBRL(v.total_recebido)}</p>
-                        )}
-                      </div>
-                    ) : v.is_televendas ? (
-                      <div>
-                        <span className="font-semibold" style={{ color: '#00205C' }}>{formatBRL(v.valor_pa)}</span>
-                        <span className="ml-1 text-xs font-normal px-1 rounded" style={{ background: '#eff6ff', color: '#1d4ed8' }}>PA</span>
-                        <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Geral: {formatBRL(v.total_vendas)}</p>
-                        {v.total_recebido > 0 && (
-                          <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Rec: {formatBRL(v.total_recebido)}</p>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="font-semibold" style={{ color: '#00205C' }}>{formatBRL(v.total_vendas)}</span>
-                    );
-
-                    // Meta atingida — só considera "cadastrada" se tiver ao menos um valor real > 0
-                    const mTV = !isFerragens && !isDist ? metasMap[v.vendedor] : undefined;
-                    const mFerr = isFerragens ? ferrMetasMap[v.vendedor] : undefined;
-                    const mDist = isDist ? distMetasMap[v.vendedor] : undefined;
-                    const temMetaCadastrada = isFerragens
-                      ? !!(mFerr && (mFerr.meta1_valor > 0 || mFerr.meta2_valor > 0 || mFerr.meta3_valor > 0 || mFerr.metadesafio_valor > 0))
-                      : isDist
-                        ? !!(mDist && (mDist.meta1_valor > 0 || mDist.meta2_valor > 0 || mDist.meta3_valor > 0 || mDist.meta4_valor > 0 || mDist.metadesafio_valor > 0))
-                        : !!(mTV && (mTV.meta1_valor > 0 || mTV.meta2_valor > 0 || mTV.meta3_valor > 0));
-                    const metaLabel = isFerragens ? cferr?.meta_atingida?.label : isDist ? cdist?.meta_atingida?.label : v.is_televendas ? ctv?.meta_atingida?.label : f?.atingida?.label;
-                    const metaValor = isFerragens ? cferr?.meta_atingida?.valor : isDist ? cdist?.meta_atingida?.valor : v.is_televendas ? ctv?.meta_atingida?.valor : f?.atingida?.valor;
-
-                    // Próxima meta ainda não batida (para a nova coluna "Próxima Meta")
-                    const proximaMeta = isFerragens
-                      ? getProximaMeta([
-                          { label: 'Meta 1', valor: Number(mFerr?.meta1_valor) || 0 },
-                          { label: 'Meta 2', valor: Number(mFerr?.meta2_valor) || 0 },
-                          { label: 'Meta 3', valor: Number(mFerr?.meta3_valor) || 0 },
-                          { label: 'Meta Desafio', valor: Number(mFerr?.metadesafio_valor) || 0 },
-                        ], v.total_vendas)
-                      : isDist
-                        ? getProximaMeta([
-                            { label: 'Meta 1', valor: Number(mDist?.meta1_valor) || 0 },
-                            { label: 'Meta 2', valor: Number(mDist?.meta2_valor) || 0 },
-                            { label: 'Meta 3', valor: Number(mDist?.meta3_valor) || 0 },
-                            { label: 'Meta 4', valor: Number(mDist?.meta4_valor) || 0 },
-                            { label: 'Meta Desafio', valor: Number(mDist?.metadesafio_valor) || 0 },
-                          ], v.total_vendas)
-                        : v.is_televendas
-                          ? getProximaMeta([
-                              { label: 'Meta PA 1', valor: Number(mTV?.meta1_valor) || 0 },
-                              { label: 'Meta PA 2', valor: Number(mTV?.meta2_valor) || 0 },
-                              { label: 'Meta PA 3', valor: Number(mTV?.meta3_valor) || 0 },
-                            ], v.valor_pa)
-                          : getProximaMeta([
-                              { label: 'Meta 1', valor: Number(mTV?.meta1_valor) || 0 },
-                              { label: 'Meta 2', valor: Number(mTV?.meta2_valor) || 0 },
-                              { label: 'Meta 3', valor: Number(mTV?.meta3_valor) || 0 },
-                            ], v.total_vendas);
-
-                    // Comissão estimada — sem meta = 0; com meta sem faixa = percentual_sem_meta
-                    const comissaoDisplay = !temMetaCadastrada
-                      ? 0
-                      : isFerragens
-                        ? (cferr?.comissao_total ?? 0)
-                        : isDist
-                          ? (cdist?.comissao_total ?? 0)
-                          : v.is_televendas
-                            ? (ctv?.comissao_total ?? 0)
-                            : f?.comissao != null
-                              ? f.comissao
-                              : (Number(mTV?.percentual_sem_meta ?? 0) / 100) * v.total_vendas;
-
-                    // Atingimento (barra de progresso)
-                    const metaRef = isFerragens
-                      ? (Number(ferrMetasMap[v.vendedor]?.meta1_valor) || 0)
-                      : isDist
-                        ? (Number(distMetasMap[v.vendedor]?.meta1_valor) || 0)
-                        : v.is_televendas
-                          ? (Number(metasMap[v.vendedor]?.meta1_valor) || 0)
-                          : (f?.referencia ?? 0);
-                    const realizado = isFerragens || isDist ? v.total_vendas : v.is_televendas ? v.valor_pa : v.total_vendas;
-                    const pct = metaRef > 0 ? Math.min((realizado / metaRef) * 100, 100) : 0;
-
+                  linhasCalculadas.map(({ v, i, vendaCell, metaLabel, metaValor, proximaMeta, temMetaCadastrada, comissaoDisplay, ctv, metaRef, pct }) => {
                     return (
                       <tr
                         key={i}

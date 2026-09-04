@@ -9,7 +9,7 @@ import {
   ResponsiveContainer, LabelList,
 } from 'recharts';
 import { ChevronDown, Download, Filter, TrendingUp, X } from 'lucide-react';
-import { useComissaoUser as useUser, useComissaoApi } from './_shared/hooks';
+import { useComissaoUser as useUser, useComissaoApi, useRecorrenciaConfig } from './_shared/hooks';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 
@@ -232,6 +232,30 @@ export default function ComissaoGestor() {
   const usuario = useUser();
   const isAdm = usuario && usuario !== 'loading' && usuario.cargo === 'ADM';
   const api = useComissaoApi();
+  const { percentual: percentualRecorrencia, recarregar: recarregarRecorrencia } = useRecorrenciaConfig();
+  const [inputRecorrencia, setInputRecorrencia] = useState<string>(String(percentualRecorrencia));
+  useEffect(() => { setInputRecorrencia(String(percentualRecorrencia)); }, [percentualRecorrencia]);
+  const salvarRecorrencia = async () => {
+    const novo = Number(inputRecorrencia.replace(',', '.'));
+    if (!Number.isFinite(novo) || novo < 0 || novo > 100) {
+      toast.error('Percentual inválido (0 a 100).');
+      setInputRecorrencia(String(percentualRecorrencia));
+      return;
+    }
+    try {
+      const r = await api('/recorrencia-config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ percentual: novo }),
+      });
+      if (!r.ok) throw new Error('falha ao salvar');
+      await recarregarRecorrencia();
+      toast.success('Percentual de recorrência atualizado.');
+    } catch {
+      toast.error('Erro ao salvar o percentual de recorrência.');
+      setInputRecorrencia(String(percentualRecorrencia));
+    }
+  };
   const navigate = useNavigate();
   const [vendedores, setVendedores] = useState<ResumoVendedor[]>([]);
   const [metasMap, setMetasMap] = useState<Record<string, MetaVendedor>>({});
@@ -413,6 +437,13 @@ export default function ComissaoGestor() {
     };
   };
 
+  // Próxima meta ainda não batida (genérico para todos os setores) — primeira
+  // faixa cadastrada (valor > 0) cujo valor ainda é maior que o realizado.
+  const getProximaMeta = (tiers: { label: string; valor: number }[], realizado: number) => {
+    const validos = tiers.filter((t) => t.valor > 0).sort((a, b) => a.valor - b.valor);
+    return validos.find((t) => realizado < t.valor) || null;
+  };
+
   // Lógica Televendas: compara valor_pa vs metas, comissão sobre recebimentos
   const getComissaoTV = (v: ResumoVendedor) => {
     const m = metasMap[v.vendedor];
@@ -423,7 +454,7 @@ export default function ComissaoGestor() {
       meta3_valor: Number(m.meta3_valor), meta3_percentual: Number(m.meta3_percentual),
       percentual_sem_meta: Number(m.percentual_sem_meta ?? 0),
     };
-    return calcularComissaoTelevendas(v.valor_pa, v.total_recebido, metaConfig, bonusConfig, v.recorrencia_meta1_ativa ?? false);
+    return calcularComissaoTelevendas(v.valor_pa, v.total_recebido, metaConfig, bonusConfig, v.recorrencia_meta1_ativa ?? false, percentualRecorrencia);
   };
 
   // Lógica Ferragens: comissão baseada em total_vendas e total_recebido
@@ -577,6 +608,29 @@ export default function ComissaoGestor() {
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             {/* Filtros */}
+            {isAdm && (
+              <div
+                className="flex items-center gap-1.5 rounded-lg pl-3 pr-2 py-2 text-sm font-medium"
+                style={{ background: '#ffffff', border: '1px solid #e2e8f0', color: '#00205C' }}
+                title="Percentual do bônus de recorrência (Televendas)"
+              >
+                <span className="text-xs whitespace-nowrap" style={{ color: '#64748b' }}>Recorrência</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.5}
+                  value={inputRecorrencia}
+                  onChange={(e) => setInputRecorrencia(e.target.value)}
+                  onBlur={salvarRecorrencia}
+                  onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                  className="w-14 outline-none bg-transparent font-semibold text-right"
+                  style={{ color: '#00205C' }}
+                />
+                <span className="text-xs" style={{ color: '#64748b' }}>%</span>
+              </div>
+            )}
+
             {isAdm ? (
               <div className="relative">
                 <select
@@ -783,6 +837,7 @@ export default function ComissaoGestor() {
                     { label: 'Setor', align: 'left' },
                     { label: labelColunaVendas, align: 'center' },
                     { label: 'Meta Atingida', align: 'left' },
+                    { label: 'Próxima Meta', align: 'left' },
                     { label: 'Comissão Est.', align: 'center' },
                     { label: 'Atingimento', align: 'left' },
                   ].map(({ label, align }) => (
@@ -795,11 +850,11 @@ export default function ComissaoGestor() {
               <tbody>
                 {loading || !ferrCarregado || !distCarregado ? (
                   <tr>
-                    <td colSpan={7} className="text-center py-8" style={{ color: '#94a3b8' }}>Carregando...</td>
+                    <td colSpan={8} className="text-center py-8" style={{ color: '#94a3b8' }}>Carregando...</td>
                   </tr>
                 ) : vendedoresFiltrados.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="text-center py-8" style={{ color: '#94a3b8' }}>Nenhum vendedor encontrado</td>
+                    <td colSpan={8} className="text-center py-8" style={{ color: '#94a3b8' }}>Nenhum vendedor encontrado</td>
                   </tr>
                 ) : (
                   vendedoresFiltrados.map((v, i) => {
@@ -842,6 +897,34 @@ export default function ComissaoGestor() {
                         : !!(mTV && (mTV.meta1_valor > 0 || mTV.meta2_valor > 0 || mTV.meta3_valor > 0));
                     const metaLabel = isFerragens ? cferr?.meta_atingida?.label : isDist ? cdist?.meta_atingida?.label : v.is_televendas ? ctv?.meta_atingida?.label : f?.atingida?.label;
                     const metaValor = isFerragens ? cferr?.meta_atingida?.valor : isDist ? cdist?.meta_atingida?.valor : v.is_televendas ? ctv?.meta_atingida?.valor : f?.atingida?.valor;
+
+                    // Próxima meta ainda não batida (para a nova coluna "Próxima Meta")
+                    const proximaMeta = isFerragens
+                      ? getProximaMeta([
+                          { label: 'Meta 1', valor: Number(mFerr?.meta1_valor) || 0 },
+                          { label: 'Meta 2', valor: Number(mFerr?.meta2_valor) || 0 },
+                          { label: 'Meta 3', valor: Number(mFerr?.meta3_valor) || 0 },
+                          { label: 'Meta Desafio', valor: Number(mFerr?.metadesafio_valor) || 0 },
+                        ], v.total_vendas)
+                      : isDist
+                        ? getProximaMeta([
+                            { label: 'Meta 1', valor: Number(mDist?.meta1_valor) || 0 },
+                            { label: 'Meta 2', valor: Number(mDist?.meta2_valor) || 0 },
+                            { label: 'Meta 3', valor: Number(mDist?.meta3_valor) || 0 },
+                            { label: 'Meta 4', valor: Number(mDist?.meta4_valor) || 0 },
+                            { label: 'Meta Desafio', valor: Number(mDist?.metadesafio_valor) || 0 },
+                          ], v.total_vendas)
+                        : v.is_televendas
+                          ? getProximaMeta([
+                              { label: 'Meta PA 1', valor: Number(mTV?.meta1_valor) || 0 },
+                              { label: 'Meta PA 2', valor: Number(mTV?.meta2_valor) || 0 },
+                              { label: 'Meta PA 3', valor: Number(mTV?.meta3_valor) || 0 },
+                            ], v.valor_pa)
+                          : getProximaMeta([
+                              { label: 'Meta 1', valor: Number(mTV?.meta1_valor) || 0 },
+                              { label: 'Meta 2', valor: Number(mTV?.meta2_valor) || 0 },
+                              { label: 'Meta 3', valor: Number(mTV?.meta3_valor) || 0 },
+                            ], v.total_vendas);
 
                     // Comissão estimada — sem meta = 0; com meta sem faixa = percentual_sem_meta
                     const comissaoDisplay = !temMetaCadastrada
@@ -906,10 +989,24 @@ export default function ComissaoGestor() {
                             <span className="text-xs font-medium" style={{ color: '#f59e0b' }}>Meta não definida</span>
                           )}
                         </td>
+                        <td className="px-4 py-3">
+                          {proximaMeta ? (
+                            <div>
+                              <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: '#eff6ff', color: '#1d4ed8' }}>
+                                {proximaMeta.label}
+                              </span>
+                              <p className="text-xs mt-0.5" style={{ color: '#94a3b8' }}>{formatBRL(proximaMeta.valor)}</p>
+                            </div>
+                          ) : temMetaCadastrada ? (
+                            <span className="text-xs" style={{ color: '#94a3b8' }}>Todas atingidas</span>
+                          ) : (
+                            <span className="text-xs" style={{ color: '#94a3b8' }}>—</span>
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-center font-semibold" style={{ color: '#16a34a' }}>
                           {formatBRL(comissaoDisplay)}
                           {ctv?.bonus_recorrencia_ativo && (
-                            <p className="text-xs font-normal mt-0.5" style={{ color: '#065f46' }}>+10% recorrência</p>
+                            <p className="text-xs font-normal mt-0.5" style={{ color: '#065f46' }}>+{ctv.recorrencia_percentual}% recorrência</p>
                           )}
                         </td>
                         <td className="px-4 py-3" style={{ minWidth: 120 }}>

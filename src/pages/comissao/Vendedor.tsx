@@ -4,10 +4,10 @@ import AppShell from './layout/AppShell';
 import KPICard from './ui/KPICard';
 import { formatBRL, formatNumber, MESES } from './_shared/format';
 import { DollarSign, TrendingUp, ChevronDown, Search, User } from 'lucide-react';
-import { useComissaoUser as useUser, useComissaoApi } from './_shared/hooks';
+import { useComissaoUser as useUser, useComissaoApi, useRecorrenciaConfig } from './_shared/hooks';
 import { toast } from 'sonner';
 import {
-  calcularComissaoTelevendas, RECORRENCIA_MESES_CONSECUTIVOS, RECORRENCIA_PERCENTUAL,
+  calcularComissaoTelevendas, RECORRENCIA_MESES_CONSECUTIVOS,
   type MetaConfig, type BonusConfig,
 } from './_shared/commission';
 import { calcularComissaoFerragens, type FerrMetaConfig, type FerrBonusConfig, type FerrMetaGrupoConfig, type ComissaoFerragens } from './_shared/commission-ferragens';
@@ -80,6 +80,7 @@ const CORES_FAIXA = [
 export default function ComissaoVendedor() {
   const usuario = useUser();
   const api = useComissaoApi();
+  const { percentual: percentualRecorrencia } = useRecorrenciaConfig();
   const [vendedores, setVendedores] = useState<string[]>([]);
   const [vendedorSel, setVendedorSel] = useState('');
   const [busca, setBusca] = useState('');
@@ -231,7 +232,7 @@ export default function ComissaoVendedor() {
   // Comissão Televendas
   const recorrenciaMeta1Ativa = data?.recorrencia_meta1_ativa ?? false;
   const ctv = isTelevendas && mes
-    ? calcularComissaoTelevendas(valorPAAtual, recebidoAtual, metaConfigObj, bonusConfigData, recorrenciaMeta1Ativa)
+    ? calcularComissaoTelevendas(valorPAAtual, recebidoAtual, metaConfigObj, bonusConfigData, recorrenciaMeta1Ativa, percentualRecorrencia)
     : null;
 
   // Ferragens — faixas de meta (4 níveis: M1, M2, M3, Desafio)
@@ -298,7 +299,7 @@ export default function ComissaoVendedor() {
     && !!metaConfigObj && metaConfigObj.meta1_valor > 0
     && projecaoPA >= metaConfigObj.meta1_valor;
   const ctvProjecao = isTelevendas && projecaoPA > 0
-    ? calcularComissaoTelevendas(projecaoPA, projecaoRecebidos, metaConfigObj, bonusConfigData, recorrenciaProjetadaAtiva)
+    ? calcularComissaoTelevendas(projecaoPA, projecaoRecebidos, metaConfigObj, bonusConfigData, recorrenciaProjetadaAtiva, percentualRecorrencia)
     : null;
   const projecaoExibida = isTelevendas ? projecaoPA : projecaoVendas;
   const faixaProjetada = temProjecao
@@ -581,7 +582,7 @@ export default function ComissaoVendedor() {
                   </span>
                   {ctv.bonus_recorrencia_ativo && (
                     <span className="text-xs font-bold" style={{ color: '#065f46' }}>
-                      +{RECORRENCIA_PERCENTUAL}% × (meta + bônus)
+                      +{ctv.recorrencia_percentual}% × (meta + bônus)
                     </span>
                   )}
                 </div>
@@ -951,7 +952,7 @@ export default function ComissaoVendedor() {
                         <div className="rounded-lg p-2 text-center" style={{ background: ctvProjecao.bonus_recorrencia_ativo ? '#f0fdf4' : '#f8fafc', border: `1px solid ${ctvProjecao.bonus_recorrencia_ativo ? '#bbf7d0' : '#e2e8f0'}` }}>
                           <p className="text-xs font-semibold mb-0.5" style={{ color: ctvProjecao.bonus_recorrencia_ativo ? '#065f46' : '#94a3b8' }}>Recorrência projetada</p>
                           <p className="text-xs font-bold" style={{ color: ctvProjecao.bonus_recorrencia_ativo ? '#065f46' : '#94a3b8' }}>
-                            {ctvProjecao.bonus_recorrencia_ativo ? `+${RECORRENCIA_PERCENTUAL}%` : 'Não ativa'}
+                            {ctvProjecao.bonus_recorrencia_ativo ? `+${ctvProjecao.recorrencia_percentual}%` : 'Não ativa'}
                           </p>
                           <p className="text-sm font-bold mt-1" style={{ color: ctvProjecao.bonus_recorrencia_ativo ? '#16a34a' : '#94a3b8' }}>{formatBRL(ctvProjecao.comissao_recorrencia)}</p>
                         </div>

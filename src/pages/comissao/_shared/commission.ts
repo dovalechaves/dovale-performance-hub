@@ -26,6 +26,7 @@ export interface ComissaoTelevendas {
   bonus_tier: { label: string; valor: number; percentual: number } | null;
   comissao_bonus: number;
   bonus_recorrencia_ativo: boolean;
+  recorrencia_percentual: number;
   comissao_recorrencia: number;
   comissao_total: number;
 }
@@ -41,7 +42,8 @@ export function calcularComissaoTelevendas(
   total_recebido: number,
   meta: MetaConfig | null,
   bonus: BonusConfig | null,
-  recorrenciaAtiva = false
+  recorrenciaAtiva = false,
+  recorrenciaPercentual: number = RECORRENCIA_PERCENTUAL
 ): ComissaoTelevendas {
   const empty: ComissaoTelevendas = {
     valor_pa, total_recebido,
@@ -49,6 +51,7 @@ export function calcularComissaoTelevendas(
     percentual_sem_meta: meta?.percentual_sem_meta ?? 0,
     bonus_desbloqueado: false, bonus_tier: null,
     comissao_bonus: 0, bonus_recorrencia_ativo: false,
+    recorrencia_percentual: recorrenciaPercentual,
     comissao_recorrencia: 0, comissao_total: 0,
   };
   if (!meta) return empty;
@@ -85,7 +88,7 @@ export function calcularComissaoTelevendas(
   }
 
   const comissao_recorrencia = recorrenciaAtiva
-    ? (RECORRENCIA_PERCENTUAL / 100) * (comissao_meta + comissao_bonus)
+    ? (recorrenciaPercentual / 100) * (comissao_meta + comissao_bonus)
     : 0;
 
   return {
@@ -93,6 +96,7 @@ export function calcularComissaoTelevendas(
     percentual_sem_meta: meta.percentual_sem_meta,
     bonus_desbloqueado, bonus_tier, comissao_bonus,
     bonus_recorrencia_ativo: recorrenciaAtiva,
+    recorrencia_percentual: recorrenciaPercentual,
     comissao_recorrencia,
     comissao_total: comissao_meta + comissao_bonus + comissao_recorrencia,
   };

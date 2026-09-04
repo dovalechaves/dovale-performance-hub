@@ -1,7 +1,8 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { API_BASE } from '@/services/api';
+import { RECORRENCIA_PERCENTUAL } from './commission';
 
 // No máximo 1 toast de "fonte indisponível" por minuto, mesmo com várias chamadas
 // em paralelo — evita empilhar avisos repetidos na tela.
@@ -77,4 +78,26 @@ export function useComissaoApi() {
     },
     [usuario]
   );
+}
+
+// Percentual configurável do bônus de recorrência (Televendas) — lido de
+// /recorrencia-config. Usado no cálculo (Gestor/Vendedor/Simulação) e na
+// exibição, pra nunca divergir do valor configurado por um administrador.
+export function useRecorrenciaConfig() {
+  const api = useComissaoApi();
+  const [percentual, setPercentual] = useState<number>(RECORRENCIA_PERCENTUAL);
+
+  const carregar = useCallback(async () => {
+    try {
+      const r = await api('/recorrencia-config');
+      const data = await r.json();
+      if (typeof data.percentual === 'number') setPercentual(data.percentual);
+    } catch {
+      // mantém o valor atual (ou o default) em caso de falha
+    }
+  }, [api]);
+
+  useEffect(() => { carregar(); }, [carregar]);
+
+  return { percentual, recarregar: carregar };
 }

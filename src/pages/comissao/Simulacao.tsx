@@ -4,7 +4,6 @@ import { formatBRL, MESES } from './_shared/format';
 import {
   calcularComissaoTelevendas,
   RECORRENCIA_MESES_CONSECUTIVOS,
-  RECORRENCIA_PERCENTUAL,
   type MetaConfig,
   type BonusConfig,
   type ComissaoTelevendas,
@@ -22,7 +21,7 @@ import {
   type DistBonusConfig,
   type ComissaoDistribuidores,
 } from './_shared/commission-distribuidores';
-import { useComissaoUser as useUser, useComissaoApi } from './_shared/hooks';
+import { useComissaoUser as useUser, useComissaoApi, useRecorrenciaConfig } from './_shared/hooks';
 import { ChevronDown, Calculator, TrendingUp, Award, DollarSign, Clock } from 'lucide-react';
 
 const ANO_ATUAL = new Date().getFullYear();
@@ -322,6 +321,7 @@ interface MediaRec {
 export default function ComissaoSimulacao() {
   const usuario = useUser();
   const api = useComissaoApi();
+  const { percentual: percentualRecorrencia } = useRecorrenciaConfig();
 
   // Setor mode
   const [modoSetor, setModoSetor] = useState<'televendas' | 'ferragens' | 'distribuidores'>('televendas');
@@ -546,7 +546,7 @@ export default function ComissaoSimulacao() {
     const pa = parseFloat(valorPA.replace(/\./g, '').replace(',', '.')) || 0;
     const rec = parseFloat(recebimentos.replace(/\./g, '').replace(',', '.')) || 0;
     const recorrenciaAtiva = recorrenciaSimulada && !!metaConfig && metaConfig.meta1_valor > 0 && pa >= metaConfig.meta1_valor;
-    setResultado(calcularComissaoTelevendas(pa, rec, metaConfig, bonusConfig, recorrenciaAtiva));
+    setResultado(calcularComissaoTelevendas(pa, rec, metaConfig, bonusConfig, recorrenciaAtiva, percentualRecorrencia));
   };
 
   const avgRec = mediaRec?.media ?? 0;
@@ -862,7 +862,7 @@ export default function ComissaoSimulacao() {
                       </div>
                       <div className="flex justify-between text-sm py-1 border-b" style={{ borderColor: '#e2e8f0' }}>
                         <span style={{ color: '#64748b' }}>
-                          Comissão Recorrência{resultado.bonus_recorrencia_ativo ? ` (+${RECORRENCIA_PERCENTUAL}% × meta+bônus)` : ' (não ativa)'}
+                          Comissão Recorrência{resultado.bonus_recorrencia_ativo ? ` (+${resultado.recorrencia_percentual}% × meta+bônus)` : ' (não ativa)'}
                         </span>
                         <span className="font-semibold" style={{ color: '#0a1628' }}>{formatBRL(resultado.comissao_recorrencia)}</span>
                       </div>

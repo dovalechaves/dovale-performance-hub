@@ -7,7 +7,7 @@ import { SETORES_ATIVOS, addSetoresGlobais } from "../services/comissao/setores"
 import { ensureVendedorAtivoTable, getVendedoresInativos } from "../services/comissao/vendedorAtivoTable";
 import {
   calcularComissaoTelevendas, isTelevendas,
-  RECORRENCIA_MESES_CONSECUTIVOS,
+  RECORRENCIA_MESES_CONSECUTIVOS, RECORRENCIA_PERCENTUAL,
   type MetaConfig, type BonusConfig,
 } from "../services/comissao/commission";
 import {
@@ -358,6 +358,38 @@ async function garantirTabela(pool: Awaited<ReturnType<typeof getPool>>) {
   _tabelaEnsured = true;
 }
 
+// ─── recorrencia-config helpers ──────────────────────────────────────────────
+const TABELA_RECORRENCIA_CONFIG = "[TI-PAINELCOMISSAO_RECORRENCIA_CONFIG]";
+
+let _tabelaRecorrenciaEnsured = false;
+
+async function garantirTabelaRecorrencia(pool: Awaited<ReturnType<typeof getPool>>) {
+  if (_tabelaRecorrenciaEnsured) return;
+  await pool.request().query(`
+    IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'TI-PAINELCOMISSAO_RECORRENCIA_CONFIG')
+    BEGIN
+      CREATE TABLE ${TABELA_RECORRENCIA_CONFIG} (
+        ID INT IDENTITY(1,1) PRIMARY KEY,
+        PERCENTUAL FLOAT DEFAULT 10
+      );
+      INSERT INTO ${TABELA_RECORRENCIA_CONFIG} (PERCENTUAL) VALUES (10);
+    END
+  `);
+  _tabelaRecorrenciaEnsured = true;
+}
+
+async function getRecorrenciaPercentualConfigurado(pool: Awaited<ReturnType<typeof getPool>>): Promise<number> {
+  try {
+    await garantirTabelaRecorrencia(pool);
+    const result = await pool.request().query(`SELECT TOP 1 PERCENTUAL as percentual FROM ${TABELA_RECORRENCIA_CONFIG}`);
+    const valor = result.recordset[0]?.percentual;
+    return typeof valor === 'number' && Number.isFinite(valor) ? valor : RECORRENCIA_PERCENTUAL;
+  } catch (error) {
+    console.error('Erro ao buscar percentual de recorrência:', error);
+    return RECORRENCIA_PERCENTUAL;
+  }
+}
+
 // ─── bonus-mensais helpers ───────────────────────────────────────────────────
 const TABELA_BONUS_MENSAIS = "[TI-PAINELCOMISSAO_BONUS]";
 
@@ -639,6 +671,8 @@ router.get("/dashboard", async (req: any, res: any) => {
           `),
         ]);
 
+        const recorrenciaPercentualConfigurado = await getRecorrenciaPercentualConfigurado(pool);
+
         const metaMap: Record<string, MetaConfig> = {};
         metaResult.recordset.forEach((r: any) => {
           metaMap[r.nome_vendedor] = {
@@ -672,7 +706,7 @@ router.get("/dashboard", async (req: any, res: any) => {
           if (meta) {
             const mesesBateram = recorrenciaMap.get(vendedor) ?? [];
             const recorrenciaAtiva = mesesBateram.length === RECORRENCIA_MESES_CONSECUTIVOS && mesesBateram.every(Boolean);
-            const c = calcularComissaoTelevendas(pa, rec, meta, bonus, recorrenciaAtiva);
+            const c = calcularComissaoTelevendas(pa, rec, meta, bonus, recorrenciaAtiva, recorrenciaPercentualConfigurado);
             total_comissao_televendas += c.comissao_total;
           }
         }
@@ -1068,8 +1102,12 @@ router.get("/vendedor/:nome", async (req: any, res: any) => {
       }
     }
 
+    const recorrenciaPercentualConfigurado = is_televendas
+      ? await getRecorrenciaPercentualConfigurado(pool)
+      : RECORRENCIA_PERCENTUAL;
+
     const comissao_televendas = is_televendas
-      ? calcularComissaoTelevendas(valor_pa, total_recebido, metaRow, bonusConfig, recorrencia_meta1_ativa)
+      ? calcularComissaoTelevendas(valor_pa, total_recebido, metaRow, bonusConfig, recorrencia_meta1_ativa, recorrenciaPercentualConfigurado)
       : null;
 
     // ── Ferragens ─────────────────────────────────────────────────────────────
@@ -1676,6 +1714,58 @@ router.put("/bonus-config", async (req: any, res: any) => {
     return res.json({ success: true });
   } catch (error) {
     console.error('Erro ao salvar bonus config:', error);
+    return res.status(500).json({ error: 'Erro ao salvar' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// /recorrencia-config (GET, PUT) — percentual do bônus de recorrência (Televendas)
+// ═══════════════════════════════════════════════════════════════════════════
+router.get("/recorrencia-config", async (req: any, res: any) => {
+  const actor = getActor(req);
+  if (!actor) return res.status(401).json({ error: "Não autenticado" });
+  const usuario = await getComissaoUsuario(actor);
+  if (!usuario) return res.status(403).json({ error: "Sem permissão" });
+
+  try {
+    const pool = await getPool();
+    const percentual = await getRecorrenciaPercentualConfigurado(pool);
+    res.set('Cache-Control', 'private, max-age=60, stale-while-revalidate=120');
+    return res.json({ percentual });
+  } catch (error) {
+    console.error('Erro ao buscar recorrencia config:', error);
+    return res.json({ percentual: RECORRENCIA_PERCENTUAL });
+  }
+});
+
+router.put("/recorrencia-config", async (req: any, res: any) => {
+  const actor = getActor(req);
+  if (!actor) return res.status(401).json({ error: "Não autenticado" });
+  const usuario = await getComissaoUsuario(actor);
+  if (!usuario || !isADM(usuario.cargo)) {
+    return res.status(403).json({ error: 'Apenas administradores podem alterar o percentual de recorrência' });
+  }
+
+  const percentual = Number(req.body?.percentual);
+  if (!Number.isFinite(percentual) || percentual < 0 || percentual > 100) {
+    return res.status(400).json({ error: 'Percentual inválido (deve ser um número entre 0 e 100)' });
+  }
+
+  try {
+    const pool = await getPool();
+    await garantirTabelaRecorrencia(pool);
+
+    const exists = await pool.request().query(`SELECT TOP 1 ID FROM ${TABELA_RECORRENCIA_CONFIG}`);
+    const r = pool.request().input('p', sql.Float, percentual);
+
+    if (exists.recordset.length > 0) {
+      await r.query(`UPDATE ${TABELA_RECORRENCIA_CONFIG} SET PERCENTUAL=@p WHERE ID = (SELECT TOP 1 ID FROM ${TABELA_RECORRENCIA_CONFIG})`);
+    } else {
+      await r.query(`INSERT INTO ${TABELA_RECORRENCIA_CONFIG} (PERCENTUAL) VALUES (@p)`);
+    }
+    return res.json({ success: true, percentual });
+  } catch (error) {
+    console.error('Erro ao salvar recorrencia config:', error);
     return res.status(500).json({ error: 'Erro ao salvar' });
   }
 });

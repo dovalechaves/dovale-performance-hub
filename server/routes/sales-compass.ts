@@ -79,44 +79,32 @@ function toTitleCase(str: string): string {
     .join(" ");
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// GET /api/sales-compass/clientes?loja=l3&rep_codigo=571  (SSE stream)
-// Resolve o Cloudflare 524 mantendo a conexão viva com pings enquanto o
-// Firebird processa. Os dados chegam em chunks progressivos para o frontend.
-// ────────────────────────────────────────────────────────────────────────────
-router.get("/clientes", async (req, res) => {
-  const lojaKey = String(req.query.loja || "").toLowerCase().trim();
-  const repCodigoStr = req.query.rep_codigo;
+// ── Cache server-side dos clientes computados ───────────────────────────────
+// A consulta no Firebird (join clientes×pedidos×itens×produtos, sem recorte de
+// data — necessário para ticket médio/categoria "de todo o histórico") é
+// pesada: ~10s para um vendedor, ~60s para "Toda a Loja". Como esses dados só
+// mudam quando há novas vendas no Firebird (não a cada clique), cacheamos o
+// resultado já processado por alguns minutos — mesma janela de frescor que o
+// front-end já assume no seu próprio cache local (CACHE_TTL de 5 min em
+// useSseClientes). Isso não altera nenhuma regra de cálculo: a query e o
+// processamento são exatamente os mesmos, só deixam de ser refeitos a cada
+// clique em loja/vendedor dentro da janela. Também evita disparar a mesma
+// consulta pesada em duplicidade quando duas pessoas clicam quase juntas.
+const CLIENTES_CACHE_TTL = 5 * 60 * 1000;
+type ClientesComputados = { data: any[]; rawCount: number };
+const clientesCache = new Map<string, { value: ClientesComputados; ts: number }>();
+const clientesInFlight = new Map<string, Promise<ClientesComputados>>();
 
-  if (repCodigoStr === undefined || repCodigoStr === "") {
-    return res.status(400).json({ error: "rep_codigo é obrigatório." });
-  }
-  if (!lojaKey) {
-    return res.status(400).json({ error: "loja é obrigatória." });
-  }
+async function getClientesComputados(lojaKey: string, fbKey: FbKey, repCodigo: number): Promise<ClientesComputados> {
+  const cacheKey = `${lojaKey}:${repCodigo}`;
 
-  const repCodigo = Number(repCodigoStr);
-  const fbKey = LOJA_TO_FB[lojaKey];
-  if (!fbKey) {
-    return res.status(404).json({ error: `Loja "${lojaKey}" não configurada no Sales Compass.` });
-  }
+  const cached = clientesCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < CLIENTES_CACHE_TTL) return cached.value;
 
-  // ── Abre SSE imediatamente — evita 524 do Cloudflare ────────────────────
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-  res.setHeader("X-Accel-Buffering", "no");
-  res.flushHeaders();
+  const inFlight = clientesInFlight.get(cacheKey);
+  if (inFlight) return inFlight;
 
-  const send = (event: string, data: unknown) =>
-    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-
-  const pingInterval = setInterval(() => res.write(": ping\n\n"), 25000);
-  req.on("close", () => clearInterval(pingInterval));
-
-  try {
-    send("progress", { status: "querying", message: "Consultando base de dados..." });
-
+  const promise = (async () => {
     const whereRep = repCodigo !== 0
       ? "(c.cli_rep_codigo = ? OR CAST(c.cli_rep_codigo AS INTEGER) = ?)"
       : "1=1";
@@ -145,8 +133,6 @@ router.get("/clientes", async (req, res) => {
 
     const params = repCodigo !== 0 ? [String(repCodigo), repCodigo] : [];
     const rows = await queryFirebird<any>(fbKey, fbSql, params);
-
-    send("progress", { status: "processing", message: `Processando ${rows.length} registros...` });
 
     const clientesMap: Record<string, {
       id: string; nome: string; telefone: string; cidade: string; repId: any;
@@ -221,13 +207,68 @@ router.get("/clientes", async (req, res) => {
       return { ...c, categoria };
     });
 
-    // 3) Envia em lotes
+    const value: ClientesComputados = { data: withCategoria, rawCount: rows.length };
+    clientesCache.set(cacheKey, { value, ts: Date.now() });
+    return value;
+  })();
+
+  clientesInFlight.set(cacheKey, promise);
+  try {
+    return await promise;
+  } finally {
+    clientesInFlight.delete(cacheKey);
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// GET /api/sales-compass/clientes?loja=l3&rep_codigo=571  (SSE stream)
+// Resolve o Cloudflare 524 mantendo a conexão viva com pings enquanto o
+// Firebird processa. Os dados chegam em chunks progressivos para o frontend.
+// ────────────────────────────────────────────────────────────────────────────
+router.get("/clientes", async (req, res) => {
+  const lojaKey = String(req.query.loja || "").toLowerCase().trim();
+  const repCodigoStr = req.query.rep_codigo;
+
+  if (repCodigoStr === undefined || repCodigoStr === "") {
+    return res.status(400).json({ error: "rep_codigo é obrigatório." });
+  }
+  if (!lojaKey) {
+    return res.status(400).json({ error: "loja é obrigatória." });
+  }
+
+  const repCodigo = Number(repCodigoStr);
+  const fbKey = LOJA_TO_FB[lojaKey];
+  if (!fbKey) {
+    return res.status(404).json({ error: `Loja "${lojaKey}" não configurada no Sales Compass.` });
+  }
+
+  // ── Abre SSE imediatamente — evita 524 do Cloudflare ────────────────────
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
+
+  const send = (event: string, data: unknown) =>
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+
+  const pingInterval = setInterval(() => res.write(": ping\n\n"), 25000);
+  req.on("close", () => clearInterval(pingInterval));
+
+  try {
+    send("progress", { status: "querying", message: "Consultando base de dados..." });
+
+    const { data: withCategoria, rawCount } = await getClientesComputados(lojaKey, fbKey, repCodigo);
+
+    send("progress", { status: "processing", message: `Processando ${rawCount} registros...` });
+
+    // Envia em lotes
     const BATCH_SIZE = 150;
     for (let i = 0; i < withCategoria.length; i += BATCH_SIZE) {
       send("chunk", withCategoria.slice(i, i + BATCH_SIZE));
     }
 
-    send("done", { total });
+    send("done", { total: withCategoria.length });
   } catch (err: any) {
     console.error("[sales-compass] /clientes:", err.message);
     send("error", { message: err.message || "Erro ao buscar clientes." });

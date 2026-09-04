@@ -118,6 +118,39 @@ function moeda(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
+// ── Filtro de data (presets) ──────────────────────────────────────────────────
+type DataPreset = "todos" | "hoje" | "semana" | "mes" | "personalizado";
+
+function toYMD(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function getPresetRange(preset: "hoje" | "semana" | "mes"): { inicio: string; fim: string } {
+  const hoje = new Date();
+  if (preset === "hoje") {
+    const s = toYMD(hoje);
+    return { inicio: s, fim: s };
+  }
+  if (preset === "semana") {
+    const dow = hoje.getDay();
+    const diffSegunda = dow === 0 ? 6 : dow - 1;
+    const inicio = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate() - diffSegunda);
+    const fim = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate() + 6);
+    return { inicio: toYMD(inicio), fim: toYMD(fim) };
+  }
+  const inicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+  const fim = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0);
+  return { inicio: toYMD(inicio), fim: toYMD(fim) };
+}
+
+const DATA_PRESET_OPTIONS: { key: DataPreset; label: string }[] = [
+  { key: "todos", label: "Todos" },
+  { key: "hoje", label: "Hoje" },
+  { key: "semana", label: "Semana atual" },
+  { key: "mes", label: "Mês atual" },
+  { key: "personalizado", label: "Personalizado" },
+];
+
 function glowClass(id: string, gm: Record<string, any>, sm: Record<string, string>) {
   const s = gm[id] || sm[id];
   if (s === "success" || s === "comprou") return "glow-success";
@@ -1367,9 +1400,19 @@ function RelatoriosView({ loja: initialLoja, isAdmin, repLogin, role, onBack }:
 
   const [loja, setLoja] = useState(initialLoja || "l3");
   const [filtroStatus, setFiltroStatus] = useState("todos");
+  const [filtroDataPreset, setFiltroDataPreset] = useState<DataPreset>("todos");
   const [filtroInicio, setFiltroInicio] = useState("");
   const [filtroFim, setFiltroFim] = useState("");
   const [filtroCliente, setFiltroCliente] = useState("");
+
+  const aplicarPresetData = (preset: DataPreset) => {
+    setFiltroDataPreset(preset);
+    if (preset === "todos") { setFiltroInicio(""); setFiltroFim(""); return; }
+    if (preset === "personalizado") return;
+    const { inicio, fim } = getPresetRange(preset);
+    setFiltroInicio(inicio);
+    setFiltroFim(fim);
+  };
 
   const { data: logs = [], isLoading } = useQuery<CrmLog[]>({
     queryKey: ["sc-crm-logs", loja],
@@ -1417,6 +1460,21 @@ function RelatoriosView({ loja: initialLoja, isAdmin, repLogin, role, onBack }:
         </button>
       </div>
 
+      <div className="mb-3">
+        <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">Data de registro do CRM</p>
+        <div className="flex flex-wrap gap-2">
+          {DATA_PRESET_OPTIONS.map(opt => (
+            <button key={opt.key} onClick={() => aplicarPresetData(opt.key)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                filtroDataPreset === opt.key
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-muted text-muted-foreground border-border hover:bg-muted/70"}`}>
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         {!["viewer"].includes(role) && (
           <div className="relative">
@@ -1435,10 +1493,12 @@ function RelatoriosView({ loja: initialLoja, isAdmin, repLogin, role, onBack }:
           </select>
           <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
         </div>
-        <input type="date" value={filtroInicio} onChange={e=>setFiltroInicio(e.target.value)}
-          className="rounded-lg border border-border bg-muted px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
-        <input type="date" value={filtroFim} onChange={e=>setFiltroFim(e.target.value)}
-          className="rounded-lg border border-border bg-muted px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+        <input type="date" value={filtroInicio} disabled={filtroDataPreset !== "personalizado"}
+          onChange={e => { setFiltroInicio(e.target.value); setFiltroDataPreset("personalizado"); }}
+          className="rounded-lg border border-border bg-muted px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-60 disabled:cursor-not-allowed" />
+        <input type="date" value={filtroFim} disabled={filtroDataPreset !== "personalizado"}
+          onChange={e => { setFiltroFim(e.target.value); setFiltroDataPreset("personalizado"); }}
+          className="rounded-lg border border-border bg-muted px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-60 disabled:cursor-not-allowed" />
         <input placeholder="Filtrar por cliente..." value={filtroCliente} onChange={e=>setFiltroCliente(e.target.value)}
           className="col-span-2 rounded-lg border border-border bg-muted px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50" />
       </div>

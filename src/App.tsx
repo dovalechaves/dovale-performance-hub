@@ -34,8 +34,8 @@ import Prospeccao from "./pages/Prospecção.tsx";
 import ClientesProspeccao from "./pages/ClientesProspeccao.tsx";
 import EstoqueMinimo from "./pages/EstoqueMinimo.tsx";
 import NotasFiscaisAmazon from "./pages/NotasFiscaisAmazon.tsx";
+import EnvBanner from "./components/EnvBanner.tsx";
 import React from "react";
-import Prospeccao from "./pages/Prospecção.tsx";
 
 const queryClient = new QueryClient();
 

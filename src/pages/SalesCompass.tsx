@@ -151,6 +151,31 @@ const DATA_PRESET_OPTIONS: { key: DataPreset; label: string }[] = [
   { key: "personalizado", label: "Personalizado" },
 ];
 
+function emPeriodo(dataISO: string, preset: DataPreset, inicio: string, fim: string): boolean {
+  if (preset === "todos") return true;
+  if (!inicio && !fim) return true;
+  const d = new Date(dataISO);
+  if (inicio && d < new Date(inicio)) return false;
+  if (fim && d > new Date(fim + "T23:59:59")) return false;
+  return true;
+}
+
+function DataPresetButtons({ value, onChange }: { value: DataPreset; onChange: (p: DataPreset) => void }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {DATA_PRESET_OPTIONS.map(opt => (
+        <button key={opt.key} onClick={() => onChange(opt.key)}
+          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+            value === opt.key
+              ? "bg-primary text-primary-foreground border-primary"
+              : "bg-muted text-muted-foreground border-border hover:bg-muted/70"}`}>
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function glowClass(id: string, gm: Record<string, any>, sm: Record<string, string>) {
   const s = gm[id] || sm[id];
   if (s === "success" || s === "comprou") return "glow-success";
@@ -1009,10 +1034,22 @@ function GerenteView({ loja: initialLoja, repLogin, isAdmin, onSetView }:
   const [crmModal, setCrmModal] = useState<Cliente | null>(null);
   const [historicoLogs, setHistoricoLogs] = useState<CrmLog[] | null>(null);
   const [page, setPage] = useState(1);
+  const [filtroDataPreset, setFiltroDataPreset] = useState<DataPreset>("todos");
+  const [filtroDataInicio, setFiltroDataInicio] = useState("");
+  const [filtroDataFim, setFiltroDataFim] = useState("");
+
+  const aplicarPresetDataCrm = (preset: DataPreset) => {
+    setFiltroDataPreset(preset);
+    if (preset === "todos") { setFiltroDataInicio(""); setFiltroDataFim(""); return; }
+    if (preset === "personalizado") return;
+    const { inicio, fim } = getPresetRange(preset);
+    setFiltroDataInicio(inicio);
+    setFiltroDataFim(fim);
+  };
 
   useEffect(() => { setSelectedRep(null); setMostrarTodaCarteira(false); setFiltroMotivo("TODOS"); setFiltroContatados(false); }, [loja]);
   useEffect(() => { setMostrarTodaCarteira(false); setFiltroMotivo("TODOS"); setFiltroContatados(false); setFiltroNome(""); }, [selectedRep]);
-  useEffect(() => { setPage(1); }, [selectedRep, loja, filtroCategoria, filtroMotivo, filtroNome, filtroContatados, mostrarTodaCarteira]);
+  useEffect(() => { setPage(1); }, [selectedRep, loja, filtroCategoria, filtroMotivo, filtroNome, filtroContatados, mostrarTodaCarteira, filtroDataPreset, filtroDataInicio, filtroDataFim]);
 
   const repCodigo = selectedRep?.rep_codigo ?? 0;
 
@@ -1049,7 +1086,7 @@ function GerenteView({ loja: initialLoja, repLogin, isAdmin, onSetView }:
   const stats = useMemo(() => {
     const hoje = new Date().toLocaleDateString("pt-BR");
     const ids = new Set(clientes.map(c => String(c.id)));
-    const logsGerais = crmLogs.filter(l => ids.has(String(l.clienteId)));
+    const logsGerais = crmLogs.filter(l => ids.has(String(l.clienteId)) && emPeriodo(l.dataFull, filtroDataPreset, filtroDataInicio, filtroDataFim));
     const contatadosHojeIds = Array.from(new Set(
       logsGerais.filter(l => new Date(l.dataFull).toLocaleDateString("pt-BR") === hoje).map(l => String(l.clienteId))
     ));
@@ -1078,7 +1115,7 @@ function GerenteView({ loja: initialLoja, repLogin, isAdmin, onSetView }:
     return { listaFiltrada, contatadosHojeIds, totalEmCarteira: clientes.length,
       totalPotenciais: clientes.filter(isPotencialHoje).length, totalContatados: contatadosHojeIds.length,
       motivos, statusPorCliente, vendedorMap };
-  }, [clientes, crmLogs, filtroCategoria, filtroNome, filtroMotivo, mostrarTodaCarteira, filtroContatados, reps]);
+  }, [clientes, crmLogs, filtroCategoria, filtroNome, filtroMotivo, mostrarTodaCarteira, filtroContatados, reps, filtroDataPreset, filtroDataInicio, filtroDataFim]);
 
   const totalPages = Math.ceil(stats.listaFiltrada.length / PGSIZE);
   const paginada = useMemo(() => stats.listaFiltrada.slice((page-1)*PGSIZE, page*PGSIZE), [stats.listaFiltrada, page]);
@@ -1282,6 +1319,20 @@ function GerenteView({ loja: initialLoja, repLogin, isAdmin, onSetView }:
                     <h4 className="font-bold flex items-center gap-2"><PieChart className="h-4 w-4" /> Histórico CRM</h4>
                     {filtroMotivo !== "TODOS" && <button onClick={() => setFiltroMotivo("TODOS")} className="text-xs text-primary hover:underline">Limpar</button>}
                   </div>
+                  <div className="mb-4">
+                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">Data de registro do CRM</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <DataPresetButtons value={filtroDataPreset} onChange={aplicarPresetDataCrm} />
+                      {filtroDataPreset === "personalizado" && (
+                        <>
+                          <input type="date" value={filtroDataInicio} onChange={e=>setFiltroDataInicio(e.target.value)}
+                            className="rounded-lg border border-border bg-muted px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                          <input type="date" value={filtroDataFim} onChange={e=>setFiltroDataFim(e.target.value)}
+                            className="rounded-lg border border-border bg-muted px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                        </>
+                      )}
+                    </div>
+                  </div>
                   {Object.keys(stats.motivos).length === 0
                     ? <p className="text-sm text-muted-foreground italic">Nenhum contato registrado.</p>
                     : (
@@ -1462,17 +1513,7 @@ function RelatoriosView({ loja: initialLoja, isAdmin, repLogin, role, onBack }:
 
       <div className="mb-3">
         <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">Data de registro do CRM</p>
-        <div className="flex flex-wrap gap-2">
-          {DATA_PRESET_OPTIONS.map(opt => (
-            <button key={opt.key} onClick={() => aplicarPresetData(opt.key)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                filtroDataPreset === opt.key
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : "bg-muted text-muted-foreground border-border hover:bg-muted/70"}`}>
-              {opt.label}
-            </button>
-          ))}
-        </div>
+        <DataPresetButtons value={filtroDataPreset} onChange={aplicarPresetData} />
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">

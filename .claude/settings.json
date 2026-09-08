@@ -10,7 +10,17 @@
       "Bash(curl -s -X POST http://localhost:3001/api/sync?loja=bh)",
       "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d\\)\")",
       "Bash(curl -s -X POST \"http://localhost:3001/api/auth/seed\")",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Read(//c/Users/willian.rubim/dovale-performance-hub/src/pages/comissao/**)",
+      "Read(//c/Users/willian.rubim/dovale-performance-hub/**)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(cd \"/c/Users/willian.rubim/dovale-performance-hub\" && echo \"--- app ---\"; cat tsconfig.app.json; echo \"--- node ---\"; cat tsconfig.node.json)",
+      "Bash(echo \"=== MAIN .env exists? ===\" && ls -la \"/c/Users/willian.rubim/Desktop/dovale-performance-hub/.env\" 2>&1 *)",
+      "Bash(SERVER_PORT=3002 npm run server)",
+      "Bash(VITE_API_URL=http://localhost:3002/api npm run dev -- --port 8081)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\willian.rubim\\dovale-performance-hub\\src\\pages\\comissao"
     ]
   }
 }

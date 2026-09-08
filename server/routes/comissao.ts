@@ -423,9 +423,12 @@ router.get("/dashboard", async (req: any, res: any) => {
   const userSetores = verTudo ? [] : usuario.setores;
 
   try {
-    const [todasVendas, todosReceb] = await Promise.all([
+    // getVendedoresInativos() roda em paralelo com as buscas de vendas/recebimentos
+    // (mesma latência de rede, sem esperar uma coisa terminar pra começar a outra).
+    const [todasVendas, todosReceb, inativosSet] = await Promise.all([
       getVendas(ano),
       getRecebimentos(ano),
+      getVendedoresInativos().catch(() => new Set<string>()), // se falhar, não filtra inativos
     ]);
 
     const fBase = { userSetores, setores: [], inicio: `${ano}-01-01`, fim: `${ano}-12-31` };
@@ -435,10 +438,6 @@ router.get("/dashboard", async (req: any, res: any) => {
     const vendasPeriodo = filtrarVendas(todasVendas, fPeriodo);
 
     // Vendedores inativos não aparecem em nenhuma estatística por vendedor
-    let inativosSet = new Set<string>();
-    try {
-      inativosSet = await getVendedoresInativos();
-    } catch { /* se falhar, não filtra inativos */ }
     const vendasAnoAtivos = vendasAno.filter(v => !v.USU_NOME || !inativosSet.has(v.USU_NOME));
     const vendasPeriodoAtivos = vendasPeriodo.filter(v => !v.USU_NOME || !inativosSet.has(v.USU_NOME));
 
@@ -629,6 +628,10 @@ router.get("/filtros", async (req: any, res: any) => {
     const ano = new Date().getFullYear();
     const verTudo = podeVerTudo(usuario.cargo);
 
+    // Dispara os dois em paralelo — getVendedoresInativos() não depende de getVendas()
+    // e só é usado mais abaixo (fora do ramo VENDEDOR), mas já sai buscando junto.
+    const inativosPromise = getVendedoresInativos().catch(() => new Set<string>()); // se falhar, não filtra inativos
+
     // Lê todos os vendedores do ano dos bancos externos
     const todasVendas = await getVendas(ano);
 
@@ -663,11 +666,8 @@ router.get("/filtros", async (req: any, res: any) => {
       setores: setoresFiltro,
     });
 
-    // Vendedores inativos (ainda vem do SQL Server)
-    let inativosSet = new Set<string>();
-    try {
-      inativosSet = await getVendedoresInativos();
-    } catch { /* se falhar, não filtra inativos */ }
+    // Vendedores inativos (ainda vem do SQL Server) — já disparado em paralelo acima
+    const inativosSet = await inativosPromise;
 
     const vendedores = [...new Set(
       vendas.filter(v => v.USU_NOME && !inativosSet.has(v.USU_NOME)).map(v => v.USU_NOME!)
@@ -720,15 +720,11 @@ router.get("/vendedores", async (req: any, res: any) => {
   }
 
   try {
-    const [todasVendas, todosReceb] = await Promise.all([
+    const [todasVendas, todosReceb, inativosSet] = await Promise.all([
       getVendas(ano),
       getRecebimentos(ano),
+      getVendedoresInativos().catch(() => new Set<string>()), // se falhar, não filtra inativos
     ]);
-
-    let inativosSet = new Set<string>();
-    try {
-      inativosSet = await getVendedoresInativos();
-    } catch { /* se falhar, não filtra inativos */ }
 
     const vendas = filtrarVendas(todasVendas, {
       inicio: dataInicio,
@@ -793,13 +789,6 @@ router.get("/vendedor/:nome", async (req: any, res: any) => {
     return res.status(403).json({ error: 'Sem permissão' });
   }
 
-  try {
-    const inativosSet = await getVendedoresInativos();
-    if (inativosSet.has(vendedor)) {
-      return res.status(404).json({ error: 'Vendedor inativo' });
-    }
-  } catch { /* se falhar, não bloqueia por inativo */ }
-
   const ano = parseInt(req.query.ano || new Date().getFullYear().toString());
   const mes = req.query.mes;
 
@@ -808,11 +797,26 @@ router.get("/vendedor/:nome", async (req: any, res: any) => {
     ? new Date(ano, parseInt(mes), 0).toISOString().split('T')[0]
     : `${ano}-12-31`;
 
+  // Dispara os três em paralelo — a checagem de inativo não precisa esperar
+  // vendas/recebimentos terminarem pra começar, e vice-versa.
+  const inativosPromise = getVendedoresInativos().catch(() => new Set<string>()); // se falhar, não bloqueia por inativo
+  const vendasPromise = getVendas(ano);
+  const recebPromise = getRecebimentos(ano);
+  // Se o vendedor for inativo, retornamos antes de dar await nessas duas — evita
+  // "unhandled rejection" caso rejeitem sem ninguém escutando (não altera o valor
+  // usado no Promise.all mais abaixo, só evita o warning nesse caminho de saída antecipada).
+  vendasPromise.catch(() => {});
+  recebPromise.catch(() => {});
+
   try {
-    const [todasVendas, todosReceb] = await Promise.all([
-      getVendas(ano),
-      getRecebimentos(ano),
-    ]);
+    const inativosSet = await inativosPromise;
+    if (inativosSet.has(vendedor)) {
+      return res.status(404).json({ error: 'Vendedor inativo' });
+    }
+  } catch { /* getVendedoresInativos() já não lança (.catch acima) — mantido por segurança */ }
+
+  try {
+    const [todasVendas, todosReceb] = await Promise.all([vendasPromise, recebPromise]);
 
     // Filtro base: só esse vendedor, aplicando SETORES_ATIVOS
     const userSetores = usuario.cargo === "GESTOR" ? usuario.setores : [];
@@ -1118,13 +1122,6 @@ router.get("/vendedor/:nome/evolucao", async (req: any, res: any) => {
     return res.status(403).json({ error: 'Sem permissão' });
   }
 
-  try {
-    const inativosSet = await getVendedoresInativos();
-    if (inativosSet.has(vendedor)) {
-      return res.status(404).json({ error: 'Vendedor inativo' });
-    }
-  } catch { /* se falhar, não bloqueia por inativo */ }
-
   const hoje = new Date();
   const anoRef = parseInt(req.query.ano) || hoje.getFullYear();
   const mesRef = parseInt(req.query.mes) || hoje.getMonth() + 1;
@@ -1137,10 +1134,23 @@ router.get("/vendedor/:nome/evolucao", async (req: any, res: any) => {
     m -= 1;
     if (m === 0) { m = 12; a -= 1; }
   }
+  const anosNecessarios = [...new Set(meses.map((x) => x.ano))];
+
+  // Dispara tudo em paralelo — a checagem de inativo não precisa esperar vendas
+  // terminarem pra começar, e vice-versa.
+  const inativosPromise = getVendedoresInativos().catch(() => new Set<string>()); // se falhar, não bloqueia por inativo
+  const vendasPorAnoPromise = Promise.all(anosNecessarios.map((ano) => getVendas(ano)));
+  vendasPorAnoPromise.catch(() => {}); // evita "unhandled rejection" se sairmos antes de usar (vendedor inativo)
 
   try {
-    const anosNecessarios = [...new Set(meses.map((x) => x.ano))];
-    const vendasPorAno = await Promise.all(anosNecessarios.map((ano) => getVendas(ano)));
+    const inativosSet = await inativosPromise;
+    if (inativosSet.has(vendedor)) {
+      return res.status(404).json({ error: 'Vendedor inativo' });
+    }
+  } catch { /* getVendedoresInativos() já não lança (.catch acima) — mantido por segurança */ }
+
+  try {
+    const vendasPorAno = await vendasPorAnoPromise;
     const todasVendas = vendasPorAno.flat();
 
     const userSetores = usuario.cargo === "GESTOR" ? usuario.setores : [];

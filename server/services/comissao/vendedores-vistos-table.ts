@@ -62,11 +62,22 @@ export function registrarVendedoresVistos(ano: number, pares: { nome: string; se
   });
 }
 
+// Cache curto (1 min) — várias rotas (metas, bônus, config de setor etc.) chamam
+// getVendedoresPermitidos, que por sua vez chama esta função, todas dentro do mesmo
+// carregamento de tela do GESTOR. A lista em si só muda quando um vendedor novo aparece
+// numa leitura de vendas (throttle de 10 min em registrarVendedoresVistos), então 1 min
+// de cache não tem risco de mostrar dado desatualizado de forma perceptível.
+const CACHE_TTL_MS = 60 * 1000;
+const _cache = new Map<string, { setSet: Set<string>; ts: number }>();
+
 // União histórica: todo vendedor já visto nesses setores, independente de a fonte de
 // vendas atual estar disponível ou não. Nunca lança — falha aqui não pode reduzir o
 // que a leitura atual já tinha.
 export async function getVendedoresVistosPorSetor(setores: string[]): Promise<Set<string>> {
   if (!setores.length) return new Set();
+  const chaveCache = [...setores].sort().join('|');
+  const hit = _cache.get(chaveCache);
+  if (hit && Date.now() - hit.ts < CACHE_TTL_MS) return hit.setSet;
   try {
     await ensureVendedoresVistosTable();
     const pool = await getPool();
@@ -80,9 +91,11 @@ export async function getVendedoresVistosPorSetor(setores: string[]): Promise<Se
     const res = await request.query(
       `SELECT DISTINCT NOME_VENDEDOR FROM [TI-PAINELCOMISSAO_VENDEDORES_VISTOS] WHERE SETOR IN (${placeholders})`
     );
-    return new Set(res.recordset.map((row: { NOME_VENDEDOR: string }) => row.NOME_VENDEDOR));
+    const resultado = new Set(res.recordset.map((row: { NOME_VENDEDOR: string }) => row.NOME_VENDEDOR));
+    _cache.set(chaveCache, { setSet: resultado, ts: Date.now() });
+    return resultado;
   } catch (err) {
     console.error('[vendedores-vistos] consulta:', (err as Error)?.message ?? err);
-    return new Set();
+    return hit?.setSet ?? new Set();
   }
 }

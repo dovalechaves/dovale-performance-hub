@@ -1,6 +1,9 @@
 import { getPool } from '../../db/sqlserver';
 
+let _ensured = false;
+
 export async function ensureVendedorAtivoTable(): Promise<void> {
+  if (_ensured) return;
   const pool = await getPool();
   await pool.request().query(`
     IF NOT EXISTS (
@@ -12,6 +15,7 @@ export async function ensureVendedorAtivoTable(): Promise<void> {
       ativo BIT NOT NULL DEFAULT 1
     )
   `);
+  _ensured = true;
 }
 
 // Nomes de vendedores marcados como inativos (vale para todos os setores).

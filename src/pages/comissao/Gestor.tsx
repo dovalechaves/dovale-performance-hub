@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import AppShell from './layout/AppShell';
 import { formatBRL, formatNumber, MESES, CORES_GRAFICO } from './_shared/format';
 import { calcularComissaoTelevendas, type MetaConfig, type BonusConfig } from './_shared/commission';
@@ -227,6 +227,19 @@ interface DistVendedorBonus {
   bonusdesafio_valor: number;
 }
 
+interface MetaTierSetor {
+  label: string;
+  meta: number;
+  percentual: number;
+  batida: boolean;
+}
+
+interface MetaSetorResumo {
+  setor: string;
+  realizado: number;
+  tiers: MetaTierSetor[];
+}
+
 export default function ComissaoGestor() {
   const usuario = useUser();
   const isAdm = usuario && usuario !== 'loading' && usuario.cargo === 'ADM';
@@ -433,9 +446,10 @@ export default function ComissaoGestor() {
   };
 
   // Lógica Ferragens: comissão baseada em total_vendas e total_recebido
-  const vendasSetorFerragens = vendedores
-    .filter(v => v.setor === 'FERRAGENS')
-    .reduce((s, v) => s + v.total_vendas, 0);
+  const vendasSetorFerragens = useMemo(
+    () => vendedores.filter(v => v.setor === 'FERRAGENS').reduce((s, v) => s + v.total_vendas, 0),
+    [vendedores]
+  );
 
   const getComissaoFerr = (v: ResumoVendedor) => {
     const mRec = ferrMetasMap[v.vendedor];
@@ -480,19 +494,102 @@ export default function ComissaoGestor() {
     return calcularComissaoDistribuidores(v.total_vendas, v.total_recebido, metaCfg, bonusCfg);
   };
 
-  const vendedoresFiltrados = vendedores.filter((v) =>
-    !busca || v.vendedor.toLowerCase().includes(busca.toLowerCase())
+  const vendedoresFiltrados = useMemo(
+    () => vendedores.filter((v) => !busca || v.vendedor.toLowerCase().includes(busca.toLowerCase())),
+    [vendedores, busca]
   );
 
-  const totalVendas = vendedoresFiltrados.reduce((s, v) => s + v.total_vendas, 0);
-  const totalPA = vendedoresFiltrados.reduce((s, v) => s + (v.setor === 'FERRAGENS' ? 0 : (v.valor_pa ?? 0)), 0);
-  const algumaTelevendas = vendedoresFiltrados.some((v) => v.is_televendas);
-  const totalComissoes = vendedoresFiltrados.reduce((s, v) => {
+  const totalVendas = useMemo(
+    () => vendedoresFiltrados.reduce((s, v) => s + v.total_vendas, 0),
+    [vendedoresFiltrados]
+  );
+  const totalPA = useMemo(
+    () => vendedoresFiltrados.reduce((s, v) => s + (v.setor === 'FERRAGENS' ? 0 : (v.valor_pa ?? 0)), 0),
+    [vendedoresFiltrados]
+  );
+  const algumaTelevendas = useMemo(
+    () => vendedoresFiltrados.some((v) => v.is_televendas),
+    [vendedoresFiltrados]
+  );
+  const totalComissoes = useMemo(() => vendedoresFiltrados.reduce((s, v) => {
     if (v.setor === 'FERRAGENS') return s + (getComissaoFerr(v)?.comissao_total ?? 0);
     if (v.setor === 'DISTRIBUIDORES') return s + (getComissaoDist(v)?.comissao_total ?? 0);
     if (v.is_televendas) return s + (getComissaoTV(v)?.comissao_total ?? 0);
     return s + (getFaixa(v.vendedor, v.total_vendas)?.comissao ?? 0);
-  }, 0);
+  }, 0),
+  // getFaixa/getComissaoTV/getComissaoFerr/getComissaoDist são recriadas a cada
+  // render, mas só leem os estados abaixo — listamos os estados, não as funções.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [vendedoresFiltrados, metasMap, bonusConfig, ferrMetasMap, ferrBonusMap, ferrMetaGrupo, vendasSetorFerragens, distMetasMap, distBonusMap]);
+
+  // Meta do setor = soma das metas individuais de cada vendedor do setor (ex.: 3
+  // vendedores com Meta 1 = 10 mil cada → Meta 1 do setor = 30 mil). Cada setor usa
+  // suas próprias faixas: Ferragens (1/2/3/Desafio), Distribuidores (1/2/3/4/Desafio),
+  // demais setores — Televendas/Televendas MG/Lojas — usam metasMap (1/2/3). O
+  // "realizado" comparado contra a meta é o mesmo valor usado na linha do vendedor na
+  // tabela: valor_pa para Televendas, total_vendas para os demais. Usa `vendedores`
+  // (não vendedoresFiltrados) porque a busca por nome não deve mudar o total do setor.
+  const metasPorSetor = useMemo<MetaSetorResumo[]>(() => {
+    const porSetor = new Map<string, ResumoVendedor[]>();
+    vendedores.forEach((v) => {
+      if (!porSetor.has(v.setor)) porSetor.set(v.setor, []);
+      porSetor.get(v.setor)!.push(v);
+    });
+
+    const somaMeta = (lista: ResumoVendedor[], mapa: Record<string, { [k: string]: number | string }>, campo: string) =>
+      lista.reduce((s, v) => s + (Number(mapa[v.vendedor]?.[campo]) || 0), 0);
+
+    const resumos: MetaSetorResumo[] = [];
+    porSetor.forEach((lista, setor) => {
+      const isFerr = setor === 'FERRAGENS';
+      const isDist = setor === 'DISTRIBUIDORES';
+      const isTV = !isFerr && !isDist && lista.some((v) => v.is_televendas);
+
+      let realizado: number;
+      let tiersDef: { label: string; valor: number }[];
+
+      if (isFerr) {
+        realizado = lista.reduce((s, v) => s + v.total_vendas, 0);
+        tiersDef = [
+          { label: 'Meta 1', valor: somaMeta(lista, ferrMetasMap, 'meta1_valor') },
+          { label: 'Meta 2', valor: somaMeta(lista, ferrMetasMap, 'meta2_valor') },
+          { label: 'Meta 3', valor: somaMeta(lista, ferrMetasMap, 'meta3_valor') },
+          { label: 'Meta Desafio', valor: somaMeta(lista, ferrMetasMap, 'metadesafio_valor') },
+        ];
+      } else if (isDist) {
+        realizado = lista.reduce((s, v) => s + v.total_vendas, 0);
+        tiersDef = [
+          { label: 'Meta 1', valor: somaMeta(lista, distMetasMap, 'meta1_valor') },
+          { label: 'Meta 2', valor: somaMeta(lista, distMetasMap, 'meta2_valor') },
+          { label: 'Meta 3', valor: somaMeta(lista, distMetasMap, 'meta3_valor') },
+          { label: 'Meta 4', valor: somaMeta(lista, distMetasMap, 'meta4_valor') },
+          { label: 'Meta Desafio', valor: somaMeta(lista, distMetasMap, 'metadesafio_valor') },
+        ];
+      } else {
+        realizado = isTV
+          ? lista.reduce((s, v) => s + (v.valor_pa ?? 0), 0)
+          : lista.reduce((s, v) => s + v.total_vendas, 0);
+        tiersDef = [
+          { label: 'Meta 1', valor: somaMeta(lista, metasMap, 'meta1_valor') },
+          { label: 'Meta 2', valor: somaMeta(lista, metasMap, 'meta2_valor') },
+          { label: 'Meta 3', valor: somaMeta(lista, metasMap, 'meta3_valor') },
+        ];
+      }
+
+      const tiers: MetaTierSetor[] = tiersDef
+        .filter((t) => t.valor > 0) // ninguém do setor tem essa faixa cadastrada
+        .map((t) => ({
+          label: t.label,
+          meta: t.valor,
+          percentual: (realizado / t.valor) * 100,
+          batida: realizado >= t.valor,
+        }));
+
+      resumos.push({ setor, realizado, tiers });
+    });
+
+    return resumos.sort((a, b) => a.setor.localeCompare(b.setor));
+  }, [vendedores, metasMap, ferrMetasMap, distMetasMap]);
 
   // Projeção do mês — ritmo em dias úteis (seg–sex) decorridos vs total do mês
   const hoje = new Date();
@@ -523,11 +620,15 @@ export default function ComissaoGestor() {
       ? 'Venda PA'
       : 'Vendas';
 
-  const top8Grafico = vendedoresFiltrados.slice(0, 8).map((v) => ({
-    name: v.is_televendas ? `${nomeAbrev(v.vendedor)} (PA)` : nomeAbrev(v.vendedor),
-    Faturamento: v.is_televendas ? (v.valor_pa ?? 0) : v.total_vendas,
-    Recebimento: v.total_recebido ?? 0,
-  }));
+  const top8Grafico = useMemo(
+    () => vendedoresFiltrados.slice(0, 8).map((v) => ({
+      name: v.is_televendas ? `${nomeAbrev(v.vendedor)} (PA)` : nomeAbrev(v.vendedor),
+      Faturamento: v.is_televendas ? (v.valor_pa ?? 0) : v.total_vendas,
+      Recebimento: v.total_recebido ?? 0,
+    })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [vendedoresFiltrados]
+  );
 
   const exportCSV = () => {
     const header = ['Vendedor', 'Setor', 'Total Vendas', 'Valor PA', 'Recebimentos', 'Meta Atingida', 'Comissão (R$)'].join(';');
@@ -705,6 +806,49 @@ export default function ComissaoGestor() {
             </p>
           </div>
         </div>
+
+        {/* Meta do Setor — soma das metas individuais dos vendedores do setor */}
+        {metasPorSetor.length > 0 && (
+          <div className="rounded-xl p-5 shadow-sm" style={{ background: '#ffffff', border: '1px solid #e2e8f0' }}>
+            <h2 className="text-sm font-semibold mb-4" style={{ color: '#00205C' }}>
+              Meta do Setor
+            </h2>
+            <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
+              {metasPorSetor.map((ms) => (
+                <div key={ms.setor} className="rounded-lg p-4" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                  <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: '#00205C' }}>
+                    {ms.setor}
+                  </p>
+                  <p className="text-sm font-bold mt-1 mb-3" style={{ color: '#00205C' }}>
+                    Vendido: {formatBRL(ms.realizado)}
+                  </p>
+                  {ms.tiers.length === 0 ? (
+                    <p className="text-xs" style={{ color: '#94a3b8' }}>Nenhuma meta cadastrada</p>
+                  ) : (
+                    <div className="space-y-2.5">
+                      {ms.tiers.map((t) => (
+                        <div key={t.label}>
+                          <div className="flex items-center justify-between text-xs mb-1">
+                            <span style={{ color: '#64748b' }}>{t.label}: {formatBRL(t.meta)}</span>
+                            <span className="font-semibold" style={{ color: t.batida ? '#16a34a' : '#64748b' }}>
+                              {t.percentual.toFixed(0)}%{t.batida ? ' ✓' : ''}
+                            </span>
+                          </div>
+                          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: '#e2e8f0' }}>
+                            <div
+                              className="h-full rounded-full"
+                              style={{ width: `${Math.min(t.percentual, 100)}%`, background: t.batida ? '#16a34a' : '#FFD700' }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Gráfico Top vendedores */}
         <div className="rounded-xl p-5 shadow-sm" style={{ background: '#ffffff', border: '1px solid #e2e8f0' }}>

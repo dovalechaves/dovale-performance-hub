@@ -46,6 +46,9 @@ interface Sessao {
   total_itens: number;
   total_contados: number;
   locais?: Local[];
+  importando_produtos?: boolean;
+  import_processados?: number;
+  import_total?: number;
 }
 
 interface Item {
@@ -406,6 +409,32 @@ export default function Inventario() {
       if (viewRef.current === "list") loadSessoes();
     });
 
+    socket.on("inventario:import-progresso", (data: any) => {
+      setSessoes((prev) => prev.map((s) => s.id === data.sessao_id
+        ? { ...s, importando_produtos: true, import_processados: data.processados, import_total: data.total, total_itens: data.importados }
+        : s
+      ));
+      setSelectedSessao((cur) => cur && cur.id === data.sessao_id
+        ? { ...cur, importando_produtos: true, import_processados: data.processados, import_total: data.total, total_itens: data.importados }
+        : cur
+      );
+    });
+
+    socket.on("inventario:import-concluido", (data: any) => {
+      setSessoes((prev) => prev.map((s) => s.id === data.sessao_id
+        ? { ...s, importando_produtos: false, import_processados: data.total, import_total: data.total, total_itens: data.importados }
+        : s
+      ));
+      toast.success(`Importação da sessão #${data.sessao_id} concluída: ${data.importados} produto(s) com saldo.`);
+      if (selectedSessaoRef.current?.id === data.sessao_id) loadDetail(data.sessao_id);
+      if (viewRef.current === "list") loadSessoes();
+    });
+
+    socket.on("inventario:import-erro", (data: any) => {
+      setSessoes((prev) => prev.map((s) => s.id === data.sessao_id ? { ...s, importando_produtos: false } : s));
+      toast.error(`Erro na importação da sessão #${data.sessao_id}: ${data.error}`);
+    });
+
     return () => { socket.disconnect(); };
   }, [applyContagemUpdate, loadDetail, loadLogs, loadSessoes]);
 
@@ -454,7 +483,11 @@ export default function Inventario() {
         }),
       });
       setCreateProgress({ show: true, message: "Finalizando...", percent: 90 });
-      toast.success(`Sessão criada com ${data.total_itens ?? 0} itens!`);
+      if (data.importando_produtos) {
+        toast.success(`Sessão #${data.id} criada! Catálogo grande — os produtos com saldo estão sendo importados em segundo plano (acompanhe o progresso na lista).`);
+      } else {
+        toast.success(`Sessão criada com ${data.total_itens ?? 0} itens!`);
+      }
       setShowCreate(false);
       setNewNome("");
       setNewNumLocais(1);
@@ -949,8 +982,14 @@ export default function Inventario() {
                             </span>
                           </td>
                           <td className="px-4 py-3 text-center text-xs">{s.num_locais}</td>
-                          <td className="px-4 py-3 text-center text-xs">{s.total_itens}</td>
-                          <td className="px-4 py-3 text-center text-xs">{s.total_contados}/{s.total_itens}</td>
+                          <td className="px-4 py-3 text-center text-xs">
+                            {s.importando_produtos ? (
+                              <span className="text-amber-600" title={`Importando produtos: ${s.import_processados ?? 0}/${s.import_total ?? 0} verificados`}>
+                                Importando... {s.import_total ? Math.round(((s.import_processados ?? 0) / s.import_total) * 100) : 0}%
+                              </span>
+                            ) : s.total_itens}
+                          </td>
+                          <td className="px-4 py-3 text-center text-xs">{s.importando_produtos ? "—" : `${s.total_contados}/${s.total_itens}`}</td>
                           <td className="px-4 py-3 text-xs text-muted-foreground">{s.criado_por}</td>
                           <td className="px-4 py-3 text-xs text-muted-foreground">{fmtDate(s.criado_em)}</td>
                           <td className="px-4 py-3">
@@ -994,6 +1033,18 @@ export default function Inventario() {
                         ) : null;
                       })()}
                     </div>
+                    {selectedSessao.importando_produtos && (
+                      <div className="mt-2 max-w-xs">
+                        <p className="text-[10px] text-amber-600 mb-1">
+                          Importando produtos do Firebird... {selectedSessao.import_processados ?? 0}/{selectedSessao.import_total ?? 0} verificados
+                          {typeof selectedSessao.total_itens === "number" ? ` — ${selectedSessao.total_itens} com saldo até agora` : ""}
+                        </p>
+                        <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                          <div className="h-full bg-amber-500 transition-all"
+                            style={{ width: `${selectedSessao.import_total ? Math.round(((selectedSessao.import_processados ?? 0) / selectedSessao.import_total) * 100) : 0}%` }} />
+                        </div>
+                      </div>
+                    )}
                     {locais.length > 0 && (
                       <div className="flex flex-wrap items-center gap-1.5 mt-2">
                         {locais.map((l) => (

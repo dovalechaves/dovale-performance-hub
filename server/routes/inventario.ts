@@ -99,7 +99,6 @@ const INVENTARIO_LOJA_LABELS: Record<string, string> = {
   fast: "Fast",
   campinas: "Campinas",
   riopreto: "Rio Preto",
-  sjc: "SJC",
   mg: "Minas Gerais",
   fortaleza: "Fortaleza",
   uberlandia: "Uberlandia",
@@ -107,8 +106,27 @@ const INVENTARIO_LOJA_LABELS: Record<string, string> = {
   bosque: "Bosque",
 };
 
+// SJC tem um \u00fanico Firebird para ind\u00fastria + ecommerce. O invent\u00e1rio precisa contar
+// os dois locais de estoque separadamente, ent\u00e3o viram duas "lojas" virtuais aqui,
+// ambas resolvidas para a conex\u00e3o Firebird "sjc" \u2014 ver CONSULTA_ESTOQUE(produto, filial, LOCAL_ESTOQUE, ...).
+const INVENTARIO_LOJA_CONEXAO: Record<string, FirebirdLoja> = {
+  sjc_industria: "sjc" as FirebirdLoja,
+  sjc_ecommerce: "sjc" as FirebirdLoja,
+};
+
+const INVENTARIO_LOJA_LOCAL_ESTOQUE: Record<string, number> = {
+  sjc_industria: 1, // Almoxarifado
+  sjc_ecommerce: 2, // Ecommerce
+};
+
+function localEstoqueDaLoja(raw: unknown, padrao: number): number {
+  const value = String(raw ?? "").trim().toLowerCase();
+  return INVENTARIO_LOJA_LOCAL_ESTOQUE[value] ?? padrao;
+}
+
 function normalizeLoja(raw: unknown): FirebirdLoja {
   const value = String(raw ?? "").trim().toLowerCase();
+  if (INVENTARIO_LOJA_CONEXAO[value]) return INVENTARIO_LOJA_CONEXAO[value];
   if ((firebirdLojas as string[]).includes(value)) return value as FirebirdLoja;
 
   const legacy = value
@@ -149,10 +167,11 @@ async function checkPedidosAbertos(loja: unknown): Promise<number> {
 
 async function lookupProduto(loja: unknown, codigo: string): Promise<{ descricao: string | null; qtd_sistema: number; custo_fiscal: number | null } | null> {
   try {
+    const localEstoque = localEstoqueDaLoja(loja, 0);
     const rows = await queryFb<FbProduto>(loja,
       `SELECT p.PRO_CODIGO, p.PRO_RESUMO,
               c.PCF_CUSTO_FISCAL,
-              (SELECT disponivel FROM CONSULTA_ESTOQUE(p.PRO_CODIGO, 1, 0, 0, CAST('NOW' AS DATE))) AS SALDO_ATUAL
+              (SELECT disponivel FROM CONSULTA_ESTOQUE(p.PRO_CODIGO, 1, ${localEstoque}, 0, CAST('NOW' AS DATE))) AS SALDO_ATUAL
        FROM PRODUTOS p
        LEFT JOIN PRODUTOS_CFG_FILIAL c ON c.PCF_PRO_CODIGO = p.PRO_CODIGO AND c.PCF_FIL_CODIGO = '1'
        WHERE p.PRO_CODIGO = ?`,
@@ -180,18 +199,116 @@ interface FbProdutoBulk {
 
 async function fetchProdutosComSaldo(loja: unknown): Promise<FbProdutoBulk[]> {
   try {
+    const localEstoque = localEstoqueDaLoja(loja, 0);
     const rows = await queryFb<FbProdutoBulk>(loja,
-      `SELECT p.PRO_CODIGO, p.PRO_RESUMO,
-              c.PCF_CUSTO_FISCAL,
-              (SELECT disponivel FROM CONSULTA_ESTOQUE(p.PRO_CODIGO, 1, 0, 0, CAST('NOW' AS DATE))) AS SALDO_ATUAL
-       FROM PRODUTOS p
-       LEFT JOIN PRODUTOS_CFG_FILIAL c ON c.PCF_PRO_CODIGO = p.PRO_CODIGO AND c.PCF_FIL_CODIGO = '1'
-       WHERE (SELECT disponivel FROM CONSULTA_ESTOQUE(p.PRO_CODIGO, 1, 0, 0, CAST('NOW' AS DATE))) > 0`
+      `SELECT * FROM (
+         SELECT p.PRO_CODIGO, p.PRO_RESUMO,
+                c.PCF_CUSTO_FISCAL,
+                (SELECT disponivel FROM CONSULTA_ESTOQUE(p.PRO_CODIGO, 1, ${localEstoque}, 0, CAST('NOW' AS DATE))) AS SALDO_ATUAL
+           FROM PRODUTOS p
+           LEFT JOIN PRODUTOS_CFG_FILIAL c ON c.PCF_PRO_CODIGO = p.PRO_CODIGO AND c.PCF_FIL_CODIGO = '1'
+       ) WHERE SALDO_ATUAL > 0`
     );
     return rows;
   } catch (err) {
     console.error("[inventario] Firebird bulk lookup error:", err);
     return [];
+  }
+}
+
+// ── Importação em background para catálogos grandes (SJC: ~31 mil produtos) ──
+// CONSULTA_ESTOQUE custa ~300-600ms por chamada no Firebird — rodar pro catálogo
+// inteiro de uma vez trava a requisição por horas. Por isso, pra essas lojas a
+// sessão é criada vazia e os produtos entram aos poucos, em lotes, com progresso
+// gravado na própria sessão e emitido via socket.
+const IMPORT_ASSINCRONO = new Set(["sjc_industria", "sjc_ecommerce"]);
+const IMPORT_BATCH_SIZE = 200;
+
+async function fetchTodosCodigosProduto(loja: unknown): Promise<number[]> {
+  // Restringe ao universo de Produto Acabado (PA) e Produto Revenda (PR) — reduz
+  // de ~31 mil pra ~10 mil produtos em SJC antes de chamar CONSULTA_ESTOQUE.
+  const rows = await queryFb<{ PRO_CODIGO: number }>(loja,
+    `SELECT PRO_CODIGO FROM PRODUTOS WHERE PRO_TIPO IN ('PA', 'PR') ORDER BY PRO_CODIGO`
+  );
+  return rows.map((r) => Number(r.PRO_CODIGO));
+}
+
+async function fetchProdutosComSaldoLote(loja: unknown, codigos: number[]): Promise<FbProdutoBulk[]> {
+  const localEstoque = localEstoqueDaLoja(loja, 0);
+  return queryFb<FbProdutoBulk>(loja,
+    `SELECT * FROM (
+       SELECT p.PRO_CODIGO, p.PRO_RESUMO,
+              c.PCF_CUSTO_FISCAL,
+              (SELECT disponivel FROM CONSULTA_ESTOQUE(p.PRO_CODIGO, 1, ${localEstoque}, 0, CAST('NOW' AS DATE))) AS SALDO_ATUAL
+         FROM PRODUTOS p
+         LEFT JOIN PRODUTOS_CFG_FILIAL c ON c.PCF_PRO_CODIGO = p.PRO_CODIGO AND c.PCF_FIL_CODIGO = '1'
+        WHERE p.PRO_CODIGO IN (${codigos.join(",")})
+     ) WHERE SALDO_ATUAL > 0`
+  );
+}
+
+async function importarProdutosEmBackground(sessaoId: number, loja: unknown, locais: { id: number }[], usuario: string) {
+  const pool = await getPool();
+  try {
+    const codigos = await fetchTodosCodigosProduto(loja);
+    const total = codigos.length;
+    await pool.request()
+      .input("id", sql.Int, sessaoId)
+      .input("total", sql.Int, total)
+      .query(`UPDATE dbo.INVENTARIO_SESSOES SET importando_produtos = 1, import_total = @total, import_processados = 0 WHERE id = @id`);
+
+    let processados = 0;
+    let importados = 0;
+
+    for (let i = 0; i < codigos.length; i += IMPORT_BATCH_SIZE) {
+      const lote = codigos.slice(i, i + IMPORT_BATCH_SIZE);
+      const produtos = await fetchProdutosComSaldoLote(loja, lote);
+
+      for (const prod of produtos) {
+        const codigo = String(prod.PRO_CODIGO);
+        const descricao = prod.PRO_RESUMO ?? null;
+        const qtdSistema = Number(prod.SALDO_ATUAL ?? 0);
+        const custoFiscal = prod.PCF_CUSTO_FISCAL != null && Number(prod.PCF_CUSTO_FISCAL) !== 0 ? Number(prod.PCF_CUSTO_FISCAL) : 0.01;
+
+        const ins = await pool.request()
+          .input("sessao_id", sql.Int, sessaoId)
+          .input("pro_codigo", sql.VarChar(50), codigo)
+          .input("descricao", sql.VarChar(300), descricao)
+          .input("qtd_sistema", sql.Decimal(18, 4), qtdSistema)
+          .input("custo_fiscal", sql.Decimal(18, 4), custoFiscal)
+          .query(`INSERT INTO dbo.INVENTARIO_ITENS (sessao_id, pro_codigo, descricao, qtd_sistema, custo_fiscal)
+                  OUTPUT INSERTED.id VALUES (@sessao_id, @pro_codigo, @descricao, @qtd_sistema, @custo_fiscal)`);
+        const itemId = ins.recordset[0].id;
+
+        for (const loc of locais) {
+          await pool.request()
+            .input("item_id", sql.Int, itemId)
+            .input("local_id", sql.Int, loc.id)
+            .query(`INSERT INTO dbo.INVENTARIO_CONTAGENS (item_id, local_id) VALUES (@item_id, @local_id)`);
+        }
+        importados++;
+      }
+
+      processados += lote.length;
+      await pool.request()
+        .input("id", sql.Int, sessaoId)
+        .input("processados", sql.Int, processados)
+        .query(`UPDATE dbo.INVENTARIO_SESSOES SET import_processados = @processados WHERE id = @id`);
+      await refreshCounts(sessaoId);
+
+      if (io) {
+        io.emit("inventario:import-progresso", { sessao_id: sessaoId, processados, total, importados });
+      }
+    }
+
+    await pool.request().input("id", sql.Int, sessaoId).query(`UPDATE dbo.INVENTARIO_SESSOES SET importando_produtos = 0 WHERE id = @id`);
+    await addLog(sessaoId, usuario, "IMPORTACAO_AUTOMATICA", `${importados} produtos com saldo importados do Firebird (background, ${total} produtos verificados)`);
+    if (io) io.emit("inventario:import-concluido", { sessao_id: sessaoId, importados, total });
+  } catch (err: any) {
+    console.error("[inventario] Erro na importação em background:", err);
+    await pool.request().input("id", sql.Int, sessaoId).query(`UPDATE dbo.INVENTARIO_SESSOES SET importando_produtos = 0 WHERE id = @id`).catch(() => {});
+    await addLog(sessaoId, usuario, "IMPORTACAO_ERRO", err.message).catch(() => {});
+    if (io) io.emit("inventario:import-erro", { sessao_id: sessaoId, error: err.message });
   }
 }
 
@@ -219,6 +336,15 @@ async function ensureTables() {
 
     IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'INVENTARIO_SESSOES' AND COLUMN_NAME = 'num_locais')
       ALTER TABLE dbo.INVENTARIO_SESSOES ADD num_locais INT NOT NULL DEFAULT 1;
+
+    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'INVENTARIO_SESSOES' AND COLUMN_NAME = 'importando_produtos')
+      ALTER TABLE dbo.INVENTARIO_SESSOES ADD importando_produtos BIT NOT NULL DEFAULT 0;
+
+    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'INVENTARIO_SESSOES' AND COLUMN_NAME = 'import_processados')
+      ALTER TABLE dbo.INVENTARIO_SESSOES ADD import_processados INT NOT NULL DEFAULT 0;
+
+    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'INVENTARIO_SESSOES' AND COLUMN_NAME = 'import_total')
+      ALTER TABLE dbo.INVENTARIO_SESSOES ADD import_total INT NOT NULL DEFAULT 0;
 
     IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'INVENTARIO_LOCAIS')
     CREATE TABLE dbo.INVENTARIO_LOCAIS (
@@ -315,10 +441,15 @@ async function refreshCounts(sessaoId: number) {
 
 router.get("/lojas", (_req: Request, res: Response) => {
   res.json(
-    firebirdLojas.map((value) => ({
-      value,
-      label: INVENTARIO_LOJA_LABELS[value] ?? String(value).toUpperCase(),
-    }))
+    firebirdLojas.flatMap((value) => {
+      if (value === "sjc") {
+        return [
+          { value: "sjc_industria", label: "SJC Indústria" },
+          { value: "sjc_ecommerce", label: "SJC Ecommerce" },
+        ];
+      }
+      return [{ value, label: INVENTARIO_LOJA_LABELS[value] ?? String(value).toUpperCase() }];
+    })
   );
 });
 
@@ -342,7 +473,13 @@ router.get("/sessoes", async (req: Request, res: Response) => {
   try {
     await init();
     const pool = await getPool();
-    const loja = req.query.loja ? normalizeLoja(req.query.loja) : undefined;
+    // Filtra pela chave "virtual" gravada na sessão (ex: sjc_industria) — não normalizar
+    // pra conexão física aqui, senão o filtro nunca bate com o que foi salvo.
+    let loja: string | undefined;
+    if (req.query.loja) {
+      loja = String(req.query.loja).trim().toLowerCase();
+      normalizeLoja(loja);
+    }
     const r = pool.request();
     let where = "";
     if (loja) {
@@ -361,11 +498,16 @@ router.post("/sessoes", async (req: Request, res: Response) => {
   try {
     await init();
     const { loja, nome, usuario, num_locais, nomes_locais } = req.body;
-    const lojaKey = normalizeLoja(loja);
     if (!loja || !nome || !usuario) return res.status(400).json({ error: "loja, nome e usuario são obrigatórios" });
 
+    // Guarda a loja "virtual" (ex: sjc_industria) — normalizeLoja só valida aqui.
+    // Não usar o retorno pra gravar/consultar: ele resolve pra conexão Firebird física
+    // (sjc_industria/sjc_ecommerce → "sjc"), o que perderia o local de estoque.
+    const lojaSessao = String(loja).trim().toLowerCase();
+    normalizeLoja(lojaSessao);
+
     // Block if there are open/draft orders
-    const pedidosAbertos = await checkPedidosAbertos(lojaKey);
+    const pedidosAbertos = await checkPedidosAbertos(lojaSessao);
     if (pedidosAbertos > 0) {
       return res.status(409).json({
         error: `Não é possível criar sessão de inventário: há ${pedidosAbertos} pedido(s) em aberto ou rascunho. Finalize-os antes de iniciar o inventário.`,
@@ -377,7 +519,7 @@ router.post("/sessoes", async (req: Request, res: Response) => {
 
     const pool = await getPool();
     const result = await pool.request()
-      .input("loja", sql.VarChar(100), lojaKey)
+      .input("loja", sql.VarChar(100), lojaSessao)
       .input("nome", sql.VarChar(200), nome)
       .input("usuario", sql.VarChar(100), usuario)
       .input("num_locais", sql.Int, n)
@@ -398,10 +540,26 @@ router.post("/sessoes", async (req: Request, res: Response) => {
     }
 
     const locaisStr = names.join(", ");
-    await addLog(sessao.id, usuario, "SESSAO_CRIADA", `Sessão "${nome}" — loja ${lojaKey} — ${n} local(is): ${locaisStr}`);
+    await addLog(sessao.id, usuario, "SESSAO_CRIADA", `Sessão "${nome}" — loja ${lojaSessao} — ${n} local(is): ${locaisStr}`);
+
+    // SJC tem ~31 mil produtos e cada checagem de saldo custa ~300-600ms no Firebird —
+    // rodar isso tudo antes de responder travaria o request por horas. Pra essas
+    // lojas, devolve a sessão já e importa os produtos em segundo plano, em lotes.
+    if (IMPORT_ASSINCRONO.has(lojaSessao)) {
+      const locaisRes = await pool.request()
+        .input("sid", sql.Int, sessao.id)
+        .query(`SELECT id FROM dbo.INVENTARIO_LOCAIS WHERE sessao_id = @sid ORDER BY ordem`);
+
+      importarProdutosEmBackground(sessao.id, lojaSessao, locaisRes.recordset, usuario).catch((e) =>
+        console.error("[inventario] Falha ao rodar importação em background:", e)
+      );
+      await addLog(sessao.id, usuario, "IMPORTACAO_INICIADA", "Catálogo grande — importação de produtos rodando em segundo plano");
+
+      return res.status(201).json({ ...sessao, itens_importados: 0, importando_produtos: true });
+    }
 
     // Auto-import all products with saldo > 0 from Firebird
-    const produtos = await fetchProdutosComSaldo(lojaKey);
+    const produtos = await fetchProdutosComSaldo(lojaSessao);
     let importados = 0;
     if (produtos.length > 0) {
       const locaisRes = await pool.request()
@@ -792,6 +950,10 @@ router.patch("/sessoes/:id/status", async (req: Request, res: Response) => {
           }
         }
 
+        // Local de estoque gravado no Firebird (PLE_ORIGEM): 1=Almoxarifado, 2=Ecommerce.
+        // Só SJC Indústria/Ecommerce diferenciam isso; as demais lojas mantêm 1, como sempre foi.
+        const localEstoqueOrigem = localEstoqueDaLoja(sessao.loja, 1);
+
         // Helper to create one Firebird inventory
         async function criarInventarioFb(obs: string, itens: any[]): Promise<number> {
           const maxIdRows = await queryFb<{ MX: number }>(sessao.loja, `SELECT MAX(PRI_ID) AS MX FROM PRODUTOS_INVENTARIO WHERE EMP_FIL_CODIGO = 1`);
@@ -799,8 +961,8 @@ router.patch("/sessoes/:id/status", async (req: Request, res: Response) => {
 
           await executeFb(sessao.loja,
             `INSERT INTO PRODUTOS_INVENTARIO (EMP_FIL_CODIGO, PRI_ID, PRI_DATA, PRI_OBS1, PRI_STS_CODIGO, PRI_USU_CODIGO, PRI_DATASISTEMA, PRI_PLE_ORIGEM, PRI_IND_AGRUPADO, PRI_VLR_TOTAL, PRI_ALTERA_CUSTO_FISCAL)
-             VALUES (1, ?, ?, ?, 'AA', ?, ?, 1, 1, 0, 0)`,
-            [priId, now, obs, usuCodigoSistema, now]
+             VALUES (1, ?, ?, ?, 'AA', ?, ?, ?, 1, 0, 0)`,
+            [priId, now, obs, usuCodigoSistema, now, localEstoqueOrigem]
           );
 
           let vlrTotal = 0;
@@ -812,8 +974,8 @@ router.patch("/sessoes/:id/status", async (req: Request, res: Response) => {
 
             await executeFb(sessao.loja,
               `INSERT INTO PRODUTOS_INVENTARIO_ITENS (EMP_FIL_CODIGO, PRI_ID, PII_PRO_CODIGO, PII_SALDOANTERIOR, PII_INVENTARIO, PII_SALDOATUAL, PII_ID, PII_USU_CODIGO, PII_DATASISTEMA, PII_PLE_ORIGEM, PII_VLR_UNITARIO, PII_VLR_TOTAL)
-               VALUES (1, ?, ?, ?, ?, ?, 0, ?, ?, 1, ?, ?)`,
-              [priId, Number(item.pro_codigo), saldoAnterior, item.qtdContada, item.qtdContada, usuCodigoSistema, now, custoUnit, vlrItem]
+               VALUES (1, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+              [priId, Number(item.pro_codigo), saldoAnterior, item.qtdContada, item.qtdContada, usuCodigoSistema, now, localEstoqueOrigem, custoUnit, vlrItem]
             );
           }
 
@@ -1176,7 +1338,8 @@ router.get("/sessoes/:id/logs", async (req: Request, res: Response) => {
 router.get("/produto/:codigo", async (req: Request, res: Response) => {
   try {
     const codigo = String(req.params.codigo);
-    const loja = normalizeLoja(req.query.loja ?? "fortaleza");
+    const loja = String(req.query.loja ?? "fortaleza").trim().toLowerCase();
+    normalizeLoja(loja); // valida — mas repassa a chave virtual (ex: sjc_industria) pro lookup, não a conexão física
     const data = await lookupProduto(loja, codigo);
     if (!data) {
       return res.status(404).json({ error: "Produto não encontrado no Firebird" });

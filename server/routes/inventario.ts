@@ -92,23 +92,57 @@ export function setInventarioIO(socketIO: SocketServer) { io = socketIO; }
 
 type FirebirdLoja = (typeof firebirdLojas)[number];
 
-const INVENTARIO_LOJA_LABELS: Record<string, string> = {
-  bh: "Belo Horizonte",
-  l2: "Santana",
-  l3: "Rio de Janeiro",
-  fast: "Fast",
-  campinas: "Campinas",
-  riopreto: "Rio Preto",
-  sjc: "SJC",
-  mg: "Minas Gerais",
-  fortaleza: "Fortaleza",
-  uberlandia: "Uberlandia",
-  goiania: "Goiania",
-  bosque: "Bosque",
-};
+// Config por loja: filial correta pro CONSULTA_ESTOQUE/PRODUTOS_CFG_FILIAL (antes fixo
+// em "1" pra todas \u2014 errado pra quem n\u00e3o \u00e9 filial 1) e, quando existe, o c\u00f3digo do
+// local de estoque "Ecommerce" (PRODUTOS_LOCAIS_ESTOQUE.PLE_CODIGO) \u2014 levantado ao vivo
+// em cada base em 2026-09. Lojas sem ecommercePle n\u00e3o separam a sess\u00e3o (n\u00e3o t\u00eam esse
+// local de estoque cadastrado); Almoxarifado \u00e9 sempre PLE_CODIGO 1 em todas.
+interface LojaInventarioConfig {
+  key: FirebirdLoja;
+  label: string;
+  filial: number;
+  ecommercePle?: number;
+}
+
+const LOJAS_INVENTARIO_CONFIG: LojaInventarioConfig[] = [
+  { key: "bh" as FirebirdLoja,         label: "Belo Horizonte", filial: 2 },
+  { key: "l2" as FirebirdLoja,         label: "Santana",        filial: 1, ecommercePle: 2 },
+  { key: "l3" as FirebirdLoja,         label: "Rio de Janeiro", filial: 9, ecommercePle: 3 },
+  { key: "fast" as FirebirdLoja,       label: "Fast",           filial: 12, ecommercePle: 2 },
+  { key: "campinas" as FirebirdLoja,   label: "Campinas",       filial: 1 },
+  { key: "riopreto" as FirebirdLoja,   label: "Rio Preto",      filial: 1 },
+  { key: "sjc" as FirebirdLoja,        label: "SJC",            filial: 1, ecommercePle: 2 },
+  { key: "mg" as FirebirdLoja,         label: "Minas Gerais",   filial: 7 },
+  { key: "fortaleza" as FirebirdLoja,  label: "Fortaleza",      filial: 1 },
+  { key: "uberlandia" as FirebirdLoja, label: "Uberlandia",     filial: 12 },
+  { key: "goiania" as FirebirdLoja,    label: "Goiania",        filial: 1, ecommercePle: 2 },
+  { key: "bosque" as FirebirdLoja,     label: "Bosque",         filial: 1, ecommercePle: 2 },
+];
+
+// Chave virtual (ex: "sjc_industria") \u2192 conex\u00e3o Firebird real ("sjc"). Toda loja com
+// ecommercePle vira duas lojas "virtuais" na tela (Ind\u00fastria/Ecommerce); as demais
+// continuam com a chave original, sem split.
+const INVENTARIO_LOJA_CONEXAO: Record<string, FirebirdLoja> = {};
+const INVENTARIO_LOJA_LOCAL_ESTOQUE: Record<string, number> = {};
+const INVENTARIO_LOJA_FILIAL: Record<string, number> = {};
+for (const cfg of LOJAS_INVENTARIO_CONFIG) {
+  INVENTARIO_LOJA_FILIAL[cfg.key] = cfg.filial;
+  if (cfg.ecommercePle != null) {
+    INVENTARIO_LOJA_CONEXAO[`${cfg.key}_industria`] = cfg.key;
+    INVENTARIO_LOJA_CONEXAO[`${cfg.key}_ecommerce`] = cfg.key;
+    INVENTARIO_LOJA_LOCAL_ESTOQUE[`${cfg.key}_industria`] = 1;
+    INVENTARIO_LOJA_LOCAL_ESTOQUE[`${cfg.key}_ecommerce`] = cfg.ecommercePle;
+  }
+}
+
+function localEstoqueDaLoja(raw: unknown, padrao: number): number {
+  const value = String(raw ?? "").trim().toLowerCase();
+  return INVENTARIO_LOJA_LOCAL_ESTOQUE[value] ?? padrao;
+}
 
 function normalizeLoja(raw: unknown): FirebirdLoja {
   const value = String(raw ?? "").trim().toLowerCase();
+  if (INVENTARIO_LOJA_CONEXAO[value]) return INVENTARIO_LOJA_CONEXAO[value];
   if ((firebirdLojas as string[]).includes(value)) return value as FirebirdLoja;
 
   const legacy = value
@@ -118,6 +152,12 @@ function normalizeLoja(raw: unknown): FirebirdLoja {
   if (legacy === "fortaleza") return "fortaleza" as FirebirdLoja;
 
   throw new Error(`Loja de inventario invalida: ${String(raw ?? "")}`);
+}
+
+// Filial correta pra essa loja (virtual ou real) \u2014 resolve pra conex\u00e3o f\u00edsica primeiro.
+function filialDaLoja(raw: unknown): number {
+  const conexao = normalizeLoja(raw);
+  return INVENTARIO_LOJA_FILIAL[conexao] ?? 1;
 }
 
 function queryFb<T = Record<string, unknown>>(loja: unknown, sqlStr: string, params: unknown[] = []): Promise<T[]> {
@@ -149,12 +189,14 @@ async function checkPedidosAbertos(loja: unknown): Promise<number> {
 
 async function lookupProduto(loja: unknown, codigo: string): Promise<{ descricao: string | null; qtd_sistema: number; custo_fiscal: number | null } | null> {
   try {
+    const localEstoque = localEstoqueDaLoja(loja, 0);
+    const filial = filialDaLoja(loja);
     const rows = await queryFb<FbProduto>(loja,
       `SELECT p.PRO_CODIGO, p.PRO_RESUMO,
               c.PCF_CUSTO_FISCAL,
-              (SELECT disponivel FROM CONSULTA_ESTOQUE(p.PRO_CODIGO, 1, 0, 0, CAST('NOW' AS DATE))) AS SALDO_ATUAL
+              (SELECT disponivel FROM CONSULTA_ESTOQUE(p.PRO_CODIGO, ${filial}, ${localEstoque}, 0, CAST('NOW' AS DATE))) AS SALDO_ATUAL
        FROM PRODUTOS p
-       LEFT JOIN PRODUTOS_CFG_FILIAL c ON c.PCF_PRO_CODIGO = p.PRO_CODIGO AND c.PCF_FIL_CODIGO = '1'
+       LEFT JOIN PRODUTOS_CFG_FILIAL c ON c.PCF_PRO_CODIGO = p.PRO_CODIGO AND c.PCF_FIL_CODIGO = '${filial}'
        WHERE p.PRO_CODIGO = ?`,
       [Number(codigo)]
     );
@@ -180,18 +222,120 @@ interface FbProdutoBulk {
 
 async function fetchProdutosComSaldo(loja: unknown): Promise<FbProdutoBulk[]> {
   try {
+    const localEstoque = localEstoqueDaLoja(loja, 0);
+    const filial = filialDaLoja(loja);
     const rows = await queryFb<FbProdutoBulk>(loja,
-      `SELECT p.PRO_CODIGO, p.PRO_RESUMO,
-              c.PCF_CUSTO_FISCAL,
-              (SELECT disponivel FROM CONSULTA_ESTOQUE(p.PRO_CODIGO, 1, 0, 0, CAST('NOW' AS DATE))) AS SALDO_ATUAL
-       FROM PRODUTOS p
-       LEFT JOIN PRODUTOS_CFG_FILIAL c ON c.PCF_PRO_CODIGO = p.PRO_CODIGO AND c.PCF_FIL_CODIGO = '1'
-       WHERE (SELECT disponivel FROM CONSULTA_ESTOQUE(p.PRO_CODIGO, 1, 0, 0, CAST('NOW' AS DATE))) > 0`
+      `SELECT * FROM (
+         SELECT p.PRO_CODIGO, p.PRO_RESUMO,
+                c.PCF_CUSTO_FISCAL,
+                (SELECT disponivel FROM CONSULTA_ESTOQUE(p.PRO_CODIGO, ${filial}, ${localEstoque}, 0, CAST('NOW' AS DATE))) AS SALDO_ATUAL
+           FROM PRODUTOS p
+           LEFT JOIN PRODUTOS_CFG_FILIAL c ON c.PCF_PRO_CODIGO = p.PRO_CODIGO AND c.PCF_FIL_CODIGO = '${filial}'
+       ) WHERE SALDO_ATUAL > 0`
     );
     return rows;
   } catch (err) {
     console.error("[inventario] Firebird bulk lookup error:", err);
     return [];
+  }
+}
+
+// ── Importação em background para catálogos grandes ─────────────────────────
+// CONSULTA_ESTOQUE pode custar centenas de ms por chamada no Firebird — rodar pro
+// catálogo inteiro de uma vez trava a requisição por horas (medido em SJC: ~31 mil
+// produtos, ~300-600ms/chamada). Por segurança, toda loja com split Indústria/Ecommerce
+// roda em segundo plano (o custo real por chamada não foi medido nas outras bases),
+// em lotes, com progresso gravado na própria sessão e emitido via socket.
+const IMPORT_ASSINCRONO = new Set(Object.keys(INVENTARIO_LOJA_CONEXAO));
+const IMPORT_BATCH_SIZE = 200;
+
+async function fetchTodosCodigosProduto(loja: unknown): Promise<number[]> {
+  // Restringe ao universo de Produto Acabado (PA) e Produto Revenda (PR) — reduz
+  // bastante o total de produtos verificados antes de chamar CONSULTA_ESTOQUE
+  // (em SJC, de ~31 mil pra ~10 mil).
+  const rows = await queryFb<{ PRO_CODIGO: number }>(loja,
+    `SELECT PRO_CODIGO FROM PRODUTOS WHERE PRO_TIPO IN ('PA', 'PR') ORDER BY PRO_CODIGO`
+  );
+  return rows.map((r) => Number(r.PRO_CODIGO));
+}
+
+async function fetchProdutosComSaldoLote(loja: unknown, codigos: number[]): Promise<FbProdutoBulk[]> {
+  const localEstoque = localEstoqueDaLoja(loja, 0);
+  const filial = filialDaLoja(loja);
+  return queryFb<FbProdutoBulk>(loja,
+    `SELECT * FROM (
+       SELECT p.PRO_CODIGO, p.PRO_RESUMO,
+              c.PCF_CUSTO_FISCAL,
+              (SELECT disponivel FROM CONSULTA_ESTOQUE(p.PRO_CODIGO, ${filial}, ${localEstoque}, 0, CAST('NOW' AS DATE))) AS SALDO_ATUAL
+         FROM PRODUTOS p
+         LEFT JOIN PRODUTOS_CFG_FILIAL c ON c.PCF_PRO_CODIGO = p.PRO_CODIGO AND c.PCF_FIL_CODIGO = '${filial}'
+        WHERE p.PRO_CODIGO IN (${codigos.join(",")})
+     ) WHERE SALDO_ATUAL > 0`
+  );
+}
+
+async function importarProdutosEmBackground(sessaoId: number, loja: unknown, locais: { id: number }[], usuario: string) {
+  const pool = await getPool();
+  try {
+    const codigos = await fetchTodosCodigosProduto(loja);
+    const total = codigos.length;
+    await pool.request()
+      .input("id", sql.Int, sessaoId)
+      .input("total", sql.Int, total)
+      .query(`UPDATE dbo.INVENTARIO_SESSOES SET importando_produtos = 1, import_total = @total, import_processados = 0 WHERE id = @id`);
+
+    let processados = 0;
+    let importados = 0;
+
+    for (let i = 0; i < codigos.length; i += IMPORT_BATCH_SIZE) {
+      const lote = codigos.slice(i, i + IMPORT_BATCH_SIZE);
+      const produtos = await fetchProdutosComSaldoLote(loja, lote);
+
+      for (const prod of produtos) {
+        const codigo = String(prod.PRO_CODIGO);
+        const descricao = prod.PRO_RESUMO ?? null;
+        const qtdSistema = Number(prod.SALDO_ATUAL ?? 0);
+        const custoFiscal = prod.PCF_CUSTO_FISCAL != null && Number(prod.PCF_CUSTO_FISCAL) !== 0 ? Number(prod.PCF_CUSTO_FISCAL) : 0.01;
+
+        const ins = await pool.request()
+          .input("sessao_id", sql.Int, sessaoId)
+          .input("pro_codigo", sql.VarChar(50), codigo)
+          .input("descricao", sql.VarChar(300), descricao)
+          .input("qtd_sistema", sql.Decimal(18, 4), qtdSistema)
+          .input("custo_fiscal", sql.Decimal(18, 4), custoFiscal)
+          .query(`INSERT INTO dbo.INVENTARIO_ITENS (sessao_id, pro_codigo, descricao, qtd_sistema, custo_fiscal)
+                  OUTPUT INSERTED.id VALUES (@sessao_id, @pro_codigo, @descricao, @qtd_sistema, @custo_fiscal)`);
+        const itemId = ins.recordset[0].id;
+
+        for (const loc of locais) {
+          await pool.request()
+            .input("item_id", sql.Int, itemId)
+            .input("local_id", sql.Int, loc.id)
+            .query(`INSERT INTO dbo.INVENTARIO_CONTAGENS (item_id, local_id) VALUES (@item_id, @local_id)`);
+        }
+        importados++;
+      }
+
+      processados += lote.length;
+      await pool.request()
+        .input("id", sql.Int, sessaoId)
+        .input("processados", sql.Int, processados)
+        .query(`UPDATE dbo.INVENTARIO_SESSOES SET import_processados = @processados WHERE id = @id`);
+      await refreshCounts(sessaoId);
+
+      if (io) {
+        io.emit("inventario:import-progresso", { sessao_id: sessaoId, processados, total, importados });
+      }
+    }
+
+    await pool.request().input("id", sql.Int, sessaoId).query(`UPDATE dbo.INVENTARIO_SESSOES SET importando_produtos = 0 WHERE id = @id`);
+    await addLog(sessaoId, usuario, "IMPORTACAO_AUTOMATICA", `${importados} produtos com saldo importados do Firebird (background, ${total} produtos verificados)`);
+    if (io) io.emit("inventario:import-concluido", { sessao_id: sessaoId, importados, total });
+  } catch (err: any) {
+    console.error("[inventario] Erro na importação em background:", err);
+    await pool.request().input("id", sql.Int, sessaoId).query(`UPDATE dbo.INVENTARIO_SESSOES SET importando_produtos = 0 WHERE id = @id`).catch(() => {});
+    await addLog(sessaoId, usuario, "IMPORTACAO_ERRO", err.message).catch(() => {});
+    if (io) io.emit("inventario:import-erro", { sessao_id: sessaoId, error: err.message });
   }
 }
 
@@ -219,6 +363,15 @@ async function ensureTables() {
 
     IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'INVENTARIO_SESSOES' AND COLUMN_NAME = 'num_locais')
       ALTER TABLE dbo.INVENTARIO_SESSOES ADD num_locais INT NOT NULL DEFAULT 1;
+
+    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'INVENTARIO_SESSOES' AND COLUMN_NAME = 'importando_produtos')
+      ALTER TABLE dbo.INVENTARIO_SESSOES ADD importando_produtos BIT NOT NULL DEFAULT 0;
+
+    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'INVENTARIO_SESSOES' AND COLUMN_NAME = 'import_processados')
+      ALTER TABLE dbo.INVENTARIO_SESSOES ADD import_processados INT NOT NULL DEFAULT 0;
+
+    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'INVENTARIO_SESSOES' AND COLUMN_NAME = 'import_total')
+      ALTER TABLE dbo.INVENTARIO_SESSOES ADD import_total INT NOT NULL DEFAULT 0;
 
     IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'INVENTARIO_LOCAIS')
     CREATE TABLE dbo.INVENTARIO_LOCAIS (
@@ -315,10 +468,15 @@ async function refreshCounts(sessaoId: number) {
 
 router.get("/lojas", (_req: Request, res: Response) => {
   res.json(
-    firebirdLojas.map((value) => ({
-      value,
-      label: INVENTARIO_LOJA_LABELS[value] ?? String(value).toUpperCase(),
-    }))
+    LOJAS_INVENTARIO_CONFIG.flatMap((cfg) => {
+      if (cfg.ecommercePle != null) {
+        return [
+          { value: `${cfg.key}_industria`, label: `${cfg.label} Indústria` },
+          { value: `${cfg.key}_ecommerce`, label: `${cfg.label} Ecommerce` },
+        ];
+      }
+      return [{ value: cfg.key, label: cfg.label }];
+    })
   );
 });
 
@@ -342,7 +500,13 @@ router.get("/sessoes", async (req: Request, res: Response) => {
   try {
     await init();
     const pool = await getPool();
-    const loja = req.query.loja ? normalizeLoja(req.query.loja) : undefined;
+    // Filtra pela chave "virtual" gravada na sessão (ex: sjc_industria) — não normalizar
+    // pra conexão física aqui, senão o filtro nunca bate com o que foi salvo.
+    let loja: string | undefined;
+    if (req.query.loja) {
+      loja = String(req.query.loja).trim().toLowerCase();
+      normalizeLoja(loja);
+    }
     const r = pool.request();
     let where = "";
     if (loja) {
@@ -361,11 +525,16 @@ router.post("/sessoes", async (req: Request, res: Response) => {
   try {
     await init();
     const { loja, nome, usuario, num_locais, nomes_locais } = req.body;
-    const lojaKey = normalizeLoja(loja);
     if (!loja || !nome || !usuario) return res.status(400).json({ error: "loja, nome e usuario são obrigatórios" });
 
+    // Guarda a loja "virtual" (ex: sjc_industria) — normalizeLoja só valida aqui.
+    // Não usar o retorno pra gravar/consultar: ele resolve pra conexão Firebird física
+    // (sjc_industria/sjc_ecommerce → "sjc"), o que perderia o local de estoque.
+    const lojaSessao = String(loja).trim().toLowerCase();
+    normalizeLoja(lojaSessao);
+
     // Block if there are open/draft orders
-    const pedidosAbertos = await checkPedidosAbertos(lojaKey);
+    const pedidosAbertos = await checkPedidosAbertos(lojaSessao);
     if (pedidosAbertos > 0) {
       return res.status(409).json({
         error: `Não é possível criar sessão de inventário: há ${pedidosAbertos} pedido(s) em aberto ou rascunho. Finalize-os antes de iniciar o inventário.`,
@@ -377,7 +546,7 @@ router.post("/sessoes", async (req: Request, res: Response) => {
 
     const pool = await getPool();
     const result = await pool.request()
-      .input("loja", sql.VarChar(100), lojaKey)
+      .input("loja", sql.VarChar(100), lojaSessao)
       .input("nome", sql.VarChar(200), nome)
       .input("usuario", sql.VarChar(100), usuario)
       .input("num_locais", sql.Int, n)
@@ -398,10 +567,26 @@ router.post("/sessoes", async (req: Request, res: Response) => {
     }
 
     const locaisStr = names.join(", ");
-    await addLog(sessao.id, usuario, "SESSAO_CRIADA", `Sessão "${nome}" — loja ${lojaKey} — ${n} local(is): ${locaisStr}`);
+    await addLog(sessao.id, usuario, "SESSAO_CRIADA", `Sessão "${nome}" — loja ${lojaSessao} — ${n} local(is): ${locaisStr}`);
+
+    // SJC tem ~31 mil produtos e cada checagem de saldo custa ~300-600ms no Firebird —
+    // rodar isso tudo antes de responder travaria o request por horas. Pra essas
+    // lojas, devolve a sessão já e importa os produtos em segundo plano, em lotes.
+    if (IMPORT_ASSINCRONO.has(lojaSessao)) {
+      const locaisRes = await pool.request()
+        .input("sid", sql.Int, sessao.id)
+        .query(`SELECT id FROM dbo.INVENTARIO_LOCAIS WHERE sessao_id = @sid ORDER BY ordem`);
+
+      importarProdutosEmBackground(sessao.id, lojaSessao, locaisRes.recordset, usuario).catch((e) =>
+        console.error("[inventario] Falha ao rodar importação em background:", e)
+      );
+      await addLog(sessao.id, usuario, "IMPORTACAO_INICIADA", "Catálogo grande — importação de produtos rodando em segundo plano");
+
+      return res.status(201).json({ ...sessao, itens_importados: 0, importando_produtos: true });
+    }
 
     // Auto-import all products with saldo > 0 from Firebird
-    const produtos = await fetchProdutosComSaldo(lojaKey);
+    const produtos = await fetchProdutosComSaldo(lojaSessao);
     let importados = 0;
     if (produtos.length > 0) {
       const locaisRes = await pool.request()
@@ -792,15 +977,23 @@ router.patch("/sessoes/:id/status", async (req: Request, res: Response) => {
           }
         }
 
+        // Local de estoque gravado no Firebird (PLE_ORIGEM): 1=Almoxarifado, 2/3=Ecommerce
+        // (varia por loja). Lojas sem split mantêm 1, como sempre foi.
+        const localEstoqueOrigem = localEstoqueDaLoja(sessao.loja, 1);
+        // EMP_FIL_CODIGO era fixo em 1 pra qualquer loja — só não dava problema porque
+        // as únicas lojas com sessão real (Bosque, Campinas, Fortaleza, Santana) são
+        // filial 1 por coincidência. Agora resolve a filial certa por loja.
+        const filialFb = filialDaLoja(sessao.loja);
+
         // Helper to create one Firebird inventory
         async function criarInventarioFb(obs: string, itens: any[]): Promise<number> {
-          const maxIdRows = await queryFb<{ MX: number }>(sessao.loja, `SELECT MAX(PRI_ID) AS MX FROM PRODUTOS_INVENTARIO WHERE EMP_FIL_CODIGO = 1`);
+          const maxIdRows = await queryFb<{ MX: number }>(sessao.loja, `SELECT MAX(PRI_ID) AS MX FROM PRODUTOS_INVENTARIO WHERE EMP_FIL_CODIGO = ?`, [filialFb]);
           const priId = (maxIdRows[0]?.MX ?? 0) + 1;
 
           await executeFb(sessao.loja,
             `INSERT INTO PRODUTOS_INVENTARIO (EMP_FIL_CODIGO, PRI_ID, PRI_DATA, PRI_OBS1, PRI_STS_CODIGO, PRI_USU_CODIGO, PRI_DATASISTEMA, PRI_PLE_ORIGEM, PRI_IND_AGRUPADO, PRI_VLR_TOTAL, PRI_ALTERA_CUSTO_FISCAL)
-             VALUES (1, ?, ?, ?, 'AA', ?, ?, 1, 1, 0, 0)`,
-            [priId, now, obs, usuCodigoSistema, now]
+             VALUES (?, ?, ?, ?, 'AA', ?, ?, ?, 1, 0, 0)`,
+            [filialFb, priId, now, obs, usuCodigoSistema, now, localEstoqueOrigem]
           );
 
           let vlrTotal = 0;
@@ -812,14 +1005,14 @@ router.patch("/sessoes/:id/status", async (req: Request, res: Response) => {
 
             await executeFb(sessao.loja,
               `INSERT INTO PRODUTOS_INVENTARIO_ITENS (EMP_FIL_CODIGO, PRI_ID, PII_PRO_CODIGO, PII_SALDOANTERIOR, PII_INVENTARIO, PII_SALDOATUAL, PII_ID, PII_USU_CODIGO, PII_DATASISTEMA, PII_PLE_ORIGEM, PII_VLR_UNITARIO, PII_VLR_TOTAL)
-               VALUES (1, ?, ?, ?, ?, ?, 0, ?, ?, 1, ?, ?)`,
-              [priId, Number(item.pro_codigo), saldoAnterior, item.qtdContada, item.qtdContada, usuCodigoSistema, now, custoUnit, vlrItem]
+               VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+              [filialFb, priId, Number(item.pro_codigo), saldoAnterior, item.qtdContada, item.qtdContada, usuCodigoSistema, now, localEstoqueOrigem, custoUnit, vlrItem]
             );
           }
 
           await executeFb(sessao.loja,
-            `UPDATE PRODUTOS_INVENTARIO SET PRI_VLR_TOTAL = ? WHERE EMP_FIL_CODIGO = 1 AND PRI_ID = ?`,
-            [vlrTotal, priId]
+            `UPDATE PRODUTOS_INVENTARIO SET PRI_VLR_TOTAL = ? WHERE EMP_FIL_CODIGO = ? AND PRI_ID = ?`,
+            [vlrTotal, filialFb, priId]
           );
 
           return priId;
@@ -1176,7 +1369,8 @@ router.get("/sessoes/:id/logs", async (req: Request, res: Response) => {
 router.get("/produto/:codigo", async (req: Request, res: Response) => {
   try {
     const codigo = String(req.params.codigo);
-    const loja = normalizeLoja(req.query.loja ?? "fortaleza");
+    const loja = String(req.query.loja ?? "fortaleza").trim().toLowerCase();
+    normalizeLoja(loja); // valida — mas repassa a chave virtual (ex: sjc_industria) pro lookup, não a conexão física
     const data = await lookupProduto(loja, codigo);
     if (!data) {
       return res.status(404).json({ error: "Produto não encontrado no Firebird" });

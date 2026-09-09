@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import AppShell from './layout/AppShell';
 import { formatBRL, MESES } from './_shared/format';
 import {
@@ -325,49 +326,32 @@ export default function ComissaoSimulacao() {
   const [modoSetor, setModoSetor] = useState<'televendas' | 'ferragens' | 'distribuidores'>('televendas');
 
   // ── Televendas ──
-  const [vendedores, setVendedores] = useState<string[]>([]);
   const [vendedor, setVendedor] = useState('');
   const [mes, setMes] = useState(new Date().getMonth() + 1);
   const [ano, setAno] = useState(ANO_ATUAL);
 
   // ── Ferragens ──
-  const [ferrVendedores, setFerrVendedores] = useState<string[]>([]);
   const [ferrVendedor, setFerrVendedor] = useState('');
   const [ferrMes, setFerrMes] = useState(new Date().getMonth() + 1);
   const [ferrAno, setFerrAno] = useState(ANO_ATUAL);
-  const [ferrMetaConf, setFerrMetaConf] = useState<FerrMetaConfig | null>(null);
-  const [ferrBonusConf, setFerrBonusConf] = useState<FerrBonusConfig | null>(null);
-  const [ferrMetaGrupoConf, setFerrMetaGrupoConf] = useState<FerrMetaGrupoConfig | null>(null);
-  const [loadingFerrConf, setLoadingFerrConf] = useState(false);
   const [ferrTotalVendas, setFerrTotalVendas] = useState('');
   const [ferrRecebimentos, setFerrRecebimentos] = useState('');
   const [ferrVendasSetor, setFerrVendasSetor] = useState('');
   const [ferrResultado, setFerrResultado] = useState<ComissaoFerragens | null>(null);
-  const [ferrMediaRec, setFerrMediaRec] = useState<MediaRec | null>(null);
-  const [ferrMediaSetor, setFerrMediaSetor] = useState<MediaRec | null>(null);
   const [ferrModoReverso, setFerrModoReverso] = useState(false);
   const [ferrComissaoDesejada, setFerrComissaoDesejada] = useState('');
   const [ferrReversoCalculado, setFerrReversoCalculado] = useState(false);
 
   // ── Distribuidores ──
-  const [distVendedores, setDistVendedores] = useState<string[]>([]);
   const [distVendedor, setDistVendedor] = useState('');
   const [distMes, setDistMes] = useState(new Date().getMonth() + 1);
   const [distAno, setDistAno] = useState(ANO_ATUAL);
-  const [distMetaConf, setDistMetaConf] = useState<DistMetaConfig | null>(null);
-  const [distBonusConf, setDistBonusConf] = useState<DistBonusConfig | null>(null);
-  const [loadingDistConf, setLoadingDistConf] = useState(false);
   const [distTotalVendas, setDistTotalVendas] = useState('');
   const [distRecebimentos, setDistRecebimentos] = useState('');
   const [distResultado, setDistResultado] = useState<ComissaoDistribuidores | null>(null);
-  const [distMediaRec, setDistMediaRec] = useState<MediaRec | null>(null);
   const [distModoReverso, setDistModoReverso] = useState(false);
   const [distComissaoDesejada, setDistComissaoDesejada] = useState('');
   const [distReversoCalculado, setDistReversoCalculado] = useState(false);
-
-  const [metaConfig, setMetaConfig] = useState<MetaConfig | null>(null);
-  const [bonusConfig, setBonusConfig] = useState<BonusConfig | null>(null);
-  const [loadingConfig, setLoadingConfig] = useState(false);
 
   // Direct mode
   const [valorPA, setValorPA] = useState('');
@@ -379,41 +363,156 @@ export default function ComissaoSimulacao() {
   const [comissaoDesejada, setComissaoDesejada] = useState('');
   const [reversoCalculado, setReversoCalculado] = useState(false);
 
-  // Historical avg recebimentos (loaded alongside config)
-  const [mediaRec, setMediaRec] = useState<MediaRec | null>(null);
+  // ── Listas de vendedores por setor via React Query ───────────────────────
+  // Cache do próprio painel (QueryClientProvider em App.tsx) — trocar de aba e
+  // voltar pra Simulação reaproveita as listas já buscadas em vez de recarregar
+  // do zero. Mesmo TTL do Cache-Control da rota /filtros no backend (max-age=60).
+  const usuarioPronto = !!usuario && usuario !== 'loading';
+  const filtrosTVQuery = useQuery({
+    queryKey: ['comissao', 'simulacao', 'filtros-setor', 'TELEVENDAS,TELEVENDAS MG'],
+    queryFn: async () => {
+      const r = await api('/filtros?setor=TELEVENDAS,TELEVENDAS MG', { cache: 'no-store' });
+      return r.json() as Promise<{ vendedores?: string[] }>;
+    },
+    enabled: usuarioPronto,
+    staleTime: 60_000,
+  });
+  const filtrosFerrQuery = useQuery({
+    queryKey: ['comissao', 'simulacao', 'filtros-setor', 'FERRAGENS'],
+    queryFn: async () => {
+      const r = await api('/filtros?setor=FERRAGENS', { cache: 'no-store' });
+      return r.json() as Promise<{ vendedores?: string[] }>;
+    },
+    enabled: usuarioPronto,
+    staleTime: 60_000,
+  });
+  const filtrosDistQuery = useQuery({
+    queryKey: ['comissao', 'simulacao', 'filtros-setor', 'DISTRIBUIDORES'],
+    queryFn: async () => {
+      const r = await api('/filtros?setor=DISTRIBUIDORES', { cache: 'no-store' });
+      return r.json() as Promise<{ vendedores?: string[] }>;
+    },
+    enabled: usuarioPronto,
+    staleTime: 60_000,
+  });
+  const vendedores = useMemo(() => filtrosTVQuery.data?.vendedores ?? [], [filtrosTVQuery.data]);
+  const ferrVendedores = useMemo(() => filtrosFerrQuery.data?.vendedores ?? [], [filtrosFerrQuery.data]);
+  const distVendedores = useMemo(() => filtrosDistQuery.data?.vendedores ?? [], [filtrosDistQuery.data]);
+
+  // Cada vendedor pertence a um único setor — quando o usuário logado é VENDEDOR,
+  // pré-seleciona o próprio nome assim que a lista do setor correspondente chega
+  // (igual ao que o então-Promise.all fazia de uma vez só).
+  useEffect(() => {
+    if (!usuario || usuario === 'loading' || usuario.cargo !== 'VENDEDOR') return;
+    const tvLista = filtrosTVQuery.data?.vendedores ?? [];
+    const feLista = filtrosFerrQuery.data?.vendedores ?? [];
+    const diLista = filtrosDistQuery.data?.vendedores ?? [];
+    setVendedor(tvLista[0] || '');
+    setFerrVendedor(feLista[0] || '');
+    setDistVendedor(diLista[0] || '');
+  }, [usuario, filtrosTVQuery.data, filtrosFerrQuery.data, filtrosDistQuery.data]);
+
+  // ── Config (metas/bônus/média) por setor via React Query ─────────────────
+  // /recebimentos-media e /vendas-media-setor não definem Cache-Control, então
+  // o combinado usa o default seguro de 30s (mesmo quando as outras rotas do
+  // grupo têm max-age=60 — usamos o menor TTL do conjunto).
+  const tvConfigQuery = useQuery({
+    queryKey: ['comissao', 'simulacao', 'televendas-config', vendedor, ano, mes],
+    queryFn: async () => {
+      const [metaRes, bonusRes, mediaRes] = await Promise.all([
+        api(`/metas-mensais?ano=${ano}&mes=${mes}`),
+        api(`/bonus-config`),
+        api(`/recebimentos-media?vendedor=${encodeURIComponent(vendedor)}&mes=${mes}&ano=${ano}`),
+      ]);
+      const metas: (MetaConfig & { nome_vendedor: string })[] = await metaRes.json();
+      const bonus: BonusConfig = await bonusRes.json();
+      const media: MediaRec & { error?: string } = await mediaRes.json();
+      return {
+        metaConfig: metas.find((m) => m.nome_vendedor === vendedor) ?? null,
+        bonusConfig: bonus,
+        mediaRec: !media.error ? media : null,
+      };
+    },
+    enabled: !!vendedor,
+    staleTime: 30_000,
+  });
+  const metaConfig = tvConfigQuery.data?.metaConfig ?? null;
+  const bonusConfig = tvConfigQuery.data?.bonusConfig ?? null;
+  const mediaRec = tvConfigQuery.data?.mediaRec ?? null;
+  const loadingConfig = tvConfigQuery.isLoading;
+
+  // Muda vendedor/mês/ano invalida qualquer simulação anterior (o resultado calculado
+  // era em cima de outros parâmetros) — igual ao reset que carregarConfig fazia antes
+  // de buscar a config nova. Sem reset de reversoCalculado aqui, igual ao original.
+  useEffect(() => {
+    if (!vendedor) return;
+    setResultado(null);
+  }, [vendedor, mes, ano]);
+
+  const ferrConfigQuery = useQuery({
+    queryKey: ['comissao', 'simulacao', 'ferragens-config', ferrVendedor, ferrAno, ferrMes],
+    queryFn: async () => {
+      const [metasRes, bonusRes, grupoRes, mediaRes, mediaSetorRes] = await Promise.all([
+        api(`/ferragens/metas?ano=${ferrAno}&mes=${ferrMes}`).then(r => r.json()),
+        api(`/ferragens/bonus?ano=${ferrAno}&mes=${ferrMes}`).then(r => r.json()),
+        api(`/ferragens/meta-grupo?ano=${ferrAno}&mes=${ferrMes}`).then(r => r.json()),
+        api(`/recebimentos-media?vendedor=${encodeURIComponent(ferrVendedor)}&mes=${ferrMes}&ano=${ferrAno}`).then(r => r.json()),
+        api(`/vendas-media-setor?setor=FERRAGENS&mes=${ferrMes}&ano=${ferrAno}`).then(r => r.json()),
+      ]);
+      const metaVend = Array.isArray(metasRes) ? metasRes.find((m: FerrMetaConfig & { nome_vendedor: string }) => m.nome_vendedor === ferrVendedor) : null;
+      const bonusVend = Array.isArray(bonusRes) ? bonusRes.find((b: FerrBonusConfig & { nome_vendedor: string }) => b.nome_vendedor === ferrVendedor) : null;
+      return {
+        metaConf: metaVend ?? null,
+        bonusConf: bonusVend ?? null,
+        metaGrupoConf: grupoRes && !grupoRes.error ? grupoRes : null,
+        mediaRec: !mediaRes.error ? mediaRes : null,
+        mediaSetor: !mediaSetorRes.error ? mediaSetorRes : null,
+      };
+    },
+    enabled: !!ferrVendedor,
+    staleTime: 30_000,
+  });
+  const ferrMetaConf = ferrConfigQuery.data?.metaConf ?? null;
+  const ferrBonusConf = ferrConfigQuery.data?.bonusConf ?? null;
+  const ferrMetaGrupoConf = ferrConfigQuery.data?.metaGrupoConf ?? null;
+  const ferrMediaRec = ferrConfigQuery.data?.mediaRec ?? null;
+  const ferrMediaSetor = ferrConfigQuery.data?.mediaSetor ?? null;
+  const loadingFerrConf = ferrConfigQuery.isLoading;
 
   useEffect(() => {
-    if (!usuario || usuario === 'loading') return;
-    if (usuario.cargo === 'VENDEDOR') {
-      // Cada vendedor pertence a um único setor — descobrimos qual consultando
-      // os três filtros por setor e vendo em qual deles o nome aparece.
-      Promise.all([
-        api('/filtros?setor=TELEVENDAS,TELEVENDAS MG', { cache: 'no-store' }).then((r) => r.json()),
-        api('/filtros?setor=FERRAGENS', { cache: 'no-store' }).then((r) => r.json()),
-        api('/filtros?setor=DISTRIBUIDORES', { cache: 'no-store' }).then((r) => r.json()),
-      ]).then(([tv, fe, di]) => {
-        const tvLista: string[] = tv.vendedores || [];
-        const feLista: string[] = fe.vendedores || [];
-        const diLista: string[] = di.vendedores || [];
-        setVendedores(tvLista);
-        setFerrVendedores(feLista);
-        setDistVendedores(diLista);
-        setVendedor(tvLista[0] || '');
-        setFerrVendedor(feLista[0] || '');
-        setDistVendedor(diLista[0] || '');
-      });
-    } else {
-      api('/filtros?setor=TELEVENDAS,TELEVENDAS MG', { cache: 'no-store' })
-        .then((r) => r.json())
-        .then((f) => setVendedores(f.vendedores || []));
-      api('/filtros?setor=FERRAGENS', { cache: 'no-store' })
-        .then((r) => r.json())
-        .then((f) => setFerrVendedores(f.vendedores || []));
-      api('/filtros?setor=DISTRIBUIDORES', { cache: 'no-store' })
-        .then((r) => r.json())
-        .then((f) => setDistVendedores(f.vendedores || []));
-    }
-  }, [api, usuario]);
+    if (!ferrVendedor) return;
+    setFerrResultado(null);
+    setFerrReversoCalculado(false);
+  }, [ferrVendedor, ferrMes, ferrAno]);
+
+  const distConfigQuery = useQuery({
+    queryKey: ['comissao', 'simulacao', 'distribuidores-config', distVendedor, distAno, distMes],
+    queryFn: async () => {
+      const [metasRes, bonusRes, mediaRes] = await Promise.all([
+        api(`/distribuidores/metas?ano=${distAno}&mes=${distMes}`).then(r => r.json()),
+        api(`/distribuidores/bonus?ano=${distAno}&mes=${distMes}`).then(r => r.json()),
+        api(`/recebimentos-media?vendedor=${encodeURIComponent(distVendedor)}&mes=${distMes}&ano=${distAno}`).then(r => r.json()),
+      ]);
+      const metaVend = Array.isArray(metasRes) ? metasRes.find((m: DistMetaConfig & { nome_vendedor: string }) => m.nome_vendedor === distVendedor) : null;
+      const bonusVend = Array.isArray(bonusRes) ? bonusRes.find((b: DistBonusConfig & { nome_vendedor: string }) => b.nome_vendedor === distVendedor) : null;
+      return {
+        metaConf: metaVend ?? null,
+        bonusConf: bonusVend ?? null,
+        mediaRec: !mediaRes.error ? mediaRes : null,
+      };
+    },
+    enabled: !!distVendedor,
+    staleTime: 30_000,
+  });
+  const distMetaConf = distConfigQuery.data?.metaConf ?? null;
+  const distBonusConf = distConfigQuery.data?.bonusConf ?? null;
+  const distMediaRec = distConfigQuery.data?.mediaRec ?? null;
+  const loadingDistConf = distConfigQuery.isLoading;
+
+  useEffect(() => {
+    if (!distVendedor) return;
+    setDistResultado(null);
+  }, [distVendedor, distMes, distAno]);
 
   const isLoadingUser = usuario === 'loading';
   const setoresUsuarioKey = usuario && usuario !== 'loading' ? (usuario.setores || []).join('|') : '';
@@ -441,38 +540,6 @@ export default function ComissaoSimulacao() {
     }
   }, [abasPermitidas, modoSetor]);
 
-  useEffect(() => {
-    if (!ferrVendedor) return;
-    carregarConfigFerragens();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ferrVendedor, ferrMes, ferrAno]);
-
-  const carregarConfigFerragens = async () => {
-    setLoadingFerrConf(true);
-    setFerrResultado(null);
-    setFerrReversoCalculado(false);
-    setFerrMediaRec(null);
-    setFerrMediaSetor(null);
-    try {
-      const [metasRes, bonusRes, grupoRes, mediaRes, mediaSetorRes] = await Promise.all([
-        api(`/ferragens/metas?ano=${ferrAno}&mes=${ferrMes}`).then(r => r.json()),
-        api(`/ferragens/bonus?ano=${ferrAno}&mes=${ferrMes}`).then(r => r.json()),
-        api(`/ferragens/meta-grupo?ano=${ferrAno}&mes=${ferrMes}`).then(r => r.json()),
-        api(`/recebimentos-media?vendedor=${encodeURIComponent(ferrVendedor)}&mes=${ferrMes}&ano=${ferrAno}`).then(r => r.json()),
-        api(`/vendas-media-setor?setor=FERRAGENS&mes=${ferrMes}&ano=${ferrAno}`).then(r => r.json()),
-      ]);
-      const metaVend = Array.isArray(metasRes) ? metasRes.find((m: FerrMetaConfig & { nome_vendedor: string }) => m.nome_vendedor === ferrVendedor) : null;
-      const bonusVend = Array.isArray(bonusRes) ? bonusRes.find((b: FerrBonusConfig & { nome_vendedor: string }) => b.nome_vendedor === ferrVendedor) : null;
-      setFerrMetaConf(metaVend ?? null);
-      setFerrBonusConf(bonusVend ?? null);
-      setFerrMetaGrupoConf(grupoRes && !grupoRes.error ? grupoRes : null);
-      if (!mediaRes.error) setFerrMediaRec(mediaRes);
-      if (!mediaSetorRes.error) setFerrMediaSetor(mediaSetorRes);
-    } finally {
-      setLoadingFerrConf(false);
-    }
-  };
-
   const simularFerragens = () => {
     const totalVendas = parseFloat(ferrTotalVendas.replace(/\./g, '').replace(',', '.')) || 0;
     const recebimentos = parseFloat(ferrRecebimentos.replace(/\./g, '').replace(',', '.')) || 0;
@@ -480,63 +547,10 @@ export default function ComissaoSimulacao() {
     setFerrResultado(calcularComissaoFerragens(totalVendas, recebimentos, ferrMetaConf, ferrBonusConf, vendasSetor, ferrMetaGrupoConf));
   };
 
-  useEffect(() => {
-    if (!distVendedor) return;
-    carregarConfigDistribuidores();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [distVendedor, distMes, distAno]);
-
-  const carregarConfigDistribuidores = async () => {
-    setLoadingDistConf(true);
-    setDistResultado(null);
-    setDistMediaRec(null);
-    try {
-      const [metasRes, bonusRes, mediaRes] = await Promise.all([
-        api(`/distribuidores/metas?ano=${distAno}&mes=${distMes}`).then(r => r.json()),
-        api(`/distribuidores/bonus?ano=${distAno}&mes=${distMes}`).then(r => r.json()),
-        api(`/recebimentos-media?vendedor=${encodeURIComponent(distVendedor)}&mes=${distMes}&ano=${distAno}`).then(r => r.json()),
-      ]);
-      const metaVend = Array.isArray(metasRes) ? metasRes.find((m: DistMetaConfig & { nome_vendedor: string }) => m.nome_vendedor === distVendedor) : null;
-      const bonusVend = Array.isArray(bonusRes) ? bonusRes.find((b: DistBonusConfig & { nome_vendedor: string }) => b.nome_vendedor === distVendedor) : null;
-      setDistMetaConf(metaVend ?? null);
-      setDistBonusConf(bonusVend ?? null);
-      if (!mediaRes.error) setDistMediaRec(mediaRes);
-    } finally {
-      setLoadingDistConf(false);
-    }
-  };
-
   const simularDistribuidores = () => {
     const totalVendas = parseFloat(distTotalVendas.replace(/\./g, '').replace(',', '.')) || 0;
     const recebimentos = parseFloat(distRecebimentos.replace(/\./g, '').replace(',', '.')) || 0;
     setDistResultado(calcularComissaoDistribuidores(totalVendas, recebimentos, distMetaConf, distBonusConf));
-  };
-
-  useEffect(() => {
-    if (!vendedor) return;
-    carregarConfig();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vendedor, mes, ano]);
-
-  const carregarConfig = async () => {
-    setLoadingConfig(true);
-    setResultado(null);
-    setMediaRec(null);
-    try {
-      const [metaRes, bonusRes, mediaRes] = await Promise.all([
-        api(`/metas-mensais?ano=${ano}&mes=${mes}`),
-        api(`/bonus-config`),
-        api(`/recebimentos-media?vendedor=${encodeURIComponent(vendedor)}&mes=${mes}&ano=${ano}`),
-      ]);
-      const metas: (MetaConfig & { nome_vendedor: string })[] = await metaRes.json();
-      const bonus: BonusConfig = await bonusRes.json();
-      const media: MediaRec & { error?: string } = await mediaRes.json();
-      setMetaConfig(metas.find((m) => m.nome_vendedor === vendedor) ?? null);
-      setBonusConfig(bonus);
-      if (!media.error) setMediaRec(media);
-    } finally {
-      setLoadingConfig(false);
-    }
   };
 
   const simular = () => {

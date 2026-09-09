@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import AppShell from './layout/AppShell';
 import { formatBRL, formatNumber, MESES, CORES_GRAFICO } from './_shared/format';
 import { calcularComissaoTelevendas, type MetaConfig, type BonusConfig } from './_shared/commission';
@@ -171,6 +172,39 @@ function EvolucaoVendedorModal({ vendedor, isTelevendas, ano, mes, onClose }: {
   );
 }
 
+interface MetaTierSetor {
+  label: string;
+  meta: number;
+  percentual: number;
+  batida: boolean;
+}
+
+function MetaTierList({ tiers }: { tiers: MetaTierSetor[] }) {
+  if (tiers.length === 0) {
+    return <p className="text-xs" style={{ color: '#94a3b8' }}>Nenhuma meta cadastrada</p>;
+  }
+  return (
+    <div className="space-y-2.5">
+      {tiers.map((t) => (
+        <div key={t.label}>
+          <div className="flex items-center justify-between text-xs mb-1">
+            <span style={{ color: '#64748b' }}>{t.label}: {formatBRL(t.meta)}</span>
+            <span className="font-semibold" style={{ color: t.batida ? '#16a34a' : '#64748b' }}>
+              {t.percentual.toFixed(0)}%{t.batida ? ' ✓' : ''}
+            </span>
+          </div>
+          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: '#e2e8f0' }}>
+            <div
+              className="h-full rounded-full"
+              style={{ width: `${Math.min(t.percentual, 100)}%`, background: t.batida ? '#16a34a' : '#FFD700' }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 interface ResumoVendedor {
   vendedor: string;
   setor: string;
@@ -227,17 +261,13 @@ interface DistVendedorBonus {
   bonusdesafio_valor: number;
 }
 
-interface MetaTierSetor {
-  label: string;
-  meta: number;
-  percentual: number;
-  batida: boolean;
-}
-
 interface MetaSetorResumo {
   setor: string;
   realizado: number;
   tiers: MetaTierSetor[];
+  // Só preenchido para o setor Ferragens: meta do grupo estipulada pelo gestor
+  // na Configuração (não é soma das metas individuais, é um valor único do setor).
+  tiersGrupo?: MetaTierSetor[];
 }
 
 export default function ComissaoGestor() {
@@ -245,10 +275,6 @@ export default function ComissaoGestor() {
   const isAdm = usuario && usuario !== 'loading' && usuario.cargo === 'ADM';
   const api = useComissaoApi();
   const navigate = useNavigate();
-  const [vendedores, setVendedores] = useState<ResumoVendedor[]>([]);
-  const [metasMap, setMetasMap] = useState<Record<string, MetaVendedor>>({});
-  const [setores, setSetores] = useState<string[]>([]);
-  const [empresas, setEmpresas] = useState<string[]>([]);
   const [filtroSetor, setFiltroSetor] = useState('');
   const [filtroEmpresa, setFiltroEmpresa] = useState('');
   const [searchParams, setSearchParams] = useSearchParams();
@@ -277,16 +303,7 @@ export default function ComissaoGestor() {
       return next;
     }, { replace: true });
   };
-  const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState('');
-  const [bonusConfig, setBonusConfig] = useState<BonusConfig | null>(null);
-  const [ferrMetasMap, setFerrMetasMap] = useState<Record<string, FerrVendedorMeta>>({});
-  const [ferrBonusMap, setFerrBonusMap] = useState<Record<string, FerrVendedorBonus>>({});
-  const [ferrMetaGrupo, setFerrMetaGrupo] = useState<FerrMetaGrupoConfig | null>(null);
-  const [ferrCarregado, setFerrCarregado] = useState(false);
-  const [distMetasMap, setDistMetasMap] = useState<Record<string, DistVendedorMeta>>({});
-  const [distBonusMap, setDistBonusMap] = useState<Record<string, DistVendedorBonus>>({});
-  const [distCarregado, setDistCarregado] = useState(false);
   const [vendedorEvolucao, setVendedorEvolucao] = useState<{ nome: string; isTelevendas: boolean } | null>(null);
 
   useEffect(() => {
@@ -295,116 +312,155 @@ export default function ComissaoGestor() {
     }
   }, [usuario, navigate]);
 
+  // ── Dados via React Query ────────────────────────────────────────────────
+  // Cada query fica com o cache do próprio painel (QueryClientProvider em
+  // App.tsx), então sair da tela do Gestor e voltar (ou trocar de aba e
+  // voltar à janela) reaproveita o que já foi buscado em vez de recarregar
+  // tudo do zero — só refaz o fetch em segundo plano se passou do staleTime
+  // (mesmo TTL do Cache-Control já configurado em cada rota no backend).
+
+  const filtrosQuery = useQuery({
+    queryKey: ['comissao', 'gestor', 'filtros'],
+    queryFn: async () => {
+      const r = await api('/filtros', { cache: 'no-store' });
+      return r.json() as Promise<{ setores?: string[]; empresas?: string[] }>;
+    },
+    staleTime: 60_000,
+  });
+  const setores = filtrosQuery.data?.setores ?? [];
+  const empresas = filtrosQuery.data?.empresas ?? [];
+
+  const bonusConfigQuery = useQuery({
+    queryKey: ['comissao', 'gestor', 'bonus-config'],
+    queryFn: async () => {
+      const r = await api('/bonus-config');
+      return r.json() as Promise<BonusConfig>;
+    },
+    staleTime: 60_000,
+  });
+  const bonusConfig = bonusConfigQuery.data ?? null;
   useEffect(() => {
-    api('/filtros', { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((d) => {
-        setSetores(d.setores || []);
-        setEmpresas(d.empresas || []);
-      });
-    api('/bonus-config')
-      .then((r) => r.json())
-      .then(setBonusConfig)
-      .catch((err) => {
-        console.error('[gestor] bonus-config:', err);
-        toast.warning('O bônus global ainda não carregou. Tentando novamente em breve.');
-      });
-  }, []);
+    if (bonusConfigQuery.isError) {
+      console.error('[gestor] bonus-config:', bonusConfigQuery.error);
+      toast.warning('O bônus global ainda não carregou. Tentando novamente em breve.');
+    }
+  }, [bonusConfigQuery.isError, bonusConfigQuery.error]);
 
+  const metasQuery = useQuery({
+    queryKey: ['comissao', 'gestor', 'metas', ano, mes],
+    queryFn: async () => {
+      const url = mes ? `/metas-mensais?ano=${ano}&mes=${mes}` : '/metas';
+      const r = await api(url);
+      return r.json() as Promise<MetaVendedor[]>;
+    },
+    staleTime: 60_000,
+  });
+  const metasMap = useMemo(() => {
+    const map: Record<string, MetaVendedor> = {};
+    (metasQuery.data ?? []).forEach((m) => { map[m.nome_vendedor] = m; });
+    return map;
+  }, [metasQuery.data]);
   useEffect(() => {
-    const url = mes
-      ? `/metas-mensais?ano=${ano}&mes=${mes}`
-      : '/metas';
-    api(url)
-      .then((r) => r.json())
-      .then((list: MetaVendedor[]) => {
-        const map: Record<string, MetaVendedor> = {};
-        list.forEach((m) => { map[m.nome_vendedor] = m; });
-        setMetasMap(map);
-      })
-      .catch((err) => {
-        console.error('[gestor] metas:', err);
-        toast.warning('As metas ainda não carregaram. Os valores exibidos podem estar desatualizados — tentando novamente em breve.');
-      });
-  }, [ano, mes]);
+    if (metasQuery.isError) {
+      console.error('[gestor] metas:', metasQuery.error);
+      toast.warning('As metas ainda não carregaram. Os valores exibidos podem estar desatualizados — tentando novamente em breve.');
+    }
+  }, [metasQuery.isError, metasQuery.error]);
 
+  // Ferragens e Distribuidores não têm meta "do ano" — sempre usam a config do
+  // mês (atual, se a visão for o ano inteiro), igual ao comportamento anterior.
+  const mesFetch = mes || new Date().getMonth() + 1;
+
+  const ferrConfigQuery = useQuery({
+    queryKey: ['comissao', 'gestor', 'ferragens-config', ano, mesFetch],
+    queryFn: async () => {
+      const r = await api(`/ferragens/config?ano=${ano}&mes=${mesFetch}`, { cache: 'no-store' });
+      if (!r.ok) throw new Error(String(r.status));
+      return r.json() as Promise<{ metas: FerrVendedorMeta[]; bonus: FerrVendedorBonus[]; metaGrupo: FerrMetaGrupoConfig | null }>;
+    },
+    staleTime: 60_000,
+  });
+  const ferrMetasMap = useMemo(() => {
+    const mm: Record<string, FerrVendedorMeta> = {};
+    (ferrConfigQuery.data?.metas ?? []).forEach((m) => { mm[m.nome_vendedor] = m; });
+    return mm;
+  }, [ferrConfigQuery.data]);
+  const ferrBonusMap = useMemo(() => {
+    const bm: Record<string, FerrVendedorBonus> = {};
+    (ferrConfigQuery.data?.bonus ?? []).forEach((b) => { bm[b.nome_vendedor] = b; });
+    return bm;
+  }, [ferrConfigQuery.data]);
+  const ferrMetaGrupo = ferrConfigQuery.data?.metaGrupo ?? null;
+  const ferrCarregado = !ferrConfigQuery.isPending;
   useEffect(() => {
-    setFerrCarregado(false);
-    const mesFetch = mes || new Date().getMonth() + 1;
-    api(`/ferragens/config?ano=${ano}&mes=${mesFetch}`, { cache: 'no-store' })
-      .then(r => r.ok ? r.json() : Promise.reject(r.status))
-      .then(({ metas, bonus, metaGrupo }) => {
-        const mm: Record<string, FerrVendedorMeta> = {};
-        (metas as FerrVendedorMeta[]).forEach(m => { mm[m.nome_vendedor] = m; });
-        setFerrMetasMap(mm);
-        const bm: Record<string, FerrVendedorBonus> = {};
-        (bonus as FerrVendedorBonus[]).forEach(b => { bm[b.nome_vendedor] = b; });
-        setFerrBonusMap(bm);
-        setFerrMetaGrupo((metaGrupo as FerrMetaGrupoConfig) ?? null);
-        setFerrCarregado(true);
-      })
-      .catch(err => {
-        console.error('[gestor] ferragens/config:', err);
-        toast.warning('Os dados de Ferragens ainda não carregaram. Tentando novamente em breve.');
-        setFerrCarregado(true);
-      });
-  }, [ano, mes]);
+    if (ferrConfigQuery.isError) {
+      console.error('[gestor] ferragens/config:', ferrConfigQuery.error);
+      toast.warning('Os dados de Ferragens ainda não carregaram. Tentando novamente em breve.');
+    }
+  }, [ferrConfigQuery.isError, ferrConfigQuery.error]);
 
+  const distConfigQuery = useQuery({
+    queryKey: ['comissao', 'gestor', 'distribuidores-config', ano, mesFetch],
+    queryFn: async () => {
+      const r = await api(`/distribuidores/config?ano=${ano}&mes=${mesFetch}`, { cache: 'no-store' });
+      if (!r.ok) throw new Error(String(r.status));
+      return r.json() as Promise<{ metas: DistVendedorMeta[]; bonus: DistVendedorBonus[] }>;
+    },
+    staleTime: 60_000,
+  });
+  const distMetasMap = useMemo(() => {
+    const mm: Record<string, DistVendedorMeta> = {};
+    (distConfigQuery.data?.metas ?? []).forEach((m) => { mm[m.nome_vendedor] = m; });
+    return mm;
+  }, [distConfigQuery.data]);
+  const distBonusMap = useMemo(() => {
+    const bm: Record<string, DistVendedorBonus> = {};
+    (distConfigQuery.data?.bonus ?? []).forEach((b) => { bm[b.nome_vendedor] = b; });
+    return bm;
+  }, [distConfigQuery.data]);
+  const distCarregado = !distConfigQuery.isPending;
   useEffect(() => {
-    setDistCarregado(false);
-    const mesFetch = mes || new Date().getMonth() + 1;
-    api(`/distribuidores/config?ano=${ano}&mes=${mesFetch}`, { cache: 'no-store' })
-      .then(r => r.ok ? r.json() : Promise.reject(r.status))
-      .then(({ metas, bonus }) => {
-        const mm: Record<string, DistVendedorMeta> = {};
-        (metas as DistVendedorMeta[]).forEach(m => { mm[m.nome_vendedor] = m; });
-        setDistMetasMap(mm);
-        const bm: Record<string, DistVendedorBonus> = {};
-        (bonus as DistVendedorBonus[]).forEach(b => { bm[b.nome_vendedor] = b; });
-        setDistBonusMap(bm);
-        setDistCarregado(true);
-      })
-      .catch(err => {
-        console.error('[gestor] distribuidores/config:', err);
-        toast.warning('Os dados de Distribuidores ainda não carregaram. Tentando novamente em breve.');
-        setDistCarregado(true);
-      });
-  }, [ano, mes]);
+    if (distConfigQuery.isError) {
+      console.error('[gestor] distribuidores/config:', distConfigQuery.error);
+      toast.warning('Os dados de Distribuidores ainda não carregaram. Tentando novamente em breve.');
+    }
+  }, [distConfigQuery.isError, distConfigQuery.error]);
 
-  const carregarVendedores = () => {
-    setLoading(true);
-    const params = new URLSearchParams({ ano: ano.toString() });
-    if (mes) params.set('mes', mes.toString());
-    if (filtroSetor) params.set('setor', filtroSetor);
-    if (filtroEmpresa) params.set('empresa', filtroEmpresa);
-
-    api(`/vendedores?${params}`, { cache: 'no-store' })
-      .then((r) => r.json())
-      .then(setVendedores)
-      .catch((err) => {
-        console.error(err);
-        toast.warning('A lista de vendedores ainda não atualizou. Tentando novamente em breve.');
-      })
-      .finally(() => setLoading(false));
-  };
-
+  const vendedoresQuery = useQuery({
+    queryKey: ['comissao', 'gestor', 'vendedores', ano, mes, filtroSetor, filtroEmpresa],
+    queryFn: async () => {
+      const params = new URLSearchParams({ ano: ano.toString() });
+      if (mes) params.set('mes', mes.toString());
+      if (filtroSetor) params.set('setor', filtroSetor);
+      if (filtroEmpresa) params.set('empresa', filtroEmpresa);
+      const r = await api(`/vendedores?${params}`, { cache: 'no-store' });
+      return r.json() as Promise<ResumoVendedor[]>;
+    },
+    staleTime: 30_000, // igual ao Cache-Control (max-age=30) do backend
+  });
+  const vendedores = useMemo(() => vendedoresQuery.data ?? [], [vendedoresQuery.data]);
+  const loading = vendedoresQuery.isLoading;
   useEffect(() => {
-    carregarVendedores();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ano, mes, filtroSetor, filtroEmpresa]);
+    if (vendedoresQuery.isError) {
+      console.error(vendedoresQuery.error);
+      toast.warning('A lista de vendedores ainda não atualizou. Tentando novamente em breve.');
+    }
+  }, [vendedoresQuery.isError, vendedoresQuery.error]);
 
-  // Revalidação: ao voltar pra essa aba (ex: depois de mexer em Vínculos na Configuração),
-  // busca os dados de novo sem precisar de F5.
+  // Revalidação: ao voltar pra essa aba (ex: depois de mexer em Vínculos na
+  // Configuração), força a busca de novo mesmo que ainda esteja dentro do
+  // staleTime — sem isso o gestor poderia ver a lista de vendedores
+  // desatualizada por até 30s ao voltar de outra aba/janela.
+  const refetchVendedores = vendedoresQuery.refetch;
   useEffect(() => {
-    const revalidar = () => { if (document.visibilityState === 'visible') carregarVendedores(); };
+    const revalidar = () => { if (document.visibilityState === 'visible') refetchVendedores(); };
     window.addEventListener('focus', revalidar);
     document.addEventListener('visibilitychange', revalidar);
     return () => {
       window.removeEventListener('focus', revalidar);
       document.removeEventListener('visibilitychange', revalidar);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ano, mes, filtroSetor, filtroEmpresa]);
+  }, [refetchVendedores]);
 
   // Lógica para vendedores normais (não-Televendas): compara total_vendas vs metas
   const getFaixa = (vendedor: string, totalVendas: number) => {
@@ -585,11 +641,32 @@ export default function ComissaoGestor() {
           batida: realizado >= t.valor,
         }));
 
-      resumos.push({ setor, realizado, tiers });
+      // Meta do Grupo (só Ferragens) — valor único configurado pelo gestor na
+      // Configuração (FerrMetaGrupoConfig), não a soma das metas individuais.
+      // Comparada contra o mesmo "realizado" do setor (total_vendas de Ferragens).
+      let tiersGrupo: MetaTierSetor[] | undefined;
+      if (isFerr && ferrMetaGrupo) {
+        const tiersGrupoDef = [
+          { label: 'Meta 1', valor: Number(ferrMetaGrupo.meta1_valor) || 0 },
+          { label: 'Meta 2', valor: Number(ferrMetaGrupo.meta2_valor) || 0 },
+          { label: 'Meta 3', valor: Number(ferrMetaGrupo.meta3_valor) || 0 },
+          { label: 'Meta Desafio', valor: Number(ferrMetaGrupo.metadesafio_valor) || 0 },
+        ];
+        tiersGrupo = tiersGrupoDef
+          .filter((t) => t.valor > 0)
+          .map((t) => ({
+            label: t.label,
+            meta: t.valor,
+            percentual: (realizado / t.valor) * 100,
+            batida: realizado >= t.valor,
+          }));
+      }
+
+      resumos.push({ setor, realizado, tiers, tiersGrupo });
     });
 
     return resumos.sort((a, b) => a.setor.localeCompare(b.setor));
-  }, [vendedores, metasMap, ferrMetasMap, distMetasMap]);
+  }, [vendedores, metasMap, ferrMetasMap, distMetasMap, ferrMetaGrupo]);
 
   // Projeção do mês — ritmo em dias úteis (seg–sex) decorridos vs total do mês
   const hoje = new Date();
@@ -811,38 +888,42 @@ export default function ComissaoGestor() {
         {metasPorSetor.length > 0 && (
           <div className="rounded-xl p-5 shadow-sm" style={{ background: '#ffffff', border: '1px solid #e2e8f0' }}>
             <h2 className="text-sm font-semibold mb-4" style={{ color: '#00205C' }}>
-              Meta do Setor
+              Meta do Setor <span className="font-normal" style={{ color: '#64748b' }}>(soma da meta individual de cada vendedora do setor)</span>
             </h2>
             <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
               {metasPorSetor.map((ms) => (
-                <div key={ms.setor} className="rounded-lg p-4" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                <div
+                  key={ms.setor}
+                  className="rounded-lg p-4"
+                  style={{
+                    background: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    gridColumn: ms.tiersGrupo && ms.tiersGrupo.length > 0 ? 'span 2' : undefined,
+                  }}
+                >
                   <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: '#00205C' }}>
                     {ms.setor}
                   </p>
                   <p className="text-sm font-bold mt-1 mb-3" style={{ color: '#00205C' }}>
                     Vendido: {formatBRL(ms.realizado)}
                   </p>
-                  {ms.tiers.length === 0 ? (
-                    <p className="text-xs" style={{ color: '#94a3b8' }}>Nenhuma meta cadastrada</p>
-                  ) : (
-                    <div className="space-y-2.5">
-                      {ms.tiers.map((t) => (
-                        <div key={t.label}>
-                          <div className="flex items-center justify-between text-xs mb-1">
-                            <span style={{ color: '#64748b' }}>{t.label}: {formatBRL(t.meta)}</span>
-                            <span className="font-semibold" style={{ color: t.batida ? '#16a34a' : '#64748b' }}>
-                              {t.percentual.toFixed(0)}%{t.batida ? ' ✓' : ''}
-                            </span>
-                          </div>
-                          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: '#e2e8f0' }}>
-                            <div
-                              className="h-full rounded-full"
-                              style={{ width: `${Math.min(t.percentual, 100)}%`, background: t.batida ? '#16a34a' : '#FFD700' }}
-                            />
-                          </div>
-                        </div>
-                      ))}
+                  {ms.tiersGrupo && ms.tiersGrupo.length > 0 ? (
+                    <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                      <div>
+                        <p className="text-xs font-semibold mb-2" style={{ color: '#00205C' }}>
+                          Meta do Setor <span className="font-normal" style={{ color: '#94a3b8' }}>(soma das vendedoras)</span>
+                        </p>
+                        <MetaTierList tiers={ms.tiers} />
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold mb-2" style={{ color: '#00205C' }}>
+                          Meta do Grupo <span className="font-normal" style={{ color: '#94a3b8' }}>(estipulada pelo gestor)</span>
+                        </p>
+                        <MetaTierList tiers={ms.tiersGrupo} />
+                      </div>
                     </div>
+                  ) : (
+                    <MetaTierList tiers={ms.tiers} />
                   )}
                 </div>
               ))}

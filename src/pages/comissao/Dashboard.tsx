@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import AppShell from './layout/AppShell';
 import KPICard from './ui/KPICard';
 import { DashboardSummary } from './_shared/types';
@@ -94,61 +95,68 @@ function ProjecaoCard({
   );
 }
 
+// Marca os erros já "tratados" (mensagem amigável definida abaixo) para diferenciar
+// de uma exceção inesperada (rede caiu, etc.) — só a segunda gera console.error,
+// igual ao comportamento anterior (catch(e) só existia para exceções de verdade).
+class DashboardApiError extends Error {}
+
 export default function ComissaoDashboard() {
   const api = useComissaoApi();
-  const [data, setData] = useState<DashboardSummary | null>(null);
-  const [erro, setErro] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [ano, setAno] = useState(ANO_ATUAL);
   const [mes, setMes] = useState<number | null>(new Date().getMonth() + 1);
 
   const hoje = new Date();
 
-  const fetchData = async () => {
-    setLoading(true);
-    setErro(null);
-    try {
+  // ── Dados via React Query ────────────────────────────────────────────────
+  // Cache do próprio painel (QueryClientProvider em App.tsx): sair da tela do
+  // Dashboard e voltar (ou trocar de aba) reaproveita o que já foi buscado em
+  // vez de recarregar tudo do zero — só refaz o fetch em segundo plano se
+  // passou do staleTime. A rota /dashboard não define Cache-Control, então
+  // usamos o default seguro de 30s.
+  const dashboardQuery = useQuery({
+    queryKey: ['comissao', 'dashboard', 'dashboard', ano, mes],
+    queryFn: async () => {
       const params = new URLSearchParams({ ano: ano.toString() });
       if (mes) params.set('mes', mes.toString());
       const res = await api(`/dashboard?${params}`, { cache: 'no-store' });
       if (!res.ok) {
-        setData(null);
-        setErro(
+        throw new DashboardApiError(
           res.status === 504 || res.status === 524
             ? 'O servidor demorou demais para responder. Tente novamente em alguns instantes.'
             : `Não foi possível carregar os dados (erro ${res.status}).`
         );
-        return;
       }
       const json = await res.json();
       const valido = json && Array.isArray(json.vendas_por_setor) && Array.isArray(json.top_vendedores);
-      setData(valido ? json : null);
-      if (!valido) setErro('Resposta inválida do servidor.');
-    } catch (e) {
-      console.error(e);
-      setData(null);
-      setErro('Falha de comunicação com o servidor.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
+      if (!valido) throw new DashboardApiError('Resposta inválida do servidor.');
+      return json as DashboardSummary;
+    },
+    staleTime: 30_000,
+  });
+  const data = dashboardQuery.data ?? null;
+  const loading = dashboardQuery.isLoading;
+  const erro = dashboardQuery.isError
+    ? (dashboardQuery.error instanceof DashboardApiError
+        ? dashboardQuery.error.message
+        : 'Falha de comunicação com o servidor.')
+    : null;
   useEffect(() => {
-    fetchData();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ano, mes]);
+    if (dashboardQuery.isError && !(dashboardQuery.error instanceof DashboardApiError)) {
+      console.error(dashboardQuery.error);
+    }
+  }, [dashboardQuery.isError, dashboardQuery.error]);
 
   // Revalidação: ao voltar pra essa aba, busca os dados de novo sem precisar de F5.
+  const refetchDashboard = dashboardQuery.refetch;
   useEffect(() => {
-    const revalidar = () => { if (document.visibilityState === 'visible') fetchData(); };
+    const revalidar = () => { if (document.visibilityState === 'visible') refetchDashboard(); };
     window.addEventListener('focus', revalidar);
     document.addEventListener('visibilitychange', revalidar);
     return () => {
       window.removeEventListener('focus', revalidar);
       document.removeEventListener('visibilitychange', revalidar);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ano, mes]);
+  }, [refetchDashboard]);
 
   const SETOR_CORES: Record<string, string> = {
     'DISTRIBUIDORES': '#00205C',
@@ -213,7 +221,7 @@ export default function ComissaoDashboard() {
             </div>
 
             <button
-              onClick={fetchData}
+              onClick={() => refetchDashboard()}
               className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors"
               style={{ background: '#00205C', color: '#FFD700' }}
             >

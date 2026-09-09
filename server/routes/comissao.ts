@@ -159,7 +159,10 @@ async function garantirVendedoresDoBody(
 }
 
 // ─── metas (VendedorMeta) helpers ────────────────────────────────────────────
+let _vendedorMetaTableEnsured = false;
+
 async function ensureVendedorMetaTable() {
+  if (_vendedorMetaTableEnsured) return;
   const pool = await getPool();
   // Cria tabela se não existir
   await pool.request().query(`
@@ -197,10 +200,14 @@ async function ensureVendedorMetaTable() {
       END
     END
   `);
+  _vendedorMetaTableEnsured = true;
 }
 
 // ─── comissao (ComissaoConfig) helpers ───────────────────────────────────────
+let _comissaoConfigTableEnsured = false;
+
 async function ensureComissaoConfigTable() {
+  if (_comissaoConfigTableEnsured) return;
   const pool = await getPool();
   await pool.request().query(`
     IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='ComissaoConfig' AND xtype='U')
@@ -214,6 +221,7 @@ async function ensureComissaoConfigTable() {
       atualizado_em DATETIME DEFAULT GETDATE()
     )
   `);
+  _comissaoConfigTableEnsured = true;
 }
 
 // ─── metas-mensais helpers ───────────────────────────────────────────────────
@@ -909,45 +917,42 @@ router.get("/vendedor/:nome", async (req: any, res: any) => {
 
     const pool = await getPool();
 
-    // Garante coluna PERCENTUAL_SEM_META
-    await pool.request().query(`
-      IF NOT EXISTS (
-        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_NAME = 'TI-PAINELCOMISSAO_METAS' AND COLUMN_NAME = 'PERCENTUAL_SEM_META'
-      )
-      BEGIN ALTER TABLE [TI-PAINELCOMISSAO_METAS] ADD PERCENTUAL_SEM_META FLOAT DEFAULT 0; END
-    `).catch(() => {});
+    // Garante coluna PERCENTUAL_SEM_META (guard em memória — mesma função usada por /metas-mensais)
+    await garantirColunaPSM(pool);
 
-    // Meta mensal (SQL Server — configuração permanece lá)
-    let metaVendedor = { recordset: [] as Array<Record<string, unknown>> };
-    if (mes) {
-      metaVendedor = await pool.request()
-        .input('nomeVend', sql.VarChar, vendedor)
-        .input('anoMeta', sql.Int, ano)
-        .input('mesMeta', sql.VarChar, mes)
-        .query(`SELECT META1_VALOR as meta1_valor, META1_PERCENTUAL as meta1_percentual,
-                       META2_VALOR as meta2_valor, META2_PERCENTUAL as meta2_percentual,
-                       META3_VALOR as meta3_valor, META3_PERCENTUAL as meta3_percentual,
-                       ISNULL(PERCENTUAL_SEM_META,0) as percentual_sem_meta
-                FROM [TI-PAINELCOMISSAO_METAS]
-                WHERE VENDEDOR=@nomeVend AND ANO=@anoMeta AND MES=@mesMeta`)
-        .catch(() => ({ recordset: [] as Array<Record<string, unknown>> }));
-    }
+    // Meta mensal e bônus — 2 queries independentes entre si, buscadas em
+    // paralelo (cada uma preserva seu próprio fallback/catch, igual ao que
+    // faziam antes em sequência).
+    const [metaVendedor, bonusResult] = await Promise.all([
+      mes
+        ? pool.request()
+            .input('nomeVend', sql.VarChar, vendedor)
+            .input('anoMeta', sql.Int, ano)
+            .input('mesMeta', sql.VarChar, mes)
+            .query(`SELECT META1_VALOR as meta1_valor, META1_PERCENTUAL as meta1_percentual,
+                           META2_VALOR as meta2_valor, META2_PERCENTUAL as meta2_percentual,
+                           META3_VALOR as meta3_valor, META3_PERCENTUAL as meta3_percentual,
+                           ISNULL(PERCENTUAL_SEM_META,0) as percentual_sem_meta
+                    FROM [TI-PAINELCOMISSAO_METAS]
+                    WHERE VENDEDOR=@nomeVend AND ANO=@anoMeta AND MES=@mesMeta`)
+            .catch(() => ({ recordset: [] as Array<Record<string, unknown>> }))
+        : Promise.resolve({ recordset: [] as Array<Record<string, unknown>> }),
+      is_televendas
+        ? pool.request()
+            .query(`SELECT TOP 1
+                      BONUS1_VALOR as bonus1_valor, BONUS1_PERCENTUAL as bonus1_percentual,
+                      BONUS2_VALOR as bonus2_valor, BONUS2_PERCENTUAL as bonus2_percentual,
+                      BONUS3_VALOR as bonus3_valor, BONUS3_PERCENTUAL as bonus3_percentual,
+                      BONUS4_VALOR as bonus4_valor, BONUS4_PERCENTUAL as bonus4_percentual,
+                      BONUS5_VALOR as bonus5_valor, BONUS5_PERCENTUAL as bonus5_percentual
+                    FROM [TI-PAINELCOMISSAO_BONUS_CONFIG]`)
+            .catch(() => ({ recordset: [] as Array<Record<string, unknown>> }))
+        : Promise.resolve({ recordset: [] as Array<Record<string, unknown>> }),
+    ]);
 
-    // Bônus (SQL Server)
-    let bonusConfig: BonusConfig | null = null;
-    if (is_televendas) {
-      const bonusResult = await pool.request()
-        .query(`SELECT TOP 1
-                  BONUS1_VALOR as bonus1_valor, BONUS1_PERCENTUAL as bonus1_percentual,
-                  BONUS2_VALOR as bonus2_valor, BONUS2_PERCENTUAL as bonus2_percentual,
-                  BONUS3_VALOR as bonus3_valor, BONUS3_PERCENTUAL as bonus3_percentual,
-                  BONUS4_VALOR as bonus4_valor, BONUS4_PERCENTUAL as bonus4_percentual,
-                  BONUS5_VALOR as bonus5_valor, BONUS5_PERCENTUAL as bonus5_percentual
-                FROM [TI-PAINELCOMISSAO_BONUS_CONFIG]`)
-        .catch(() => ({ recordset: [] as Array<Record<string, unknown>> }));
-      if (bonusResult.recordset.length) bonusConfig = bonusResult.recordset[0] as unknown as BonusConfig;
-    }
+    const bonusConfig: BonusConfig | null = bonusResult.recordset.length
+      ? bonusResult.recordset[0] as unknown as BonusConfig
+      : null;
 
     // Recebimentos do vendedor no período
     let total_recebido = 0;

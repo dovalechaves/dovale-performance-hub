@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import AppShell from './layout/AppShell';
 import KPICard from './ui/KPICard';
@@ -73,7 +74,6 @@ const CORES_FAIXA = [
 export default function ComissaoVendedor() {
   const usuario = useUser();
   const api = useComissaoApi();
-  const [vendedores, setVendedores] = useState<string[]>([]);
   const [vendedorSel, setVendedorSel] = useState('');
   const [busca, setBusca] = useState('');
   const [aberto, setAberto] = useState(false);
@@ -103,66 +103,99 @@ export default function ComissaoVendedor() {
       return next;
     }, { replace: true });
   };
-  const [data, setData] = useState<VendedorData | null>(null);
-  const [comissoes, setComissoes] = useState<ComissaoConfig[]>([]);
-  const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  // ── Dados via React Query ────────────────────────────────────────────────
+  // Cache do próprio painel (QueryClientProvider em App.tsx): sair da tela do
+  // Vendedor e voltar reaproveita a lista de vendedores/config de setor já
+  // buscada em vez de recarregar do zero — só refaz o fetch em segundo plano
+  // se passou do staleTime (mesmo TTL do Cache-Control já configurado nas
+  // rotas /filtros e /config-setor no backend).
+  const filtrosQuery = useQuery({
+    queryKey: ['comissao', 'vendedor', 'filtros'],
+    queryFn: async () => {
+      const r = await api('/filtros', { cache: 'no-store' });
+      return r.json() as Promise<{ vendedores?: string[] }>;
+    },
+    staleTime: 60_000,
+  });
+  const vendedores = useMemo(() => filtrosQuery.data?.vendedores ?? [], [filtrosQuery.data]);
+
+  // Seleciona o primeiro vendedor da lista automaticamente (ou mantém a seleção
+  // atual se ela ainda existir na lista) — igual ao que carregarVendedores fazia
+  // toda vez que a lista chegava (fetch inicial ou revalidação por foco).
+  useEffect(() => {
+    if (!filtrosQuery.data) return;
+    const lista = filtrosQuery.data.vendedores ?? [];
+    setVendedorSel((atual) => {
+      if (atual && lista.includes(atual)) return atual;
+      const primeiro = lista[0] ?? '';
+      setBusca(primeiro);
+      return primeiro;
+    });
+  }, [filtrosQuery.data]);
+
   const isVendedor = usuario && usuario !== 'loading' && usuario.cargo === 'VENDEDOR' && vendedores.length <= 1;
 
-  const carregarVendedores = useCallback(() => {
-    api('/filtros', { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((d) => {
-        const lista: string[] = d.vendedores || [];
-        setVendedores(lista);
-        setVendedorSel((atual) => {
-          if (atual && lista.includes(atual)) return atual;
-          const primeiro = lista[0] ?? '';
-          setBusca(primeiro);
-          return primeiro;
-        });
-      });
-  }, [api]);
-
+  const configSetorQuery = useQuery({
+    queryKey: ['comissao', 'vendedor', 'config-setor'],
+    queryFn: async () => {
+      const r = await api('/config-setor');
+      return r.json() as Promise<ComissaoConfig[]>;
+    },
+    staleTime: 60_000,
+  });
+  const comissoes = configSetorQuery.data ?? [];
   useEffect(() => {
-    carregarVendedores();
-    api('/config-setor')
-      .then((r) => r.json())
-      .then(setComissoes)
-      .catch((err) => {
-        console.error('[vendedor] config-setor:', err);
-        toast.warning('A configuração do setor ainda não carregou. Tentando novamente em breve.');
-      });
-  }, [api, carregarVendedores]);
+    if (configSetorQuery.isError) {
+      console.error('[vendedor] config-setor:', configSetorQuery.error);
+      toast.warning('A configuração do setor ainda não carregou. Tentando novamente em breve.');
+    }
+  }, [configSetorQuery.isError, configSetorQuery.error]);
 
   // Revalidação: ao voltar pra essa aba (ex: depois de mexer em Vínculos na Configuração),
   // busca a lista de vendedores de novo sem precisar de F5.
+  const refetchFiltros = filtrosQuery.refetch;
   useEffect(() => {
-    const revalidar = () => { if (document.visibilityState === 'visible') carregarVendedores(); };
+    const revalidar = () => { if (document.visibilityState === 'visible') refetchFiltros(); };
     window.addEventListener('focus', revalidar);
     document.addEventListener('visibilitychange', revalidar);
     return () => {
       window.removeEventListener('focus', revalidar);
       document.removeEventListener('visibilitychange', revalidar);
     };
-  }, [carregarVendedores]);
+  }, [refetchFiltros]);
 
+  // ── Comissão do próprio vendedor: NUNCA pode ser servida do cache ────────
+  // Decisão deliberada (commit 993e654): essa tela é a única fonte "ao vivo"
+  // de comissão que o vendedor vê, então staleTime 0 + gcTime 0 garantem que
+  // toda vez que a página monta (ou vendedorSel/ano/mes muda) o cache dessa
+  // combinação é descartado e um fetch novo é sempre disparado — nunca mostra
+  // um valor antigo (nem que seja de segundos atrás) antes do fresco chegar.
+  const vendedorDataQuery = useQuery({
+    queryKey: ['comissao', 'vendedor', 'dados', vendedorSel, ano, mes],
+    queryFn: async () => {
+      const params = new URLSearchParams({ ano: ano.toString() });
+      if (mes) params.set('mes', mes.toString());
+      const r = await api(`/vendedor/${encodeURIComponent(vendedorSel)}?${params}`, { cache: 'no-store' });
+      return r.json() as Promise<VendedorData>;
+    },
+    enabled: !!vendedorSel,
+    staleTime: 0,
+    gcTime: 0,
+  });
+  const data = vendedorDataQuery.data ?? null;
+  // isFetching (não isLoading): precisa refletir TODO fetch em andamento, incluindo
+  // revalidação em segundo plano, pra nunca exibir um número desatualizado enquanto
+  // o valor fresco ainda não chegou (mesma razão do staleTime/gcTime 0 acima).
+  const loading = vendedorDataQuery.isFetching;
   useEffect(() => {
-    if (!vendedorSel) return;
-    setLoading(true);
-    const params = new URLSearchParams({ ano: ano.toString() });
-    if (mes) params.set('mes', mes.toString());
-    api(`/vendedor/${encodeURIComponent(vendedorSel)}?${params}`, { cache: 'no-store' })
-      .then((r) => r.json())
-      .then(setData)
-      .catch((err) => {
-        console.error(err);
-        toast.warning('Os dados desse vendedor ainda não carregaram. Os valores exibidos podem estar desatualizados — tentando novamente em breve.');
-      })
-      .finally(() => setLoading(false));
-  }, [api, vendedorSel, ano, mes]);
+    if (vendedorDataQuery.isError) {
+      console.error(vendedorDataQuery.error);
+      toast.warning('Os dados desse vendedor ainda não carregaram. Os valores exibidos podem estar desatualizados — tentando novamente em breve.');
+    }
+  }, [vendedorDataQuery.isError, vendedorDataQuery.error]);
 
   // Fecha dropdown ao clicar fora
   useEffect(() => {

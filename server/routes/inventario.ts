@@ -191,12 +191,17 @@ async function lookupProduto(loja: unknown, codigo: string): Promise<{ descricao
   try {
     const localEstoque = localEstoqueDaLoja(loja, 0);
     const filial = filialDaLoja(loja);
+    // PRODUTOS_SALDOS.PRS_SALDO = saldo físico bruto (o que deveria estar na prateleira).
+    // Usamos esse valor pra "Qtd Sistema", não o "disponível" do CONSULTA_ESTOQUE (que
+    // desconta reserva de pedido em aberto) — pra contagem física, o saldo bruto é o
+    // número certo pra comparar. É também MUITO mais rápido que o CONSULTA_ESTOQUE.
     const rows = await queryFb<FbProduto>(loja,
       `SELECT p.PRO_CODIGO, p.PRO_RESUMO,
               c.PCF_CUSTO_FISCAL,
-              (SELECT disponivel FROM CONSULTA_ESTOQUE(p.PRO_CODIGO, ${filial}, ${localEstoque}, 0, CAST('NOW' AS DATE))) AS SALDO_ATUAL
+              s.PRS_SALDO AS SALDO_ATUAL
        FROM PRODUTOS p
        LEFT JOIN PRODUTOS_CFG_FILIAL c ON c.PCF_PRO_CODIGO = p.PRO_CODIGO AND c.PCF_FIL_CODIGO = '${filial}'
+       LEFT JOIN PRODUTOS_SALDOS s ON s.PRS_PRO_CODIGO = p.PRO_CODIGO AND s.PRS_FIL_CODIGO = '${filial}' AND s.PRS_PLE_CODIGO = '${localEstoque}'
        WHERE p.PRO_CODIGO = ?`,
       [Number(codigo)]
     );
@@ -224,14 +229,18 @@ async function fetchProdutosComSaldo(loja: unknown): Promise<FbProdutoBulk[]> {
   try {
     const localEstoque = localEstoqueDaLoja(loja, 0);
     const filial = filialDaLoja(loja);
+    // Join direto em PRODUTOS_SALDOS (saldo físico já calculado) em vez de chamar
+    // CONSULTA_ESTOQUE por produto — mesma base de ~30 mil produtos que levava horas
+    // via procedure volta em menos de 1s como JOIN. Restringe a Produto Acabado (PA)
+    // e Produto Revenda (PR), que é o universo que faz sentido pra inventário físico.
     const rows = await queryFb<FbProdutoBulk>(loja,
-      `SELECT * FROM (
-         SELECT p.PRO_CODIGO, p.PRO_RESUMO,
-                c.PCF_CUSTO_FISCAL,
-                (SELECT disponivel FROM CONSULTA_ESTOQUE(p.PRO_CODIGO, ${filial}, ${localEstoque}, 0, CAST('NOW' AS DATE))) AS SALDO_ATUAL
-           FROM PRODUTOS p
-           LEFT JOIN PRODUTOS_CFG_FILIAL c ON c.PCF_PRO_CODIGO = p.PRO_CODIGO AND c.PCF_FIL_CODIGO = '${filial}'
-       ) WHERE SALDO_ATUAL > 0`
+      `SELECT p.PRO_CODIGO, p.PRO_RESUMO,
+              c.PCF_CUSTO_FISCAL,
+              s.PRS_SALDO AS SALDO_ATUAL
+         FROM PRODUTOS p
+         INNER JOIN PRODUTOS_SALDOS s ON s.PRS_PRO_CODIGO = p.PRO_CODIGO AND s.PRS_FIL_CODIGO = '${filial}' AND s.PRS_PLE_CODIGO = '${localEstoque}'
+         LEFT JOIN PRODUTOS_CFG_FILIAL c ON c.PCF_PRO_CODIGO = p.PRO_CODIGO AND c.PCF_FIL_CODIGO = '${filial}'
+        WHERE p.PRO_TIPO IN ('PA', 'PR') AND s.PRS_SALDO > 0`
     );
     return rows;
   } catch (err) {
@@ -240,45 +249,20 @@ async function fetchProdutosComSaldo(loja: unknown): Promise<FbProdutoBulk[]> {
   }
 }
 
-// ── Importação em background para catálogos grandes ─────────────────────────
-// CONSULTA_ESTOQUE pode custar centenas de ms por chamada no Firebird — rodar pro
-// catálogo inteiro de uma vez trava a requisição por horas (medido em SJC: ~31 mil
-// produtos, ~300-600ms/chamada). Por segurança, toda loja com split Indústria/Ecommerce
-// roda em segundo plano (o custo real por chamada não foi medido nas outras bases),
-// em lotes, com progresso gravado na própria sessão e emitido via socket.
+// ── Importação em background ─────────────────────────────────────────────────
+// fetchProdutosComSaldo (via PRODUTOS_SALDOS) volta em menos de 1s pra qualquer
+// loja, mas ainda assim toda loja com split Indústria/Ecommerce importa em segundo
+// plano — a sessão fica disponível na hora e o gargalo real agora é gravar os
+// itens no SQL Server (um INSERT por item + por local), que roda em lotes com
+// progresso emitido via socket.
 const IMPORT_ASSINCRONO = new Set(Object.keys(INVENTARIO_LOJA_CONEXAO));
 const IMPORT_BATCH_SIZE = 200;
-
-async function fetchTodosCodigosProduto(loja: unknown): Promise<number[]> {
-  // Restringe ao universo de Produto Acabado (PA) e Produto Revenda (PR) — reduz
-  // bastante o total de produtos verificados antes de chamar CONSULTA_ESTOQUE
-  // (em SJC, de ~31 mil pra ~10 mil).
-  const rows = await queryFb<{ PRO_CODIGO: number }>(loja,
-    `SELECT PRO_CODIGO FROM PRODUTOS WHERE PRO_TIPO IN ('PA', 'PR') ORDER BY PRO_CODIGO`
-  );
-  return rows.map((r) => Number(r.PRO_CODIGO));
-}
-
-async function fetchProdutosComSaldoLote(loja: unknown, codigos: number[]): Promise<FbProdutoBulk[]> {
-  const localEstoque = localEstoqueDaLoja(loja, 0);
-  const filial = filialDaLoja(loja);
-  return queryFb<FbProdutoBulk>(loja,
-    `SELECT * FROM (
-       SELECT p.PRO_CODIGO, p.PRO_RESUMO,
-              c.PCF_CUSTO_FISCAL,
-              (SELECT disponivel FROM CONSULTA_ESTOQUE(p.PRO_CODIGO, ${filial}, ${localEstoque}, 0, CAST('NOW' AS DATE))) AS SALDO_ATUAL
-         FROM PRODUTOS p
-         LEFT JOIN PRODUTOS_CFG_FILIAL c ON c.PCF_PRO_CODIGO = p.PRO_CODIGO AND c.PCF_FIL_CODIGO = '${filial}'
-        WHERE p.PRO_CODIGO IN (${codigos.join(",")})
-     ) WHERE SALDO_ATUAL > 0`
-  );
-}
 
 async function importarProdutosEmBackground(sessaoId: number, loja: unknown, locais: { id: number }[], usuario: string) {
   const pool = await getPool();
   try {
-    const codigos = await fetchTodosCodigosProduto(loja);
-    const total = codigos.length;
+    const produtos = await fetchProdutosComSaldo(loja);
+    const total = produtos.length;
     await pool.request()
       .input("id", sql.Int, sessaoId)
       .input("total", sql.Int, total)
@@ -287,11 +271,10 @@ async function importarProdutosEmBackground(sessaoId: number, loja: unknown, loc
     let processados = 0;
     let importados = 0;
 
-    for (let i = 0; i < codigos.length; i += IMPORT_BATCH_SIZE) {
-      const lote = codigos.slice(i, i + IMPORT_BATCH_SIZE);
-      const produtos = await fetchProdutosComSaldoLote(loja, lote);
+    for (let i = 0; i < produtos.length; i += IMPORT_BATCH_SIZE) {
+      const lote = produtos.slice(i, i + IMPORT_BATCH_SIZE);
 
-      for (const prod of produtos) {
+      for (const prod of lote) {
         const codigo = String(prod.PRO_CODIGO);
         const descricao = prod.PRO_RESUMO ?? null;
         const qtdSistema = Number(prod.SALDO_ATUAL ?? 0);

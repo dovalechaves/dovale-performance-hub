@@ -92,32 +92,48 @@ export function setInventarioIO(socketIO: SocketServer) { io = socketIO; }
 
 type FirebirdLoja = (typeof firebirdLojas)[number];
 
-const INVENTARIO_LOJA_LABELS: Record<string, string> = {
-  bh: "Belo Horizonte",
-  l2: "Santana",
-  l3: "Rio de Janeiro",
-  fast: "Fast",
-  campinas: "Campinas",
-  riopreto: "Rio Preto",
-  mg: "Minas Gerais",
-  fortaleza: "Fortaleza",
-  uberlandia: "Uberlandia",
-  goiania: "Goiania",
-  bosque: "Bosque",
-};
+// Config por loja: filial correta pro CONSULTA_ESTOQUE/PRODUTOS_CFG_FILIAL (antes fixo
+// em "1" pra todas \u2014 errado pra quem n\u00e3o \u00e9 filial 1) e, quando existe, o c\u00f3digo do
+// local de estoque "Ecommerce" (PRODUTOS_LOCAIS_ESTOQUE.PLE_CODIGO) \u2014 levantado ao vivo
+// em cada base em 2026-09. Lojas sem ecommercePle n\u00e3o separam a sess\u00e3o (n\u00e3o t\u00eam esse
+// local de estoque cadastrado); Almoxarifado \u00e9 sempre PLE_CODIGO 1 em todas.
+interface LojaInventarioConfig {
+  key: FirebirdLoja;
+  label: string;
+  filial: number;
+  ecommercePle?: number;
+}
 
-// SJC tem um \u00fanico Firebird para ind\u00fastria + ecommerce. O invent\u00e1rio precisa contar
-// os dois locais de estoque separadamente, ent\u00e3o viram duas "lojas" virtuais aqui,
-// ambas resolvidas para a conex\u00e3o Firebird "sjc" \u2014 ver CONSULTA_ESTOQUE(produto, filial, LOCAL_ESTOQUE, ...).
-const INVENTARIO_LOJA_CONEXAO: Record<string, FirebirdLoja> = {
-  sjc_industria: "sjc" as FirebirdLoja,
-  sjc_ecommerce: "sjc" as FirebirdLoja,
-};
+const LOJAS_INVENTARIO_CONFIG: LojaInventarioConfig[] = [
+  { key: "bh" as FirebirdLoja,         label: "Belo Horizonte", filial: 2 },
+  { key: "l2" as FirebirdLoja,         label: "Santana",        filial: 1, ecommercePle: 2 },
+  { key: "l3" as FirebirdLoja,         label: "Rio de Janeiro", filial: 9, ecommercePle: 3 },
+  { key: "fast" as FirebirdLoja,       label: "Fast",           filial: 12, ecommercePle: 2 },
+  { key: "campinas" as FirebirdLoja,   label: "Campinas",       filial: 1 },
+  { key: "riopreto" as FirebirdLoja,   label: "Rio Preto",      filial: 1 },
+  { key: "sjc" as FirebirdLoja,        label: "SJC",            filial: 1, ecommercePle: 2 },
+  { key: "mg" as FirebirdLoja,         label: "Minas Gerais",   filial: 7 },
+  { key: "fortaleza" as FirebirdLoja,  label: "Fortaleza",      filial: 1 },
+  { key: "uberlandia" as FirebirdLoja, label: "Uberlandia",     filial: 12 },
+  { key: "goiania" as FirebirdLoja,    label: "Goiania",        filial: 1, ecommercePle: 2 },
+  { key: "bosque" as FirebirdLoja,     label: "Bosque",         filial: 1, ecommercePle: 2 },
+];
 
-const INVENTARIO_LOJA_LOCAL_ESTOQUE: Record<string, number> = {
-  sjc_industria: 1, // Almoxarifado
-  sjc_ecommerce: 2, // Ecommerce
-};
+// Chave virtual (ex: "sjc_industria") \u2192 conex\u00e3o Firebird real ("sjc"). Toda loja com
+// ecommercePle vira duas lojas "virtuais" na tela (Ind\u00fastria/Ecommerce); as demais
+// continuam com a chave original, sem split.
+const INVENTARIO_LOJA_CONEXAO: Record<string, FirebirdLoja> = {};
+const INVENTARIO_LOJA_LOCAL_ESTOQUE: Record<string, number> = {};
+const INVENTARIO_LOJA_FILIAL: Record<string, number> = {};
+for (const cfg of LOJAS_INVENTARIO_CONFIG) {
+  INVENTARIO_LOJA_FILIAL[cfg.key] = cfg.filial;
+  if (cfg.ecommercePle != null) {
+    INVENTARIO_LOJA_CONEXAO[`${cfg.key}_industria`] = cfg.key;
+    INVENTARIO_LOJA_CONEXAO[`${cfg.key}_ecommerce`] = cfg.key;
+    INVENTARIO_LOJA_LOCAL_ESTOQUE[`${cfg.key}_industria`] = 1;
+    INVENTARIO_LOJA_LOCAL_ESTOQUE[`${cfg.key}_ecommerce`] = cfg.ecommercePle;
+  }
+}
 
 function localEstoqueDaLoja(raw: unknown, padrao: number): number {
   const value = String(raw ?? "").trim().toLowerCase();
@@ -136,6 +152,12 @@ function normalizeLoja(raw: unknown): FirebirdLoja {
   if (legacy === "fortaleza") return "fortaleza" as FirebirdLoja;
 
   throw new Error(`Loja de inventario invalida: ${String(raw ?? "")}`);
+}
+
+// Filial correta pra essa loja (virtual ou real) \u2014 resolve pra conex\u00e3o f\u00edsica primeiro.
+function filialDaLoja(raw: unknown): number {
+  const conexao = normalizeLoja(raw);
+  return INVENTARIO_LOJA_FILIAL[conexao] ?? 1;
 }
 
 function queryFb<T = Record<string, unknown>>(loja: unknown, sqlStr: string, params: unknown[] = []): Promise<T[]> {
@@ -168,12 +190,13 @@ async function checkPedidosAbertos(loja: unknown): Promise<number> {
 async function lookupProduto(loja: unknown, codigo: string): Promise<{ descricao: string | null; qtd_sistema: number; custo_fiscal: number | null } | null> {
   try {
     const localEstoque = localEstoqueDaLoja(loja, 0);
+    const filial = filialDaLoja(loja);
     const rows = await queryFb<FbProduto>(loja,
       `SELECT p.PRO_CODIGO, p.PRO_RESUMO,
               c.PCF_CUSTO_FISCAL,
-              (SELECT disponivel FROM CONSULTA_ESTOQUE(p.PRO_CODIGO, 1, ${localEstoque}, 0, CAST('NOW' AS DATE))) AS SALDO_ATUAL
+              (SELECT disponivel FROM CONSULTA_ESTOQUE(p.PRO_CODIGO, ${filial}, ${localEstoque}, 0, CAST('NOW' AS DATE))) AS SALDO_ATUAL
        FROM PRODUTOS p
-       LEFT JOIN PRODUTOS_CFG_FILIAL c ON c.PCF_PRO_CODIGO = p.PRO_CODIGO AND c.PCF_FIL_CODIGO = '1'
+       LEFT JOIN PRODUTOS_CFG_FILIAL c ON c.PCF_PRO_CODIGO = p.PRO_CODIGO AND c.PCF_FIL_CODIGO = '${filial}'
        WHERE p.PRO_CODIGO = ?`,
       [Number(codigo)]
     );
@@ -200,13 +223,14 @@ interface FbProdutoBulk {
 async function fetchProdutosComSaldo(loja: unknown): Promise<FbProdutoBulk[]> {
   try {
     const localEstoque = localEstoqueDaLoja(loja, 0);
+    const filial = filialDaLoja(loja);
     const rows = await queryFb<FbProdutoBulk>(loja,
       `SELECT * FROM (
          SELECT p.PRO_CODIGO, p.PRO_RESUMO,
                 c.PCF_CUSTO_FISCAL,
-                (SELECT disponivel FROM CONSULTA_ESTOQUE(p.PRO_CODIGO, 1, ${localEstoque}, 0, CAST('NOW' AS DATE))) AS SALDO_ATUAL
+                (SELECT disponivel FROM CONSULTA_ESTOQUE(p.PRO_CODIGO, ${filial}, ${localEstoque}, 0, CAST('NOW' AS DATE))) AS SALDO_ATUAL
            FROM PRODUTOS p
-           LEFT JOIN PRODUTOS_CFG_FILIAL c ON c.PCF_PRO_CODIGO = p.PRO_CODIGO AND c.PCF_FIL_CODIGO = '1'
+           LEFT JOIN PRODUTOS_CFG_FILIAL c ON c.PCF_PRO_CODIGO = p.PRO_CODIGO AND c.PCF_FIL_CODIGO = '${filial}'
        ) WHERE SALDO_ATUAL > 0`
     );
     return rows;
@@ -216,17 +240,19 @@ async function fetchProdutosComSaldo(loja: unknown): Promise<FbProdutoBulk[]> {
   }
 }
 
-// ── Importação em background para catálogos grandes (SJC: ~31 mil produtos) ──
-// CONSULTA_ESTOQUE custa ~300-600ms por chamada no Firebird — rodar pro catálogo
-// inteiro de uma vez trava a requisição por horas. Por isso, pra essas lojas a
-// sessão é criada vazia e os produtos entram aos poucos, em lotes, com progresso
-// gravado na própria sessão e emitido via socket.
-const IMPORT_ASSINCRONO = new Set(["sjc_industria", "sjc_ecommerce"]);
+// ── Importação em background para catálogos grandes ─────────────────────────
+// CONSULTA_ESTOQUE pode custar centenas de ms por chamada no Firebird — rodar pro
+// catálogo inteiro de uma vez trava a requisição por horas (medido em SJC: ~31 mil
+// produtos, ~300-600ms/chamada). Por segurança, toda loja com split Indústria/Ecommerce
+// roda em segundo plano (o custo real por chamada não foi medido nas outras bases),
+// em lotes, com progresso gravado na própria sessão e emitido via socket.
+const IMPORT_ASSINCRONO = new Set(Object.keys(INVENTARIO_LOJA_CONEXAO));
 const IMPORT_BATCH_SIZE = 200;
 
 async function fetchTodosCodigosProduto(loja: unknown): Promise<number[]> {
   // Restringe ao universo de Produto Acabado (PA) e Produto Revenda (PR) — reduz
-  // de ~31 mil pra ~10 mil produtos em SJC antes de chamar CONSULTA_ESTOQUE.
+  // bastante o total de produtos verificados antes de chamar CONSULTA_ESTOQUE
+  // (em SJC, de ~31 mil pra ~10 mil).
   const rows = await queryFb<{ PRO_CODIGO: number }>(loja,
     `SELECT PRO_CODIGO FROM PRODUTOS WHERE PRO_TIPO IN ('PA', 'PR') ORDER BY PRO_CODIGO`
   );
@@ -235,13 +261,14 @@ async function fetchTodosCodigosProduto(loja: unknown): Promise<number[]> {
 
 async function fetchProdutosComSaldoLote(loja: unknown, codigos: number[]): Promise<FbProdutoBulk[]> {
   const localEstoque = localEstoqueDaLoja(loja, 0);
+  const filial = filialDaLoja(loja);
   return queryFb<FbProdutoBulk>(loja,
     `SELECT * FROM (
        SELECT p.PRO_CODIGO, p.PRO_RESUMO,
               c.PCF_CUSTO_FISCAL,
-              (SELECT disponivel FROM CONSULTA_ESTOQUE(p.PRO_CODIGO, 1, ${localEstoque}, 0, CAST('NOW' AS DATE))) AS SALDO_ATUAL
+              (SELECT disponivel FROM CONSULTA_ESTOQUE(p.PRO_CODIGO, ${filial}, ${localEstoque}, 0, CAST('NOW' AS DATE))) AS SALDO_ATUAL
          FROM PRODUTOS p
-         LEFT JOIN PRODUTOS_CFG_FILIAL c ON c.PCF_PRO_CODIGO = p.PRO_CODIGO AND c.PCF_FIL_CODIGO = '1'
+         LEFT JOIN PRODUTOS_CFG_FILIAL c ON c.PCF_PRO_CODIGO = p.PRO_CODIGO AND c.PCF_FIL_CODIGO = '${filial}'
         WHERE p.PRO_CODIGO IN (${codigos.join(",")})
      ) WHERE SALDO_ATUAL > 0`
   );
@@ -441,14 +468,14 @@ async function refreshCounts(sessaoId: number) {
 
 router.get("/lojas", (_req: Request, res: Response) => {
   res.json(
-    firebirdLojas.flatMap((value) => {
-      if (value === "sjc") {
+    LOJAS_INVENTARIO_CONFIG.flatMap((cfg) => {
+      if (cfg.ecommercePle != null) {
         return [
-          { value: "sjc_industria", label: "SJC Indústria" },
-          { value: "sjc_ecommerce", label: "SJC Ecommerce" },
+          { value: `${cfg.key}_industria`, label: `${cfg.label} Indústria` },
+          { value: `${cfg.key}_ecommerce`, label: `${cfg.label} Ecommerce` },
         ];
       }
-      return [{ value, label: INVENTARIO_LOJA_LABELS[value] ?? String(value).toUpperCase() }];
+      return [{ value: cfg.key, label: cfg.label }];
     })
   );
 });
@@ -950,19 +977,23 @@ router.patch("/sessoes/:id/status", async (req: Request, res: Response) => {
           }
         }
 
-        // Local de estoque gravado no Firebird (PLE_ORIGEM): 1=Almoxarifado, 2=Ecommerce.
-        // Só SJC Indústria/Ecommerce diferenciam isso; as demais lojas mantêm 1, como sempre foi.
+        // Local de estoque gravado no Firebird (PLE_ORIGEM): 1=Almoxarifado, 2/3=Ecommerce
+        // (varia por loja). Lojas sem split mantêm 1, como sempre foi.
         const localEstoqueOrigem = localEstoqueDaLoja(sessao.loja, 1);
+        // EMP_FIL_CODIGO era fixo em 1 pra qualquer loja — só não dava problema porque
+        // as únicas lojas com sessão real (Bosque, Campinas, Fortaleza, Santana) são
+        // filial 1 por coincidência. Agora resolve a filial certa por loja.
+        const filialFb = filialDaLoja(sessao.loja);
 
         // Helper to create one Firebird inventory
         async function criarInventarioFb(obs: string, itens: any[]): Promise<number> {
-          const maxIdRows = await queryFb<{ MX: number }>(sessao.loja, `SELECT MAX(PRI_ID) AS MX FROM PRODUTOS_INVENTARIO WHERE EMP_FIL_CODIGO = 1`);
+          const maxIdRows = await queryFb<{ MX: number }>(sessao.loja, `SELECT MAX(PRI_ID) AS MX FROM PRODUTOS_INVENTARIO WHERE EMP_FIL_CODIGO = ?`, [filialFb]);
           const priId = (maxIdRows[0]?.MX ?? 0) + 1;
 
           await executeFb(sessao.loja,
             `INSERT INTO PRODUTOS_INVENTARIO (EMP_FIL_CODIGO, PRI_ID, PRI_DATA, PRI_OBS1, PRI_STS_CODIGO, PRI_USU_CODIGO, PRI_DATASISTEMA, PRI_PLE_ORIGEM, PRI_IND_AGRUPADO, PRI_VLR_TOTAL, PRI_ALTERA_CUSTO_FISCAL)
-             VALUES (1, ?, ?, ?, 'AA', ?, ?, ?, 1, 0, 0)`,
-            [priId, now, obs, usuCodigoSistema, now, localEstoqueOrigem]
+             VALUES (?, ?, ?, ?, 'AA', ?, ?, ?, 1, 0, 0)`,
+            [filialFb, priId, now, obs, usuCodigoSistema, now, localEstoqueOrigem]
           );
 
           let vlrTotal = 0;
@@ -974,14 +1005,14 @@ router.patch("/sessoes/:id/status", async (req: Request, res: Response) => {
 
             await executeFb(sessao.loja,
               `INSERT INTO PRODUTOS_INVENTARIO_ITENS (EMP_FIL_CODIGO, PRI_ID, PII_PRO_CODIGO, PII_SALDOANTERIOR, PII_INVENTARIO, PII_SALDOATUAL, PII_ID, PII_USU_CODIGO, PII_DATASISTEMA, PII_PLE_ORIGEM, PII_VLR_UNITARIO, PII_VLR_TOTAL)
-               VALUES (1, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
-              [priId, Number(item.pro_codigo), saldoAnterior, item.qtdContada, item.qtdContada, usuCodigoSistema, now, localEstoqueOrigem, custoUnit, vlrItem]
+               VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+              [filialFb, priId, Number(item.pro_codigo), saldoAnterior, item.qtdContada, item.qtdContada, usuCodigoSistema, now, localEstoqueOrigem, custoUnit, vlrItem]
             );
           }
 
           await executeFb(sessao.loja,
-            `UPDATE PRODUTOS_INVENTARIO SET PRI_VLR_TOTAL = ? WHERE EMP_FIL_CODIGO = 1 AND PRI_ID = ?`,
-            [vlrTotal, priId]
+            `UPDATE PRODUTOS_INVENTARIO SET PRI_VLR_TOTAL = ? WHERE EMP_FIL_CODIGO = ? AND PRI_ID = ?`,
+            [vlrTotal, filialFb, priId]
           );
 
           return priId;

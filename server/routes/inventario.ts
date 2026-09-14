@@ -177,6 +177,9 @@ interface FbProduto {
 }
 
 async function checkPedidosAbertos(loja: unknown): Promise<number> {
+  // Ecommerce não segue a regra de pedidos em aberto/rascunho — fluxo de vendas
+  // separado do físico (Indústria/Almoxarifado), não precisa bloquear o inventário.
+  if (String(loja).trim().toLowerCase().endsWith("_ecommerce")) return 0;
   try {
     const rows = await queryFb<{ TOTAL: number }>(loja,
       `SELECT COUNT(*) AS TOTAL FROM PEDIDOS_VENDAS WHERE PDV_PSI_CODIGO IN ('RA', 'AA')`

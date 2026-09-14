@@ -882,10 +882,10 @@ export default function ComissaoVendedor() {
                 {isTelevendas
                   ? ctvProjecao?.meta_atingida
                     ? `${ctvProjecao.meta_atingida.percentual}% × recebimentos proj. (${formatBRL(projecaoRecebidos)})`
-                    : 'Ritmo atual não atinge nenhuma meta PA'
+                    : ''
                   : faixaProjetada
                     ? `${faixaProjetada.percentual}% sobre ${formatBRL(projecaoVendas)}`
-                    : 'Ritmo atual não atinge nenhuma meta'}
+                    : ''}
               </p>
 
               {isTelevendas ? (

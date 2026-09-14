@@ -93,6 +93,13 @@ const lojas: Record<string, FirebirdConfig> = {
     user: process.env.DB_FIREBIRD_BOSQUE_USER!,
     password: process.env.DB_FIREBIRD_BOSQUE_PASSWORD!,
   },
+  baseteste: {
+    host: process.env.DB_FIREBIRD_BASETESTE_HOST!,
+    port: Number(process.env.DB_FIREBIRD_BASETESTE_PORT) || 3050,
+    database: process.env.DB_FIREBIRD_BASETESTE_DATABASE!,
+    user: process.env.DB_FIREBIRD_BASETESTE_USER!,
+    password: process.env.DB_FIREBIRD_BASETESTE_PASSWORD!,
+  },
 };
 
 export function getFirebirdConfig(loja: keyof typeof lojas): FirebirdConfig {

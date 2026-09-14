@@ -20,6 +20,7 @@ const LOJAS_CONFIG: Record<string, LojaConfig> = {
   "7": { nome: "GOIANIA",    lojaKey: "goiania",    filialId: 1,  visible: true  },
   "8": { nome: "CAMPINAS",   lojaKey: "campinas",   filialId: 1,  visible: true  },
   "9": { nome: "MG",         lojaKey: "mg",         filialId: 7,  visible: false },
+  "10": { nome: "BASE TESTE", lojaKey: "baseteste", filialId: 1,  visible: true  },
 };
 
 async function getEstoqueBase(lojaId: string, codigos: string[]): Promise<Record<string, number>> {

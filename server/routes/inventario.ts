@@ -117,6 +117,7 @@ const LOJAS_INVENTARIO_CONFIG: LojaInventarioConfig[] = [
   { key: "uberlandia" as FirebirdLoja, label: "Uberlandia",     filial: 12 },
   { key: "goiania" as FirebirdLoja,    label: "Goiania",        filial: 1, ecommercePle: 2 },
   { key: "bosque" as FirebirdLoja,     label: "Bosque",         filial: 1, ecommercePle: 2 },
+  { key: "baseteste" as FirebirdLoja,  label: "Base Teste",     filial: 1 },
 ];
 
 // Chave virtual (ex: "sjc_industria") \u2192 conex\u00e3o Firebird real ("sjc"). Toda loja com

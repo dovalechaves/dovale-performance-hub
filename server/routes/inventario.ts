@@ -972,8 +972,10 @@ router.patch("/sessoes/:id/status", async (req: Request, res: Response) => {
         // filial 1 por coincidência. Agora resolve a filial certa por loja.
         const filialFb = filialDaLoja(sessao.loja);
 
-        // Helper to create one Firebird inventory
-        async function criarInventarioFb(obs: string, itens: any[]): Promise<number> {
+        // Helper to create one Firebird inventory.
+        // contados=false (bloco "NAO CONTADOS"): grava diferença 0 de propósito, pra que
+        // finalizar esse bloco no Microsys nunca zere o estoque de item não contado.
+        async function criarInventarioFb(obs: string, itens: any[], contados: boolean): Promise<number> {
           const maxIdRows = await queryFb<{ MX: number }>(sessao.loja, `SELECT MAX(PRI_ID) AS MX FROM PRODUTOS_INVENTARIO WHERE EMP_FIL_CODIGO = ?`, [filialFb]);
           const priId = (maxIdRows[0]?.MX ?? 0) + 1;
 
@@ -985,15 +987,27 @@ router.patch("/sessoes/:id/status", async (req: Request, res: Response) => {
 
           let vlrTotal = 0;
           for (const item of itens) {
+            const proCodigo = Number(item.pro_codigo);
+            // Saldo anterior é o saldo do sistema na abertura da sessão (qtd_sistema), o
+            // mesmo momento que o Microsys fotografa ao criar o bloco. Não relê o saldo
+            // na aprovação de propósito: movimentação legítima depois da contagem (entrada
+            // de mercadoria, venda) seria apagada pelo ajuste.
             const saldoAnterior = Number(item.qtd_sistema ?? 0);
             const custoUnit = Number(item.custo_fiscal ?? 0.01);
-            const vlrItem = item.qtdContada * custoUnit;
+            // PII_SALDOATUAL é a DIFERENÇA de estoque (inventário − saldo anterior), não o
+            // saldo novo — é assim que o Microsys grava nos inventários dele, e é a coluna
+            // "Diferença Estoque" da tela do bloco K280. O hub gravava a quantidade contada
+            // aqui, o que fazia a tela repetir o valor do inventário na diferença.
+            const diferenca = contados ? item.qtdContada - saldoAnterior : 0;
+            const inventario = contados ? item.qtdContada : 0;
+            // PII_VLR_TOTAL também é valorizado pela diferença, não pela contagem.
+            const vlrItem = diferenca * custoUnit;
             vlrTotal += vlrItem;
 
             await executeFb(sessao.loja,
               `INSERT INTO PRODUTOS_INVENTARIO_ITENS (EMP_FIL_CODIGO, PRI_ID, PII_PRO_CODIGO, PII_SALDOANTERIOR, PII_INVENTARIO, PII_SALDOATUAL, PII_ID, PII_USU_CODIGO, PII_DATASISTEMA, PII_PLE_ORIGEM, PII_VLR_UNITARIO, PII_VLR_TOTAL)
                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
-              [filialFb, priId, Number(item.pro_codigo), saldoAnterior, item.qtdContada, item.qtdContada, usuCodigoSistema, now, localEstoqueOrigem, custoUnit, vlrItem]
+              [filialFb, priId, proCodigo, saldoAnterior, inventario, diferenca, usuCodigoSistema, now, localEstoqueOrigem, custoUnit, vlrItem]
             );
           }
 
@@ -1005,8 +1019,8 @@ router.patch("/sessoes/:id/status", async (req: Request, res: Response) => {
           return priId;
         }
 
-        const priContados = await criarInventarioFb(`${baseNome} - CONTADOS`, itensContados);
-        const priNaoContados = await criarInventarioFb(`${baseNome} - NAO CONTADOS`, itensNaoContados);
+        const priContados = await criarInventarioFb(`${baseNome} - CONTADOS`, itensContados, true);
+        const priNaoContados = await criarInventarioFb(`${baseNome} - NAO CONTADOS`, itensNaoContados, false);
 
         await addLog(
           sessao.id, usuario, "FIREBIRD_SYNC",

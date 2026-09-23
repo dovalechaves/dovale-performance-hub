@@ -853,7 +853,7 @@ export default function ComissaoGestor() {
                 Venda PA: {formatBRL(totalPA)}
               </p>
             )}
-            {filtroSetor === 'DISTRIBUIDORES' && (
+            {apenasDistribuidores && (
               <p className="text-xs mt-0.5" style={{ color: '#94a3b8' }}>
                 Chaves vendidas: {formatNumber(totalQtdeChaveDistribuidores)} un
               </p>

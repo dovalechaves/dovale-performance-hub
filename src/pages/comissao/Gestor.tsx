@@ -213,6 +213,7 @@ interface ResumoVendedor {
   total_qtde: number;
   total_registros: number;
   valor_pa: number;
+  qtde_chave: number;
   total_recebido: number;
   is_televendas: boolean;
 }
@@ -563,6 +564,10 @@ export default function ComissaoGestor() {
     () => vendedoresFiltrados.reduce((s, v) => s + (v.setor === 'FERRAGENS' ? 0 : (v.valor_pa ?? 0)), 0),
     [vendedoresFiltrados]
   );
+  const totalQtdeChaveDistribuidores = useMemo(
+    () => vendedoresFiltrados.reduce((s, v) => s + (v.setor === 'DISTRIBUIDORES' ? (v.qtde_chave ?? 0) : 0), 0),
+    [vendedoresFiltrados]
+  );
   const algumaTelevendas = useMemo(
     () => vendedoresFiltrados.some((v) => v.is_televendas),
     [vendedoresFiltrados]
@@ -846,6 +851,11 @@ export default function ComissaoGestor() {
             {algumaTelevendas && (
               <p className="text-xs mt-0.5" style={{ color: '#94a3b8' }}>
                 Venda PA: {formatBRL(totalPA)}
+              </p>
+            )}
+            {filtroSetor === 'DISTRIBUIDORES' && (
+              <p className="text-xs mt-0.5" style={{ color: '#94a3b8' }}>
+                Chaves vendidas: {formatNumber(totalQtdeChaveDistribuidores)} un
               </p>
             )}
             <p className="text-xs mt-1" style={{ color: '#FFD700' }}>

@@ -767,6 +767,7 @@ router.get("/vendedores", async (req: any, res: any) => {
             const isPA = r.SUBGRUPO === 'CHAVE' || ['PRODUÇÃO', 'DOVALE'].includes(r.GRUPO ?? '');
             return s + (isPA ? r.SUM : 0);
           }, 0),
+          qtde_chave: rows.reduce((s, r) => s + (r.SUBGRUPO === 'CHAVE' ? r.QTDE : 0), 0),
           total_recebido: recMap[vendedor] ?? 0,
           is_televendas: isTelevendas(setorV),
         };

@@ -48,9 +48,9 @@ export async function integrarChatwoot(
   etiquetaMap: Record<string, string>, timesMap: Record<string, number>,
 ) {
   try {
-    const contatoId = await cw.criarContato(numero, nome, inboxId);
+    const contatoId = (await cw.criarContato(numero, nome, inboxId)).id;
     if (!contatoId) return;
-    const conversaId = await cw.criarConversa(contatoId, inboxId);
+    const conversaId = (await cw.criarConversa(contatoId, inboxId)).id;
     if (!conversaId) return;
     const etiqueta = etiquetaMap[templateNome.toLowerCase()];
     if (etiqueta) {
@@ -115,10 +115,11 @@ async function enviarParaContato(
   processedParams: cw.ProcessedParams, corpoPreview: string, etiqueta: string, timeId: number | null,
 ): Promise<{ contato: any; status: string; erro: string; msgId: string }> {
   try {
-    const contatoId = await cw.criarContato(contato.numero, contato.nome, inboxId);
-    if (!contatoId) return { contato, status: "FAILED", erro: "Falha ao achar/criar contato no Chatwoot", msgId: "" };
-    const conversaId = await cw.criarConversa(contatoId, inboxId);
-    if (!conversaId) return { contato, status: "FAILED", erro: "Falha ao criar conversa no Chatwoot", msgId: "" };
+    const ct = await cw.criarContato(contato.numero, contato.nome, inboxId);
+    if (!ct.id) return { contato, status: "FAILED", erro: `Falha ao achar/criar contato no Chatwoot — ${ct.error}`, msgId: "" };
+    const cv = await cw.criarConversa(ct.id, inboxId);
+    if (!cv.id) return { contato, status: "FAILED", erro: `Falha ao criar conversa no Chatwoot — ${cv.error}`, msgId: "" };
+    const conversaId = cv.id;
     if (etiqueta) await cw.adicionarEtiqueta(conversaId, etiqueta);
     if (timeId) await cw.atribuirTime(conversaId, timeId);
     const { id, error } = await cw.enviarTemplate(conversaId, templateNome, category, lang, processedParams, corpoPreview);

@@ -13,6 +13,35 @@ function headers(): Record<string, string> {
   };
 }
 
+function esperaRetry(r: Response | null, tentativa: number): number {
+  const ra = Number(r?.headers.get("retry-after"));
+  if (ra > 0) return Math.min(ra * 1000, 60_000);
+  return Math.min(2 ** tentativa * 1000, 30_000) + Math.floor(Math.random() * 500);
+}
+
+/** fetch na API do Chatwoot com retry/backoff em 429/5xx e erro de rede (rate-limit em disparos de volume). */
+async function fetchChatwoot(url: string, init: RequestInit = {}, maxTentativas = 6): Promise<Response> {
+  for (let t = 0; ; t++) {
+    try {
+      const r = await fetch(url, { ...init, headers: headers() });
+      if ((r.status === 429 || r.status >= 500) && t < maxTentativas - 1) {
+        await sleep(esperaRetry(r, t));
+        continue;
+      }
+      return r;
+    } catch (e) {
+      if (t >= maxTentativas - 1) throw e;
+      await sleep(esperaRetry(null, t));
+    }
+  }
+}
+
+async function erroHttp(r: Response): Promise<string> {
+  let txt = "";
+  try { txt = (await r.text()).slice(0, 200); } catch {}
+  return `Chatwoot ${r.status}${txt ? `: ${txt}` : ""}`;
+}
+
 // ── Contatos ─────────────────────────────────────────────────────────────────
 
 export async function buscarContato(telefone: string): Promise<number | null> {
@@ -28,7 +57,7 @@ export async function buscarContato(telefone: string): Promise<number | null> {
         per_page: "50",
         include_contacts: "true",
       })}`;
-      const r = await fetch(url, { headers: headers() });
+      const r = await fetchChatwoot(url);
       if (!r.ok) break;
       const json = await r.json();
       const contatos: any[] = json.payload ?? [];
@@ -50,9 +79,9 @@ export async function criarContato(
   telefone: string,
   nome?: string,
   inboxId?: number,
-): Promise<number | null> {
+): Promise<{ id: number | null; error: string }> {
   const digitos = telefone.replace(/\D/g, "");
-  if (!digitos) return null;
+  if (!digitos) return { id: null, error: "Número vazio/inválido" };
   const num = digitos.length <= 11 ? `55${digitos}` : digitos;
   const telefoneE164 = `+${num}`;
 
@@ -62,21 +91,27 @@ export async function criarContato(
     inbox_id: inboxId ?? INBOX_ID(),
   };
   try {
-    const r = await fetch(`${ACC()}/contacts`, {
+    const r = await fetchChatwoot(`${ACC()}/contacts`, {
       method: "POST",
-      headers: headers(),
       body: JSON.stringify(data),
     });
     if (r.status === 422) {
-      const msg = ((await r.json()).message ?? "").toLowerCase();
-      if (msg.includes("already been taken")) return buscarContato(telefoneE164);
+      const txt = await r.text();
+      let msg = txt;
+      try { msg = JSON.parse(txt).message ?? txt; } catch {}
+      if (String(msg).toLowerCase().includes("already been taken")) {
+        const id = await buscarContato(telefoneE164);
+        return id ? { id, error: "" } : { id: null, error: "Contato já existe no Chatwoot mas não foi encontrado na busca" };
+      }
+      return { id: null, error: `Chatwoot 422: ${String(msg).slice(0, 200)}` };
     }
-    if (r.status !== 200 && r.status !== 201) return null;
+    if (r.status !== 200 && r.status !== 201) return { id: null, error: await erroHttp(r) };
     const payload = (await r.json()).payload ?? {};
-    return payload.contact?.id ?? payload.id ?? null;
+    const id = payload.contact?.id ?? payload.id ?? null;
+    return id ? { id, error: "" } : { id: null, error: "Chatwoot não retornou id do contato" };
   } catch (e: any) {
     console.error(`[Chatwoot] Erro ao criar contato (${telefone}): ${e.message}`);
-    return null;
+    return { id: null, error: `Exceção ao criar contato: ${e.message}` };
   }
 }
 
@@ -85,20 +120,23 @@ export async function criarContato(
 export async function criarConversa(
   contatoId: number,
   inboxId?: number,
-): Promise<number | null> {
+): Promise<{ id: number | null; error: string }> {
   const data = { contact_id: contatoId, inbox_id: inboxId ?? INBOX_ID(), status: "open" };
   try {
-    const r = await fetch(`${ACC()}/conversations`, {
+    const r = await fetchChatwoot(`${ACC()}/conversations`, {
       method: "POST",
-      headers: headers(),
       body: JSON.stringify(data),
     });
-    if (r.ok) return (await r.json()).id ?? null;
-    console.error(`[Chatwoot] criar_conversa falhou: ${r.status}`);
-    return null;
+    if (r.ok) {
+      const id = (await r.json()).id ?? null;
+      return id ? { id, error: "" } : { id: null, error: "Chatwoot não retornou id da conversa" };
+    }
+    const error = await erroHttp(r);
+    console.error(`[Chatwoot] criar_conversa falhou: ${error}`);
+    return { id: null, error };
   } catch (e: any) {
     console.error(`[Chatwoot] Exceção ao criar conversa: ${e.message}`);
-    return null;
+    return { id: null, error: `Exceção ao criar conversa: ${e.message}` };
   }
 }
 
@@ -109,9 +147,9 @@ export async function adicionarEtiqueta(
   etiqueta: string,
 ): Promise<boolean> {
   try {
-    const r = await fetch(
+    const r = await fetchChatwoot(
       `${ACC()}/conversations/${conversationId}/labels`,
-      { method: "POST", headers: headers(), body: JSON.stringify({ labels: [etiqueta] }) },
+      { method: "POST", body: JSON.stringify({ labels: [etiqueta] }) },
     );
     if (r.ok) return true;
     console.error(`[Chatwoot] adicionar_etiqueta '${etiqueta}' falhou: ${r.status}`);
@@ -129,9 +167,9 @@ export async function atribuirTime(
   teamId: number,
 ): Promise<boolean> {
   try {
-    const r = await fetch(
+    const r = await fetchChatwoot(
       `${ACC()}/conversations/${conversationId}/assignments`,
-      { method: "POST", headers: headers(), body: JSON.stringify({ team_id: teamId }) },
+      { method: "POST", body: JSON.stringify({ team_id: teamId }) },
     );
     if (r.ok) return true;
     console.error(`[Chatwoot] atribuir_time ID=${teamId} falhou: ${r.status}`);

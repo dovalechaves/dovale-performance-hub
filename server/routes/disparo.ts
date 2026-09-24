@@ -520,9 +520,9 @@ router.post("/disparar", async (req: Request, res: Response) => {
     for (const num of NUMEROS_APROVADORES) {
       await meta.enviarTemplate(num, "permissao_disparo", "pt_BR", compsAprovacao);
     }
-    const cwContatoId = await cw.criarContato(NUMEROS_APROVADORES[0], "Aprovador Disparos", inbox_id);
+    const cwContatoId = (await cw.criarContato(NUMEROS_APROVADORES[0], "Aprovador Disparos", inbox_id)).id;
     if (cwContatoId) {
-      const cwConversaId = await cw.criarConversa(cwContatoId, inbox_id);
+      const cwConversaId = (await cw.criarConversa(cwContatoId, inbox_id)).id;
       if (cwConversaId) {
         await supa.from("disparos").update({
           aprovacao_conversa_id: cwConversaId, aprovacao_msg_id: 0,

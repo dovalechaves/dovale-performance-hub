@@ -86,6 +86,22 @@ export const myNiteroi: MySQLExtOptions = {
   password: env('MYSQL_NITEROI_PASSWORD', 'NITEROI_DB_MYSQL_PASSWORD'),
 };
 
+export const myGuarulhos: MySQLExtOptions = {
+  host: env('MYSQL_GUARULHOS_HOST'),
+  port: envInt(3306, 'MYSQL_GUARULHOS_PORT'),
+  database: env('MYSQL_GUARULHOS_DATABASE'),
+  user: env('MYSQL_GUARULHOS_USER'),
+  password: env('MYSQL_GUARULHOS_PASSWORD'),
+};
+
+export const myLapa: MySQLExtOptions = {
+  host: env('MYSQL_LAPA_HOST'),
+  port: envInt(3306, 'MYSQL_LAPA_PORT'),
+  database: env('MYSQL_LAPA_DATABASE'),
+  user: env('MYSQL_LAPA_USER'),
+  password: env('MYSQL_LAPA_PASSWORD'),
+};
+
 export const fbLockeyRJ: FirebirdOptions = {
   host: env('DB_LOCKEY_RJ_HOST', 'DB_FIREBIRD_L3_HOST'),
   port: envInt(3050, 'DB_LOCKEY_RJ_PORT', 'DB_FIREBIRD_L3_PORT'),

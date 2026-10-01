@@ -115,6 +115,11 @@ interface AuthUser {
       role: Role;
       loja: string | null;
     };
+    margemlojas: {
+      canAccess: boolean;
+      role: Role;
+      loja: string | null;
+    };
   };
 }
 
@@ -151,6 +156,7 @@ interface AuthContextValue {
       relatoriocustos?: { role?: string; loja?: string | null; can_access?: boolean };
       estoqueminimo?: { role?: string; loja?: string | null; can_access?: boolean };
       notasfiscaisamazon?: { role?: string; loja?: string | null; can_access?: boolean };
+      margemlojas?: { role?: string; loja?: string | null; can_access?: boolean };
     },
     hubRole?: string
   ) => void;
@@ -193,6 +199,7 @@ function buildUser(
     relatoriocustos?: { role?: string; loja?: string | null; can_access?: boolean };
     estoqueminimo?: { role?: string; loja?: string | null; can_access?: boolean };
     notasfiscaisamazon?: { role?: string; loja?: string | null; can_access?: boolean };
+    margemlojas?: { role?: string; loja?: string | null; can_access?: boolean };
   },
   apiHubRole?: string
 ): AuthUser {
@@ -244,6 +251,8 @@ function buildUser(
   const estoqueminimoAccess = apiApps?.estoqueminimo?.can_access ?? false;
   const notasfiscaisamazonRole = resolveRole(usuario, apiApps?.notasfiscaisamazon?.role ?? apiRole);
   const notasfiscaisamazonAccess = apiApps?.notasfiscaisamazon?.can_access ?? false;
+  const margemlojasRole = resolveRole(usuario, apiApps?.margemlojas?.role ?? apiRole);
+  const margemlojasAccess = apiApps?.margemlojas?.can_access ?? false;
 
   return {
     usuario,
@@ -359,6 +368,11 @@ function buildUser(
         role: notasfiscaisamazonRole,
         loja: null,
       },
+      margemlojas: {
+        canAccess: margemlojasAccess,
+        role: margemlojasRole,
+        loja: null,
+      },
     },
   };
 }
@@ -417,6 +431,8 @@ function loadFromStorage(): AuthUser | null {
     const estoqueminimoAccess = (parsed.apps as any)?.estoqueminimo?.canAccess ?? false;
     const notasfiscaisamazonRole = (parsed.apps as any)?.notasfiscaisamazon?.role ?? parsed.role;
     const notasfiscaisamazonAccess = (parsed.apps as any)?.notasfiscaisamazon?.canAccess ?? false;
+    const margemlojasRole = (parsed.apps as any)?.margemlojas?.role ?? parsed.role;
+    const margemlojasAccess = (parsed.apps as any)?.margemlojas?.canAccess ?? false;
 
     return {
       usuario: parsed.usuario,
@@ -532,6 +548,11 @@ function loadFromStorage(): AuthUser | null {
           role: notasfiscaisamazonRole,
           loja: null,
         },
+        margemlojas: {
+          canAccess: margemlojasAccess,
+          role: margemlojasRole,
+          loja: null,
+        },
       },
     };
   } catch {
@@ -599,6 +620,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       relatoriocustos?: { role?: string; loja?: string | null; can_access?: boolean };
       estoqueminimo?: { role?: string; loja?: string | null; can_access?: boolean };
       notasfiscaisamazon?: { role?: string; loja?: string | null; can_access?: boolean };
+      margemlojas?: { role?: string; loja?: string | null; can_access?: boolean };
     },
     hubRole?: string
   ) => {

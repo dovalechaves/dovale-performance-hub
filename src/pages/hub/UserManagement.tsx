@@ -231,7 +231,7 @@ function RepSelectorCell({
 type SimpleAppKey =
   | "disparo" | "assistente" | "multipreco" | "onboarding" | "score" | "cobranca"
   | "ecommercedisparo" | "sugestaocompras" | "relatoriocustos" | "primeiramov"
-  | "invfull" | "prospeccao" | "estoqueminimo" | "notasfiscaisamazon";
+  | "invfull" | "prospeccao" | "estoqueminimo" | "notasfiscaisamazon" | "margemlojas";
 
 function SimpleAppRow({
   appKey, title, icon, u, disabled, onUpdate,

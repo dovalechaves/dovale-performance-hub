@@ -1,4 +1,4 @@
-import { BarChart3, Calculator, Send, Archive, Bot, Database, ClipboardList, UserPlus, PackageSearch, ShieldCheck, BellRing, ShoppingCart, Sparkles, Compass, TrendingDown, Coins, Search, PackageSearch as PackageSearchIcon, AlertTriangle, FileText } from "lucide-react";
+import { BarChart3, Calculator, Send, Archive, Bot, Database, ClipboardList, UserPlus, PackageSearch, ShieldCheck, BellRing, ShoppingCart, Sparkles, Compass, TrendingDown, Coins, Search, PackageSearch as PackageSearchIcon, AlertTriangle, FileText, Percent } from "lucide-react";
 import type { AuthManagedUser } from "@/services/api";
 import type { Role } from "@/lib/rbac";
 
@@ -183,6 +183,13 @@ export const APPS: AppCard[] = [
     route: "/notas-fiscais-amazon",
     color: "from-blue-500/20 to-indigo-600/10 border-blue-500/30 hover:border-blue-500/60",
   },
+  {
+    title: "Margem de Venda das Lojas",
+    description: "Lucro da indústria nas vendas de transferência pra cada loja: preço, custo, lucro e rentabilidade por produto.",
+    icon: <Percent className="w-8 h-8" />,
+    route: "/margem-lojas",
+    color: "from-emerald-500/20 to-green-600/10 border-emerald-500/30 hover:border-emerald-500/60",
+  },
 ];
 
 export const APP_BY_ROUTE: Record<string, keyof AuthManagedUser["apps"]> = {
@@ -206,4 +213,5 @@ export const APP_BY_ROUTE: Record<string, keyof AuthManagedUser["apps"]> = {
   "/prospeccao": "prospeccao",
   "/estoque-minimo": "estoqueminimo",
   "/notas-fiscais-amazon": "notasfiscaisamazon",
+  "/margem-lojas": "margemlojas",
 };

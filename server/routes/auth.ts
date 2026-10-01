@@ -6,7 +6,7 @@ import { getPool } from "../db/sqlserver";
 const router = Router();
 const VALID_ROLES = ["admin", "manager", "viewer"] as const;
 const VALID_HUB_ROLES = ["admin", "viewer"] as const;
-const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento", "assistente", "multipreco", "inventario", "onboarding", "prospeccao", "primeiramov", "invfull", "score", "cobranca", "ecommercedisparo", "sugestaocompras", "salescompass", "painelcomissao", "relatoriocustos", "estoqueminimo", "notasfiscaisamazon"] as const;
+const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento", "assistente", "multipreco", "inventario", "onboarding", "prospeccao", "primeiramov", "invfull", "score", "cobranca", "ecommercedisparo", "sugestaocompras", "salescompass", "painelcomissao", "relatoriocustos", "estoqueminimo", "notasfiscaisamazon", "margemlojas"] as const;
 
 type Role = typeof VALID_ROLES[number];
 type HubRole = typeof VALID_HUB_ROLES[number];
@@ -248,6 +248,12 @@ function buildDefaultApps(usuario: string, localRole: unknown, localLoja: unknow
       loja: null,
       can_access: false,
     },
+    margemlojas: {
+      app_key: "margemlojas" as AppKey,
+      role: baseRole,
+      loja: null,
+      can_access: false,
+    },
   };
 }
 
@@ -281,6 +287,7 @@ function mergeApps(
     relatoriocustos: { ...defaults.relatoriocustos },
     estoqueminimo: { ...defaults.estoqueminimo },
     notasfiscaisamazon: { ...defaults.notasfiscaisamazon },
+    margemlojas: { ...defaults.margemlojas },
   };
 
   for (const row of appRows) {
@@ -341,6 +348,7 @@ function normalizeAppsPayload(
     relatoriocustos: { ...defaults.relatoriocustos },
     estoqueminimo: { ...defaults.estoqueminimo },
     notasfiscaisamazon: { ...defaults.notasfiscaisamazon },
+    margemlojas: { ...defaults.margemlojas },
   };
 
   if (payload && typeof payload === "object") {
@@ -447,6 +455,8 @@ router.post("/login", async (req, res) => {
     });
 
     if (!adRes.ok) {
+      const corpoErro = await adRes.text().catch(() => "");
+      console.error(`[auth] AD login falhou pra usuário "${usuario}": status=${adRes.status} corpo=${corpoErro.slice(0, 500)}`);
       return res.status(401).json({ error: "Usuário ou senha inválidos." });
     }
 
@@ -563,7 +573,7 @@ router.get("/users", async (req, res) => {
       pool.request().query(`
         SELECT usuario, app_key, role, loja, ativo, usu_codigo_sistema, config
         FROM dbo.USUARIOS_APPS
-        WHERE app_key IN ('dashboard', 'calculadora', 'disparo', 'fechamento', 'assistente', 'multipreco', 'inventario', 'onboarding', 'prospeccao', 'primeiramov', 'invfull', 'score', 'cobranca', 'ecommercedisparo', 'sugestaocompras', 'salescompass', 'painelcomissao', 'relatoriocustos', 'estoqueminimo', 'notasfiscaisamazon')
+        WHERE app_key IN ('dashboard', 'calculadora', 'disparo', 'fechamento', 'assistente', 'multipreco', 'inventario', 'onboarding', 'prospeccao', 'primeiramov', 'invfull', 'score', 'cobranca', 'ecommercedisparo', 'sugestaocompras', 'salescompass', 'painelcomissao', 'relatoriocustos', 'estoqueminimo', 'notasfiscaisamazon', 'margemlojas')
       `),
     ]);
 

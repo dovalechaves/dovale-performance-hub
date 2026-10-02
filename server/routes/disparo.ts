@@ -11,7 +11,7 @@ import * as cw from "../services/chatwoot";
 import { validarArquivo } from "../services/importer";
 import {
   parseConfiguracao, montarComponentesTemplate, detalharTemplate,
-  processarDisparo, setSocketIO,
+  processarDisparo, disparoEmExecucao, setSocketIO,
 } from "../services/disparo-engine";
 import type { Server as SocketServer } from "socket.io";
 
@@ -686,7 +686,12 @@ router.post("/disparos/:id/retomar", async (req: Request, res: Response) => {
   const supa = getSupa();
   const { data: d } = await supa.from("disparos").select("*").eq("id", req.params.id).single();
   if (!d) return res.status(404).json({ erro: "Disparo não encontrado" });
-  if (d.status !== "PAUSED") return res.status(400).json({ erro: `Disparo não está pausado (status: ${d.status})` });
+  if (!["PAUSED", "PAUSING"].includes(d.status)) return res.status(400).json({ erro: `Disparo não está pausado (status: ${d.status})` });
+  // PAUSING com loop vivo: basta desfazer o pedido de pausa. Sem loop (processo reiniciou), reinicia o envio.
+  if (d.status === "PAUSING" && disparoEmExecucao(d.id)) {
+    await supa.from("disparos").update({ status: "PROCESSING" }).eq("id", d.id);
+    return res.json({ mensagem: "Pausa cancelada, disparo segue em andamento", disparo_id: d.id });
+  }
   const cfg = parseConfiguracao(d.configuracao);
   await supa.from("disparos").update({ status: "PROCESSING" }).eq("id", d.id);
   processarDisparo(d.id, cfg.inbox_id ?? INBOX_PADRAO);

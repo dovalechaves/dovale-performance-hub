@@ -130,7 +130,25 @@ async function enviarParaContato(
   }
 }
 
+// Disparos com loop ativo neste processo. Se o processo reinicia no meio de uma
+// pausa, o status fica PAUSING sem nenhum loop vivo — é assim que dá pra detectar.
+const disparosAtivos = new Set<number>();
+
+export function disparoEmExecucao(disparoId: number): boolean {
+  return disparosAtivos.has(disparoId);
+}
+
 export async function processarDisparo(disparoId: number, inboxId: number) {
+  if (disparosAtivos.has(disparoId)) return;
+  disparosAtivos.add(disparoId);
+  try {
+    await executarDisparo(disparoId, inboxId);
+  } finally {
+    disparosAtivos.delete(disparoId);
+  }
+}
+
+async function executarDisparo(disparoId: number, inboxId: number) {
   const supa = getSupa();
   const { data: dData } = await supa.from("disparos").select("*").eq("id", disparoId).single();
   if (!dData) return;

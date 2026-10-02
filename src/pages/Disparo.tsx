@@ -447,7 +447,7 @@ export default function Disparo() {
                   {disparoStatus === "PROCESSING" && (
                     <Button size="sm" variant="outline" onClick={handlePausar}><Pause className="h-3 w-3 mr-1" />Pausar</Button>
                   )}
-                  {disparoStatus === "PAUSED" && (
+                  {(disparoStatus === "PAUSED" || disparoStatus === "PAUSING") && (
                     <Button size="sm" variant="outline" onClick={handleRetomar}><Play className="h-3 w-3 mr-1" />Retomar</Button>
                   )}
                   {(disparoStatus === "PAUSING" || disparoStatus === "PAUSED") && isAdmin && (

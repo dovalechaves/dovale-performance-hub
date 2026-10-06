@@ -6,7 +6,7 @@ import { getComissaoUsuario, podeVerTudo, isADM, type ComissaoUsuario } from "..
 import { SETORES_ATIVOS, addSetoresGlobais } from "../services/comissao/setores";
 import { ensureVendedorAtivoTable, getVendedoresInativos } from "../services/comissao/vendedorAtivoTable";
 import {
-  calcularComissaoTelevendas, isTelevendas,
+  calcularComissaoTelevendas, isTelevendas, usaValorGeralNaMeta,
   RECORRENCIA_MESES_CONSECUTIVOS, RECORRENCIA_PERCENTUAL,
   type MetaConfig, type BonusConfig,
 } from "../services/comissao/commission";
@@ -101,10 +101,13 @@ async function checarRecorrenciaMeta1Lote(
       const inicioM = `${a}-${String(m).padStart(2, '0')}-01`;
       const fimM = new Date(a, m, 0).toISOString().split('T')[0];
       const vendasMes = filtrarVendas(todasVendasJanela, { inicio: inicioM, fim: fimM, userSetores, setores: [], vendedor });
-      const pa = vendasMes.reduce((s, v) => {
-        const isPA = v.SUBGRUPO === 'CHAVE' || ['PRODUÇÃO', 'DOVALE'].includes(v.GRUPO ?? '');
-        return s + (isPA ? v.SUM : 0);
-      }, 0);
+      // Mês com exceção (ver usaValorGeralNaMeta): a Meta 1 é medida pelo Valor Geral, não só pelo PA
+      const pa = usaValorGeralNaMeta('TELEVENDAS', a, m)
+        ? vendasMes.reduce((s, v) => s + v.SUM, 0)
+        : vendasMes.reduce((s, v) => {
+            const isPA = v.SUBGRUPO === 'CHAVE' || ['PRODUÇÃO', 'DOVALE'].includes(v.GRUPO ?? '');
+            return s + (isPA ? v.SUM : 0);
+          }, 0);
       return pa >= meta1;
     });
     resultado.set(vendedor, bateuPorMes);
@@ -900,6 +903,11 @@ router.get("/vendedores", async (req: any, res: any) => {
           total_recebido: recMap[vendedor] ?? 0,
           is_televendas: isTelevendas(setorV),
           recorrencia_meta1_ativa: mesesBateram.length === RECORRENCIA_MESES_CONSECUTIVOS && mesesBateram.every(Boolean),
+          // Valor comparado com as metas: PA, exceto na exceção de mês (ver usaValorGeralNaMeta)
+          valor_meta: usaValorGeralNaMeta(setorV, ano, mes) ? somarVendas(rows) : rows.reduce((s, r) => {
+            const isPA = r.SUBGRUPO === 'CHAVE' || ['PRODUÇÃO', 'DOVALE'].includes(r.GRUPO ?? '');
+            return s + (isPA ? r.SUM : 0);
+          }, 0),
         };
       })
       .sort((a, b) => b.total_vendas - a.total_vendas);
@@ -1089,6 +1097,9 @@ router.get("/vendedor/:nome", async (req: any, res: any) => {
     }
 
     const metaRow = metaVendedor.recordset[0] as unknown as MetaConfig | null;
+    // Valor comparado com as metas: PA, exceto na exceção de mês (ver usaValorGeralNaMeta)
+    const meta_usa_valor_geral = usaValorGeralNaMeta(setor, ano, mes);
+    const valor_meta = meta_usa_valor_geral ? somarVendas(vendasPeriodo) : valor_pa;
 
     let recorrencia_meta1_ativa = false;
     let recorrencia_meta1_meses_anteriores_ativo = false;
@@ -1107,7 +1118,7 @@ router.get("/vendedor/:nome", async (req: any, res: any) => {
     }
 
     const comissao_televendas = is_televendas
-      ? calcularComissaoTelevendas(valor_pa, total_recebido, metaRow, bonusConfig, recorrencia_meta1_ativa, recorrenciaPercentualConfigurado)
+      ? calcularComissaoTelevendas(valor_pa, total_recebido, metaRow, bonusConfig, recorrencia_meta1_ativa, recorrenciaPercentualConfigurado, valor_meta)
       : null;
 
     // ── Ferragens ─────────────────────────────────────────────────────────────
@@ -1234,6 +1245,8 @@ router.get("/vendedor/:nome", async (req: any, res: any) => {
       is_ferragens,
       is_distribuidores,
       valor_pa,
+      valor_meta,
+      meta_usa_valor_geral,
       valor_chave,
       valor_ferragens_pa,
       valor_mercadoria,

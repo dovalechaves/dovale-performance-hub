@@ -28,6 +28,8 @@ interface VendedorData {
   is_ferragens?: boolean;
   is_distribuidores?: boolean;
   valor_pa?: number;
+  valor_meta?: number;
+  meta_usa_valor_geral?: boolean;
   valor_chave?: number;
   valor_ferragens_pa?: number;
   valor_mercadoria?: number;
@@ -244,6 +246,9 @@ export default function ComissaoVendedor() {
   const isDistribuidores = data?.is_distribuidores ?? false;
   const bonusConfigData: BonusConfig | null = data?.bonus_config ?? null;
   const valorPAAtual = data?.valor_pa ?? 0;
+  // Valor comparado com as metas: PA, ou Valor Geral na exceção de mês (definida no servidor)
+  const valorMetaAtual = data?.valor_meta ?? valorPAAtual;
+  const metaUsaValorGeral = data?.meta_usa_valor_geral ?? false;
   const recebidoAtual = data?.total_recebido ?? 0;
 
   // MetaConfig montado direto do meta_vendedor para garantir percentual_sem_meta correto
@@ -256,7 +261,7 @@ export default function ComissaoVendedor() {
 
   // Comissão Televendas
   const ctv = isTelevendas && mes
-    ? calcularComissaoTelevendas(valorPAAtual, recebidoAtual, metaConfigObj, bonusConfigData)
+    ? calcularComissaoTelevendas(valorPAAtual, recebidoAtual, metaConfigObj, bonusConfigData, valorMetaAtual)
     : null;
 
   // Ferragens — faixas de meta (4 níveis: M1, M2, M3, Desafio)
@@ -293,7 +298,7 @@ export default function ComissaoVendedor() {
     ? distFaixas.length > 0
     : faixas.some((f) => f.valor > 0);
 
-  const compareRealizado = isTelevendas ? valorPAAtual : totalVendas;
+  const compareRealizado = isTelevendas ? valorMetaAtual : totalVendas;
   const faixasExibidas = isFerragens ? ferrFaixas : isDistribuidores ? distFaixas : faixas;
   const faixaAtingida = [...faixasExibidas].reverse().find((f) => f.valor > 0 && compareRealizado >= f.valor) || null;
   const comissaoValor = isTelevendas
@@ -312,12 +317,12 @@ export default function ComissaoVendedor() {
   const isMesAtual = mesSel === hoje.getMonth() + 1 && anoSel === hoje.getFullYear();
   const diasUteisNoMes = contarDiasUteis(anoSel, mesSel);
   const diasUteisDecorridos = isMesAtual ? contarDiasUteis(anoSel, mesSel, hoje.getDate()) : diasUteisNoMes;
-  const temProjecao = mes !== null && (isTelevendas ? valorPAAtual > 0 : totalVendas > 0) && diasUteisDecorridos > 0;
+  const temProjecao = mes !== null && (isTelevendas ? valorMetaAtual > 0 : totalVendas > 0) && diasUteisDecorridos > 0;
   const projecaoVendas = temProjecao && !isTelevendas ? (totalVendas / diasUteisDecorridos) * diasUteisNoMes : 0;
-  const projecaoPA = temProjecao && isTelevendas ? (valorPAAtual / diasUteisDecorridos) * diasUteisNoMes : 0;
+  const projecaoPA = temProjecao && isTelevendas ? (valorMetaAtual / diasUteisDecorridos) * diasUteisNoMes : 0;
   const projecaoRecebidos = temProjecao && isTelevendas ? (recebidoAtual / diasUteisDecorridos) * diasUteisNoMes : 0;
   const ctvProjecao = isTelevendas && projecaoPA > 0
-    ? calcularComissaoTelevendas(projecaoPA, projecaoRecebidos, metaConfigObj, bonusConfigData)
+    ? calcularComissaoTelevendas(projecaoPA, projecaoRecebidos, metaConfigObj, bonusConfigData, projecaoPA)
     : null;
   const projecaoExibida = isTelevendas ? projecaoPA : projecaoVendas;
   const faixaProjetada = temProjecao
@@ -528,6 +533,11 @@ export default function ComissaoVendedor() {
                   </div>
                 ))}
               </div>
+              {metaUsaValorGeral && (
+                <p className="text-xs mt-3" style={{ color: '#92400e' }}>
+                  Neste mês a meta e o bônus consideram o Valor Geral (e não só o Total PA).
+                </p>
+              )}
             </div>
 
             {/* Comissão Detalhada */}
@@ -801,7 +811,7 @@ export default function ComissaoVendedor() {
             <div className="rounded-xl p-5 shadow-sm" style={{ background: '#ffffff', border: '1px solid #e2e8f0' }}>
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-sm font-semibold" style={{ color: '#00205C' }}>
-                  {isTelevendas ? 'Projeção de PA' : 'Projeção de Vendas'} — {MESES[mesSel - 1]}
+                  {isTelevendas ? (metaUsaValorGeral ? 'Projeção de Valor Geral' : 'Projeção de PA') : 'Projeção de Vendas'} — {MESES[mesSel - 1]}
                 </h2>
                 <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: '#eff6ff', color: '#1e40af' }}>
                   Dia {hoje.getDate()}/{daysInMonth} • {diasUteisDecorridos}/{diasUteisNoMes} DU
@@ -812,11 +822,11 @@ export default function ComissaoVendedor() {
                 {formatBRL(projecaoExibida)}
               </p>
               <p className="text-xs mb-4" style={{ color: '#64748b' }}>
-                Ritmo: {formatBRL((isTelevendas ? valorPAAtual : totalVendas) / diasUteisDecorridos)}/dia útil &bull; Realizado: {formatBRL(isTelevendas ? valorPAAtual : totalVendas)}
+                Ritmo: {formatBRL((isTelevendas ? valorMetaAtual : totalVendas) / diasUteisDecorridos)}/dia útil &bull; Realizado: {formatBRL(isTelevendas ? valorMetaAtual : totalVendas)}
               </p>
 
               {(() => {
-                const realizadoExib = isTelevendas ? valorPAAtual : totalVendas;
+                const realizadoExib = isTelevendas ? valorMetaAtual : totalVendas;
                 const metaRef = faixas.filter(f => f.valor > 0).sort((a,b) => b.valor - a.valor)[0]?.valor || projecaoExibida;
                 const base = Math.max(projecaoExibida, metaRef) * 1.05;
                 const pctReal = Math.min((realizadoExib / base) * 100, 100);

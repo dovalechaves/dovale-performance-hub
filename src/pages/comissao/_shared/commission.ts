@@ -18,6 +18,8 @@ export interface BonusConfig {
 
 export interface ComissaoTelevendas {
   valor_pa: number;
+  /** Valor efetivamente comparado com as metas/bônus (= valor_pa, exceto na exceção de mês — ver usaValorGeralNaMeta) */
+  valor_meta: number;
   total_recebido: number;
   meta_atingida: { label: string; valor: number; percentual: number } | null;
   comissao_meta: number;
@@ -32,10 +34,11 @@ export function calcularComissaoTelevendas(
   valor_pa: number,
   total_recebido: number,
   meta: MetaConfig | null,
-  bonus: BonusConfig | null
+  bonus: BonusConfig | null,
+  valor_meta: number = valor_pa
 ): ComissaoTelevendas {
   const empty: ComissaoTelevendas = {
-    valor_pa, total_recebido,
+    valor_pa, valor_meta, total_recebido,
     meta_atingida: null, comissao_meta: 0,
     percentual_sem_meta: meta?.percentual_sem_meta ?? 0,
     bonus_desbloqueado: false, bonus_tier: null,
@@ -49,7 +52,7 @@ export function calcularComissaoTelevendas(
     { label: 'Meta PA 1', valor: meta.meta1_valor, percentual: meta.meta1_percentual },
   ].filter((m) => m.valor > 0);
 
-  const meta_atingida = metas.find((m) => valor_pa >= m.valor) ?? null;
+  const meta_atingida = metas.find((m) => valor_meta >= m.valor) ?? null;
 
   let comissao_meta = 0;
   if (meta_atingida) {
@@ -58,7 +61,7 @@ export function calcularComissaoTelevendas(
     comissao_meta = (meta.percentual_sem_meta / 100) * total_recebido;
   }
 
-  const bonus_desbloqueado = meta.meta1_valor > 0 && valor_pa >= meta.meta1_valor;
+  const bonus_desbloqueado = meta.meta1_valor > 0 && valor_meta >= meta.meta1_valor;
   let bonus_tier: ComissaoTelevendas['bonus_tier'] = null;
   let comissao_bonus = 0;
 
@@ -70,12 +73,12 @@ export function calcularComissaoTelevendas(
       { label: 'Bônus 2', valor: bonus.bonus2_valor, percentual: bonus.bonus2_percentual },
       { label: 'Bônus 1', valor: bonus.bonus1_valor, percentual: bonus.bonus1_percentual },
     ].filter((t) => t.valor > 0);
-    bonus_tier = tiers.find((t) => valor_pa >= t.valor) ?? null;
-    if (bonus_tier) comissao_bonus = (bonus_tier.percentual / 100) * valor_pa;
+    bonus_tier = tiers.find((t) => valor_meta >= t.valor) ?? null;
+    if (bonus_tier) comissao_bonus = (bonus_tier.percentual / 100) * valor_meta;
   }
 
   return {
-    valor_pa, total_recebido, meta_atingida, comissao_meta,
+    valor_pa, valor_meta, total_recebido, meta_atingida, comissao_meta,
     percentual_sem_meta: meta.percentual_sem_meta,
     bonus_desbloqueado, bonus_tier, comissao_bonus,
     comissao_total: comissao_meta + comissao_bonus,

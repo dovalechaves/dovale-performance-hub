@@ -6,7 +6,7 @@ import { getComissaoUsuario, podeVerTudo, isADM, type ComissaoUsuario } from "..
 import { SETORES_ATIVOS, addSetoresGlobais } from "../services/comissao/setores";
 import { ensureVendedorAtivoTable, getVendedoresInativos } from "../services/comissao/vendedorAtivoTable";
 import {
-  calcularComissaoTelevendas, isTelevendas,
+  calcularComissaoTelevendas, isTelevendas, usaValorGeralNaMeta,
   type MetaConfig, type BonusConfig,
 } from "../services/comissao/commission";
 import {
@@ -770,6 +770,11 @@ router.get("/vendedores", async (req: any, res: any) => {
           qtde_chave: rows.reduce((s, r) => s + (r.SUBGRUPO === 'CHAVE' ? r.QTDE : 0), 0),
           total_recebido: recMap[vendedor] ?? 0,
           is_televendas: isTelevendas(setorV),
+          // Valor comparado com as metas: PA, exceto na exceção de mês (ver usaValorGeralNaMeta)
+          valor_meta: usaValorGeralNaMeta(setorV, ano, mes) ? somarVendas(rows) : rows.reduce((s, r) => {
+            const isPA = r.SUBGRUPO === 'CHAVE' || ['PRODUÇÃO', 'DOVALE'].includes(r.GRUPO ?? '');
+            return s + (isPA ? r.SUM : 0);
+          }, 0),
         };
       })
       .sort((a, b) => b.total_vendas - a.total_vendas);
@@ -964,8 +969,11 @@ router.get("/vendedor/:nome", async (req: any, res: any) => {
     }
 
     const metaRow = metaVendedor.recordset[0] as unknown as MetaConfig | null;
+    // Valor comparado com as metas: PA, exceto na exceção de mês (ver usaValorGeralNaMeta)
+    const meta_usa_valor_geral = usaValorGeralNaMeta(setor, ano, mes);
+    const valor_meta = meta_usa_valor_geral ? somarVendas(vendasPeriodo) : valor_pa;
     const comissao_televendas = is_televendas
-      ? calcularComissaoTelevendas(valor_pa, total_recebido, metaRow, bonusConfig)
+      ? calcularComissaoTelevendas(valor_pa, total_recebido, metaRow, bonusConfig, valor_meta)
       : null;
 
     // ── Ferragens ─────────────────────────────────────────────────────────────
@@ -1092,6 +1100,8 @@ router.get("/vendedor/:nome", async (req: any, res: any) => {
       is_ferragens,
       is_distribuidores,
       valor_pa,
+      valor_meta,
+      meta_usa_valor_geral,
       valor_chave,
       valor_ferragens_pa,
       valor_mercadoria,

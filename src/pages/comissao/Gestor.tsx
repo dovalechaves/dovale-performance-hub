@@ -213,6 +213,8 @@ interface ResumoVendedor {
   total_qtde: number;
   total_registros: number;
   valor_pa: number;
+  /** Valor comparado com as metas: PA, ou Valor Geral na exceção de mês (calculado no servidor) */
+  valor_meta?: number;
   qtde_chave: number;
   total_recebido: number;
   is_televendas: boolean;
@@ -499,7 +501,7 @@ export default function ComissaoGestor() {
       meta3_valor: Number(m.meta3_valor), meta3_percentual: Number(m.meta3_percentual),
       percentual_sem_meta: Number(m.percentual_sem_meta ?? 0),
     };
-    return calcularComissaoTelevendas(v.valor_pa, v.total_recebido, metaConfig, bonusConfig);
+    return calcularComissaoTelevendas(v.valor_pa, v.total_recebido, metaConfig, bonusConfig, v.valor_meta ?? v.valor_pa);
   };
 
   // Lógica Ferragens: comissão baseada em total_vendas e total_recebido
@@ -628,7 +630,7 @@ export default function ComissaoGestor() {
         ];
       } else {
         realizado = isTV
-          ? lista.reduce((s, v) => s + (v.valor_pa ?? 0), 0)
+          ? lista.reduce((s, v) => s + (v.valor_meta ?? v.valor_pa ?? 0), 0)
           : lista.reduce((s, v) => s + v.total_vendas, 0);
         tiersDef = [
           { label: 'Meta 1', valor: somaMeta(lista, metasMap, 'meta1_valor') },
@@ -1112,7 +1114,7 @@ export default function ComissaoGestor() {
                               { label: 'Meta PA 1', valor: Number(mTV?.meta1_valor) || 0 },
                               { label: 'Meta PA 2', valor: Number(mTV?.meta2_valor) || 0 },
                               { label: 'Meta PA 3', valor: Number(mTV?.meta3_valor) || 0 },
-                            ], v.valor_pa)
+                            ], v.valor_meta ?? v.valor_pa)
                           : getProximaMeta([
                               { label: 'Meta 1', valor: Number(mTV?.meta1_valor) || 0 },
                               { label: 'Meta 2', valor: Number(mTV?.meta2_valor) || 0 },
@@ -1140,7 +1142,7 @@ export default function ComissaoGestor() {
                         : v.is_televendas
                           ? (Number(metasMap[v.vendedor]?.meta1_valor) || 0)
                           : (f?.referencia ?? 0);
-                    const realizado = isFerragens || isDist ? v.total_vendas : v.is_televendas ? v.valor_pa : v.total_vendas;
+                    const realizado = isFerragens || isDist ? v.total_vendas : v.is_televendas ? (v.valor_meta ?? v.valor_pa) : v.total_vendas;
                     const pct = metaRef > 0 ? Math.min((realizado / metaRef) * 100, 100) : 0;
 
                     return (

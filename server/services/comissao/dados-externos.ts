@@ -29,25 +29,43 @@ export interface RecebRow {
   DATABAIXA: Date | null;
 }
 
-// ─── Cache em memória (2 min por ano) ────────────────────────────────────────
+// ─── Cache em memória (por mês e por fonte) ──────────────────────────────────
+// Antes o painel buscava o ANO INTEIRO de cada base externa de uma vez (20–50 s por base
+// e, às vezes, estourando o timeout) e guardava tudo por 2 min — então a primeira tela
+// depois de expirar esperava esse tempo todo. Agora cada (fonte, mês) é buscado e guardado
+// separadamente: as linhas já vêm agrupadas por data, então a soma dos meses é EXATAMENTE
+// o resultado do ano (mesma ordem e mesmos valores, conferido linha a linha).
+//
 // Vendas continuam entrando o dia inteiro — um cache longo faz o painel ficar
 // sistematicamente atrás de qualquer conferência feita "na hora" numa fonte externa,
-// parecendo erro sem ser. 2 min equilibra isso sem bater as 8 bases externas a cada clique.
-// Se alguma fonte falhou nessa busca, o resultado fica incompleto — não pode ficar
-// memoizado nem esses 2 min (um blip de rede de alguns segundos não pode custar minutos
-// de números errados para todo mundo). Nesse caso o cache expira ainda mais rápido, pra
-// próxima request tentar de novo em breve em vez de repetir o valor incompleto.
-const TTL = 2 * 60 * 1000;
+// parecendo erro sem ser. Por isso o mês corrente tem cache curto (1 min, e a consulta de
+// um mês leva poucos segundos); meses fechados quase não mudam e ficam mais tempo.
+// Se uma fonte falhou numa busca, aquele pedaço fica marcado como incompleto — não pode
+// ficar memoizado nem o TTL normal (um blip de rede de alguns segundos não pode custar
+// minutos de números errados): expira em 20 s, e só aquela fonte/mês é consultada de novo.
+const TTL_MES_ATUAL = 60 * 1000;
+const TTL_MES_ANTERIOR = 5 * 60 * 1000;
+const TTL_MES_FECHADO = 30 * 60 * 1000;
+const TTL_ANO_PASSADO = 2 * 60 * 60 * 1000;
 const TTL_INCOMPLETO = 20 * 1000;
-const _cv = new Map<number, { rows: VendaRow[]; ts: number; ttl: number }>();
-const _cr = new Map<number, { rows: RecebRow[]; ts: number; ttl: number }>();
-// In-flight deduplication: evita múltiplas queries simultâneas para o mesmo ano
-const _inFlightV = new Map<number, Promise<VendaRow[]>>();
-const _inFlightR = new Map<number, Promise<RecebRow[]>>();
+// Mês fechado vencido: devolve o que já tem (quase nunca mudou) e atualiza em segundo
+// plano, em vez de segurar a tela. Passado desse limite, espera o dado novo.
+const MAX_VELHO_MES_FECHADO = 24 * 60 * 60 * 1000;
+// Mês corrente vencido há pouco: se a renovação já está a caminho, serve o que tem por mais
+// um minuto em vez de segurar a tela (o dado continua com no máximo ~2 min, igual ao cache
+// antigo de 2 min). Passou disso, espera o dado novo.
+const GRACA_MES_ATUAL = 60 * 1000;
+// Enquanto o painel está em uso (ou foi usado há pouco), o servidor renova sozinho o que
+// está perto de vencer — assim quem volta pra tela encontra o cache já quente.
+const JANELA_ATIVIDADE = 90 * 60 * 1000;
+const INTERVALO_AQUECIMENTO = 15 * 1000;
+// Renova quando já passou dessa fração do TTL (com tick de 15 s e consulta de poucos segundos,
+// o mês corrente nunca chega a vencer enquanto há uso).
+const FRACAO_RENOVACAO = 0.5;
 
 // ─── Queries Firebird (por ano) ───────────────────────────────────────────────
 
-function fbVendas(emp: string, ano: number) {
+function fbVendas(emp: string, ini: string, fim: string) {
   return `
     select '${emp}' as emp,ped.pdv_data, ea.eta_descricao, r.rep_nome usu_nome,g.nome grupo,
     pn.nome subgrupo, pg.nome as familia ,sum(i.pvi_quantidade) qtde, rs.rvs_nome,
@@ -64,8 +82,8 @@ function fbVendas(emp: string, ano: number) {
     left join produtos_nivel2 pn on pn.codigo = p.pro_nivel2
     left join produtos_nivel1 g on g.codigo = p.pro_nivel1
     left join produtos_nivel3 pg on pg.codigo = p.pro_nivel3
-    where ped.pdv_data >= CAST('${ano}-01-01' AS DATE)
-    and ped.pdv_data < CAST('${ano + 1}-01-01' AS DATE)
+    where ped.pdv_data >= CAST('${ini}' AS DATE)
+    and ped.pdv_data < CAST('${fim}' AS DATE)
     and ped.pdv_psi_codigo not in ('CC')
     and ped.pdv_tve_codigo not in ('6','7','26','34')
     and c.cli_codigo not in ('44274','98030','49268')
@@ -73,7 +91,7 @@ function fbVendas(emp: string, ano: number) {
   `;
 }
 
-function fbVendasLockey(ano: number) {
+function fbVendasLockey(ini: string, fim: string) {
   return `
     select CASE WHEN ped.emp_fil_codigo='11' THEN 'Lockey SP'
                 WHEN ped.emp_fil_codigo='12' THEN 'FAST' END as emp,
@@ -92,8 +110,8 @@ function fbVendasLockey(ano: number) {
     left join produtos_nivel2 pn on pn.codigo = p.pro_nivel2
     left join produtos_nivel1 g on g.codigo = p.pro_nivel1
     left join produtos_nivel3 pg on pg.codigo = p.pro_nivel3
-    where ped.pdv_data >= CAST('${ano}-01-01' AS DATE)
-    and ped.pdv_data < CAST('${ano + 1}-01-01' AS DATE)
+    where ped.pdv_data >= CAST('${ini}' AS DATE)
+    and ped.pdv_data < CAST('${fim}' AS DATE)
     and ped.pdv_psi_codigo not in ('CC')
     and ped.pdv_tve_codigo not in ('6','7','26','34')
     and c.cli_codigo not in ('44274','98030','49268')
@@ -102,7 +120,7 @@ function fbVendasLockey(ano: number) {
   `;
 }
 
-function fbReceb(emp: string, ano: number) {
+function fbReceb(emp: string, ini: string, fim: string) {
   return `
     select '${emp}' as emp, r.rec_numero, b.rbx_dataliberacao as rec_data, r.rec_pedido,
     r.rec_vencimento, r.rec_valorpago,rep.rep_nome,
@@ -113,15 +131,15 @@ function fbReceb(emp: string, ano: number) {
     inner join representantes rep on rep.rep_codigo = r.rec_rep_codigo
     inner join clientes c on c.cli_codigo = r.rec_cli_codigo
     left join entidades_atividades e on e.eta_codigo = c.cli_eta_codigo
-    where b.rbx_datapagamento >= CAST('${ano}-01-01' AS DATE)
-    and b.rbx_datapagamento < CAST('${ano + 1}-01-01' AS DATE)
+    where b.rbx_datapagamento >= CAST('${ini}' AS DATE)
+    and b.rbx_datapagamento < CAST('${fim}' AS DATE)
     and b.rbx_valorbasecomissao > 0
     group by emp, r.rec_numero, rec_data, r.rec_pedido, r.rec_vencimento, r.rec_valorpago,
     rep.rep_nome, e.eta_descricao ,c.cli_nome,b.rbx_datapagamento, rep.rep_obs1
   `;
 }
 
-function fbRecebLockey(ano: number) {
+function fbRecebLockey(ini: string, fim: string) {
   return `
     select CASE WHEN r.rec_fil_codigo='11' THEN 'LOCKEY SP'
                 WHEN r.rec_fil_codigo='12' THEN 'FAST' END as emp,
@@ -134,8 +152,8 @@ function fbRecebLockey(ano: number) {
     inner join representantes rep on rep.rep_codigo = r.rec_rep_codigo
     inner join clientes c on c.cli_codigo = r.rec_cli_codigo
     left join entidades_atividades e on e.eta_codigo = c.cli_eta_codigo
-    where b.rbx_datapagamento >= CAST('${ano}-01-01' AS DATE)
-    and b.rbx_datapagamento < CAST('${ano + 1}-01-01' AS DATE)
+    where b.rbx_datapagamento >= CAST('${ini}' AS DATE)
+    and b.rbx_datapagamento < CAST('${fim}' AS DATE)
     and b.rbx_valorbasecomissao > 0
     and r.rec_fil_codigo in ('11','12')
     group by emp, r.rec_numero, rec_data, r.rec_pedido, r.rec_vencimento, r.rec_valorpago,
@@ -143,7 +161,7 @@ function fbRecebLockey(ano: number) {
   `;
 }
 
-function mysqlVendas(emp: string, ano: number) {
+function mysqlVendas(emp: string, ini: string, fim: string) {
   return `
     select '${emp}' as emp, o.\`Data\` as pdv_data,o.NomeVendedor as usu_nome,
     v.departamento as eta_descricao, p.Grupo as grupo, v.departamento as rvs_nome,
@@ -152,7 +170,7 @@ function mysqlVendas(emp: string, ano: number) {
     inner join orcamento o on i.Numero = o.IdPedido
     inner join pacad p on p.codigopro = i.CodigoVenda
     inner join vendedores v on v.codid = o.vendedor
-    where o.\`Data\` >= '${ano}-01-01' and o.\`Data\` < '${ano + 1}-01-01'
+    where o.\`Data\` >= '${ini}' and o.\`Data\` < '${fim}'
     and o.Orcamento = 'PEDIDO'
     and o.wsalt not in ('2')
     and o.idFormaPagamento not in ('26')
@@ -160,7 +178,7 @@ function mysqlVendas(emp: string, ano: number) {
   `;
 }
 
-function mysqlReceb(emp: string, ano: number) {
+function mysqlReceb(emp: string, ini: string, fim: string) {
   return `
     select '${emp}' as emp,c.Titulo as rec_numero,c.Emissao as rec_data,
     c.Vencimento as rec_vencimento, c.ValorPago as rec_valorpago,
@@ -168,7 +186,7 @@ function mysqlReceb(emp: string, ano: number) {
     c.DataBaixa, sum(c.ValorPago) as total
     from contasreceber c
     inner join vendedores v on v.CodId = c.IdVendedor
-    where c.DataBaixa >= '${ano}-01-01' and c.DataBaixa < '${ano + 1}-01-01'
+    where c.DataBaixa >= '${ini}' and c.DataBaixa < '${fim}'
     group by 1,2,3,4,5,6,7,8,9
   `;
 }
@@ -318,12 +336,12 @@ function rvsFromVendedorEP(vendedor: string | null): string | null {
   return null;
 }
 
-async function queryEPVendas(ano: number): Promise<VendaRow[]> {
+async function queryEPVendas(ini: string, fim: string): Promise<VendaRow[]> {
   try {
     const pool = await getPool();
     const result = await pool.request()
-      .input('ini', sql.VarChar, `${ano}-01-01`)
-      .input('fim', sql.VarChar, `${ano + 1}-01-01`)
+      .input('ini', sql.VarChar, ini)
+      .input('fim', sql.VarChar, fim)
       .query(`
         SELECT
           e.VENDEDOR      AS usu_nome,
@@ -424,94 +442,327 @@ export function fontesIndisponiveis(): { fonte: string; erro: string }[] {
 // aplicado na leitura (getVendas/getRecebimentos), assim uma alteração no vínculo tem
 // efeito imediato sem precisar invalidar/refazer as consultas nos bancos externos.
 
-function getVendasBrutas(ano: number, forcarFresco = false): Promise<VendaRow[]> {
-  const hit = _cv.get(ano);
-  if (!forcarFresco && hit && Date.now() - hit.ts < hit.ttl) return Promise.resolve(hit.rows);
-
-  const inflight = _inFlightV.get(ano);
-  if (inflight) return inflight;
-
-  const promise = (async () => {
-    try {
-      const [settled, epRows] = await Promise.all([
-        Promise.allSettled([
-          comBreaker('SJC', fbSJC.host, () => queryFirebird(fbSJC, fbVendas('SJC', ano))),
-          comBreaker('SPM', fbSPM.host, () => queryFirebird(fbSPM, fbVendas('SPM', ano))),
-          comBreaker('LOCKEY MG', fbLockeyMG.host, () => queryFirebird(fbLockeyMG, fbVendas('LOCKEY MG', ano))),
-          comBreaker('LOCKEY SP/FAST', fbLockey.host, () => queryFirebird(fbLockey, fbVendasLockey(ano))),
-          comBreaker('Rio de Janeiro', fbLockeyRJ.host, () => queryFirebird(fbLockeyRJ, fbVendas('Rio de Janeiro', ano))),
-          comBreaker('Belo Horizonte', fbLockeyBH.host, () => queryFirebird(fbLockeyBH, fbVendas('Belo Horizonte', ano))),
-          comBreaker('LOCKEY RS', myLockeyRS.host, () => queryMySQL(myLockeyRS, mysqlVendas('LOCKEY RS', ano))),
-          comBreaker('NITEROI', myNiteroi.host, () => queryMySQL(myNiteroi, mysqlVendas('NITEROI', ano))),
-        ]),
-        queryEPVendas(ano),
-      ]);
-
-      const raw: Record<string, unknown>[] = [];
-      let incompleto = false;
-      settled.forEach(r => {
-        if (r.status === 'fulfilled') raw.push(...r.value);
-        else {
-          incompleto = true;
-          console.error('[dados-externos] vendas:', (r.reason as Error)?.message ?? r.reason);
-        }
-      });
-
-      const rows = [...normalizeVendas(raw), ...epRows];
-      _cv.set(ano, { rows, ts: Date.now(), ttl: incompleto ? TTL_INCOMPLETO : TTL });
-      return rows;
-    } finally {
-      _inFlightV.delete(ano);
-    }
-  })();
-
-  _inFlightV.set(ano, promise);
-  return promise;
+interface FonteExterna {
+  nome: string;
+  host: string;
+  /** false = a própria consulta já trata falha e devolve [] (caso da EP) */
+  usaBreaker: boolean;
+  /** true = as linhas já saem no formato final (caso da EP), sem passar pelo normalizar */
+  jaNormalizada?: boolean;
+  /**
+   * true = a fonte devolve mais de uma empresa (EMP) na mesma consulta (Lockey SP + FAST). A consulta
+   * do ano vinha ordenada por empresa e depois por data; ao juntar os meses reproduzimos essa ordem
+   * (a ordem das linhas decide qual empresa aparece primeiro para um vendedor com vendas nas duas).
+   */
+  ordenarPorEmp?: boolean;
+  consultar: (ini: string, fim: string) => Promise<Record<string, unknown>[]>;
 }
+
+interface PedacoMes {
+  mes: number;
+  ini: string;
+  fim: string;
+  ttl: number;
+  /** mês que já fechou: quase não muda, pode ser servido "velho" enquanto atualiza */
+  fechado: boolean;
+  /** mês corrente ou o anterior — os únicos que o forcarFresco refaz */
+  recente: boolean;
+}
+
+interface Slot<T> { rows: T[]; ts: number; ok: boolean }
+
+// Fila por fonte: no máximo UMA consulta nossa por vez em cada base (o mesmo perfil de
+// carga de antes), e o que uma tela está esperando passa na frente do que é só renovação
+// em segundo plano.
+type Prioridade = 'alta' | 'baixa';
+interface Tarefa { fn: () => Promise<void>; prio: Prioridade; promise: Promise<void>; resolve: () => void }
+const _agenda = new Map<string, { rodando: boolean; fila: Tarefa[] }>();
+
+function enfileirar(chave: string, prio: Prioridade, fn: () => Promise<void>): Tarefa {
+  let resolve!: () => void;
+  const promise = new Promise<void>((res) => { resolve = res; });
+  const tarefa: Tarefa = { fn, prio, promise, resolve };
+  let ag = _agenda.get(chave);
+  if (!ag) { ag = { rodando: false, fila: [] }; _agenda.set(chave, ag); }
+  ag.fila.push(tarefa);
+  void rodarFila(chave);
+  return tarefa;
+}
+
+async function rodarFila(chave: string): Promise<void> {
+  const ag = _agenda.get(chave)!;
+  if (ag.rodando) return;
+  ag.rodando = true;
+  try {
+    while (ag.fila.length) {
+      const i = ag.fila.findIndex((t) => t.prio === 'alta');
+      const [tarefa] = ag.fila.splice(i >= 0 ? i : 0, 1);
+      try { await tarefa.fn(); } catch { /* a fn já trata o próprio erro */ }
+      tarefa.resolve();
+    }
+  } finally {
+    ag.rodando = false;
+  }
+}
+
+function pad2(n: number): string { return String(n).padStart(2, '0'); }
+
+// Divide o ano em pedaços mensais [ini, fim). O mês corrente vai até o fim do ano (pega
+// também eventual lançamento com data futura, como a consulta do ano inteiro fazia).
+function planoDoAno(ano: number): PedacoMes[] {
+  const hoje = new Date();
+  const anoAtual = hoje.getFullYear();
+  const mesAtual = hoje.getMonth() + 1;
+  const fimAno = `${ano + 1}-01-01`;
+
+  if (ano > anoAtual) {
+    return [{ mes: 1, ini: `${ano}-01-01`, fim: fimAno, ttl: TTL_MES_ATUAL, fechado: false, recente: true }];
+  }
+  const ultimo = ano === anoAtual ? mesAtual : 12;
+  const plano: PedacoMes[] = [];
+  for (let mes = 1; mes <= ultimo; mes++) {
+    const atual = ano === anoAtual && mes === mesAtual;
+    const idadeMeses = (anoAtual - ano) * 12 + (mesAtual - mes);
+    plano.push({
+      mes,
+      ini: `${ano}-${pad2(mes)}-01`,
+      fim: atual ? fimAno : (mes === 12 ? fimAno : `${ano}-${pad2(mes + 1)}-01`),
+      ttl: atual ? TTL_MES_ATUAL
+        : idadeMeses === 1 ? TTL_MES_ANTERIOR
+        : ano < anoAtual ? TTL_ANO_PASSADO
+        : TTL_MES_FECHADO,
+      fechado: !atual,
+      recente: atual || idadeMeses === 1,
+    });
+  }
+  return plano;
+}
+
+// Evita encher o log: uma fonte fora do ar falharia a cada renovação.
+const _ultimoLogErro = new Map<string, number>();
+function logarErroFonte(rotulo: string, mensagem: string): void {
+  const chave = `${rotulo}|${mensagem}`;
+  if (Date.now() - (_ultimoLogErro.get(chave) ?? 0) < 60_000) return;
+  _ultimoLogErro.set(chave, Date.now());
+  console.error(`[dados-externos] ${rotulo}:`, mensagem);
+}
+
+interface CacheMensal<T> {
+  rotulo: string;
+  fontes: FonteExterna[];
+  normalizar: (raw: Record<string, unknown>[]) => T[];
+  slots: Map<string, Slot<T>>;
+  emVoo: Map<string, Tarefa>;
+  montados: Map<number, { assinatura: string; rows: T[] }>;
+}
+
+function criarCacheMensal<T>(
+  rotulo: string,
+  fontes: FonteExterna[],
+  normalizar: (raw: Record<string, unknown>[]) => T[],
+): CacheMensal<T> {
+  return { rotulo, fontes, normalizar, slots: new Map(), emVoo: new Map(), montados: new Map() };
+}
+
+function chaveSlot(ano: number, p: PedacoMes, fonte: FonteExterna): string {
+  return `${ano}:${p.mes}:${p.fim}:${fonte.nome}`;
+}
+
+function atualizarSlot<T>(cache: CacheMensal<T>, chave: string, p: PedacoMes, fonte: FonteExterna, prio: Prioridade): Tarefa {
+  const emVoo = cache.emVoo.get(chave);
+  if (emVoo) {
+    if (prio === 'alta') emVoo.prio = 'alta'; // alguém passou a esperar por isso: sobe na fila
+    return emVoo;
+  }
+  const tarefa = enfileirar(`${cache.rotulo}:${fonte.nome}`, prio, async () => {
+    try {
+      const raw = fonte.usaBreaker
+        ? await comBreaker(fonte.nome, fonte.host, () => fonte.consultar(p.ini, p.fim))
+        : await fonte.consultar(p.ini, p.fim);
+      cache.slots.set(chave, {
+        rows: fonte.jaNormalizada ? (raw as unknown as T[]) : cache.normalizar(raw),
+        ts: Date.now(),
+        ok: true,
+      });
+    } catch (err) {
+      logarErroFonte(cache.rotulo, (err as Error)?.message ?? String(err));
+      // Mantém o que já se sabia desse pedaço (se houver) em vez de zerá-lo, mas marca como
+      // incompleto: tenta de novo em 20 s e a tela segue avisando que a fonte está fora.
+      const anterior = cache.slots.get(chave);
+      cache.slots.set(chave, { rows: anterior?.rows ?? [], ts: Date.now(), ok: false });
+    }
+  });
+  cache.emVoo.set(chave, tarefa);
+  const limpar = () => { if (cache.emVoo.get(chave) === tarefa) cache.emVoo.delete(chave); };
+  void tarefa.promise.then(limpar, limpar);
+  return tarefa;
+}
+
+function slotPrecisaRenovar(slot: Slot<unknown> | undefined, p: PedacoMes, fracaoDoTtl: number): boolean {
+  if (!slot) return true;
+  const idade = Date.now() - slot.ts;
+  return idade >= (slot.ok ? p.ttl * fracaoDoTtl : TTL_INCOMPLETO);
+}
+
+function montarAno<T>(cache: CacheMensal<T>, ano: number, plano: PedacoMes[]): T[] {
+  const slots: Slot<T>[][] = cache.fontes.map((f) =>
+    plano.map((p) => cache.slots.get(chaveSlot(ano, p, f)) ?? { rows: [], ts: 0, ok: false })
+  );
+  const assinatura = slots.map((linha) => linha.map((s) => s.ts).join(',')).join(';');
+  const montado = cache.montados.get(ano);
+  if (montado && montado.assinatura === assinatura) return montado.rows;
+  // Mesma ordem de antes: fonte por fonte (SJC, SPM, ..., EP), e dentro da fonte por data.
+  const rows = slots.flatMap((linha, i) => {
+    const juntas = linha.flatMap((s) => s.rows);
+    if (!cache.fontes[i].ordenarPorEmp) return juntas;
+    // sort é estável: dentro de cada empresa a ordem por data (mês a mês) é preservada
+    return juntas.sort((a, b) => {
+      const ea = (a as unknown as { EMP: string }).EMP;
+      const eb = (b as unknown as { EMP: string }).EMP;
+      return ea < eb ? -1 : ea > eb ? 1 : 0;
+    });
+  });
+  cache.montados.set(ano, { assinatura, rows });
+  return rows;
+}
+
+// Atividade recente + anos em uso: base do aquecimento automático.
+let _ultimaAtividade = 0;
+const _anosEmUso = new Map<number, number>();
+
+async function obterAno<T>(cache: CacheMensal<T>, ano: number, forcarFresco: boolean): Promise<T[]> {
+  _ultimaAtividade = Date.now();
+  _anosEmUso.set(ano, _ultimaAtividade);
+  const plano = planoDoAno(ano);
+  const esperas: Promise<void>[] = [];
+
+  for (const p of plano) {
+    for (const f of cache.fontes) {
+      const chave = chaveSlot(ano, p, f);
+      const slot = cache.slots.get(chave);
+      const forcar = forcarFresco && p.recente;
+      if (!forcar && !slotPrecisaRenovar(slot, p, 1)) continue;
+
+      const idade = slot ? Date.now() - slot.ts : Infinity;
+      const limiteVelho = p.fechado ? MAX_VELHO_MES_FECHADO : p.ttl + GRACA_MES_ATUAL;
+      if (!forcar && slot && slot.ok && idade < limiteVelho) {
+        void atualizarSlot(cache, chave, p, f, 'baixa');
+        continue;
+      }
+      esperas.push(atualizarSlot(cache, chave, p, f, 'alta').promise);
+    }
+  }
+
+  if (esperas.length) await Promise.all(esperas);
+  return montarAno(cache, ano, plano);
+}
+
+// Renova em segundo plano o que está perto de vencer, enquanto o painel está em uso.
+function aquecerCache<T>(cache: CacheMensal<T>): void {
+  const agora = Date.now();
+  for (const [ano, ultimoUso] of _anosEmUso) {
+    if (agora - ultimoUso > JANELA_ATIVIDADE) { _anosEmUso.delete(ano); continue; }
+    for (const p of planoDoAno(ano)) {
+      for (const f of cache.fontes) {
+        const chave = chaveSlot(ano, p, f);
+        if (slotPrecisaRenovar(cache.slots.get(chave), p, FRACAO_RENOVACAO)) {
+          void atualizarSlot(cache, chave, p, f, 'baixa');
+        }
+      }
+    }
+  }
+}
+
+function fonteFirebird(
+  nome: string,
+  opts: typeof fbSJC,
+  sql: (ini: string, fim: string) => string,
+): FonteExterna {
+  return { nome, host: opts.host, usaBreaker: true, consultar: (ini, fim) => queryFirebird(opts, sql(ini, fim)) };
+}
+
+function fonteMySQL(
+  nome: string,
+  opts: typeof myLockeyRS,
+  sql: (ini: string, fim: string) => string,
+): FonteExterna {
+  return { nome, host: opts.host, usaBreaker: true, consultar: (ini, fim) => queryMySQL(opts, sql(ini, fim)) };
+}
+
+const _cacheVendas = criarCacheMensal<VendaRow>(
+  'vendas',
+  [
+    fonteFirebird('SJC', fbSJC, (i, f) => fbVendas('SJC', i, f)),
+    fonteFirebird('SPM', fbSPM, (i, f) => fbVendas('SPM', i, f)),
+    fonteFirebird('LOCKEY MG', fbLockeyMG, (i, f) => fbVendas('LOCKEY MG', i, f)),
+    { ...fonteFirebird('LOCKEY SP/FAST', fbLockey, fbVendasLockey), ordenarPorEmp: true },
+    fonteFirebird('Rio de Janeiro', fbLockeyRJ, (i, f) => fbVendas('Rio de Janeiro', i, f)),
+    fonteFirebird('Belo Horizonte', fbLockeyBH, (i, f) => fbVendas('Belo Horizonte', i, f)),
+    fonteMySQL('LOCKEY RS', myLockeyRS, (i, f) => mysqlVendas('LOCKEY RS', i, f)),
+    fonteMySQL('NITEROI', myNiteroi, (i, f) => mysqlVendas('NITEROI', i, f)),
+    // EP (SQL Server): entra por último (como antes: depois das 8 bases), já devolve linhas
+    // no formato final e trata a própria falha devolvendo [] (sem breaker).
+    {
+      nome: 'EP',
+      host: '',
+      usaBreaker: false,
+      jaNormalizada: true,
+      consultar: (ini, fim) => queryEPVendas(ini, fim) as unknown as Promise<Record<string, unknown>[]>,
+    },
+  ],
+  normalizeVendas,
+);
+
+function getVendasBrutas(ano: number, forcarFresco = false): Promise<VendaRow[]> {
+  return obterAno(_cacheVendas, ano, forcarFresco);
+}
+
+const _cacheReceb = criarCacheMensal<RecebRow>(
+  'recebimentos',
+  [
+    fonteFirebird('SJC', fbSJC, (i, f) => fbReceb('SJC', i, f)),
+    fonteFirebird('SPM', fbSPM, (i, f) => fbReceb('SPM', i, f)),
+    fonteFirebird('LOCKEY MG', fbLockeyMG, (i, f) => fbReceb('LOCKEY MG', i, f)),
+    fonteFirebird('LOCKEY SP/FAST', fbLockey, fbRecebLockey),
+    fonteFirebird('Rio de Janeiro', fbLockeyRJ, (i, f) => fbReceb('Rio de Janeiro', i, f)),
+    fonteFirebird('Belo Horizonte', fbLockeyBH, (i, f) => fbReceb('Belo Horizonte', i, f)),
+    fonteMySQL('LOCKEY RS', myLockeyRS, (i, f) => mysqlReceb('LOCKEY RS', i, f)),
+    fonteMySQL('NITEROI', myNiteroi, (i, f) => mysqlReceb('NITEROI', i, f)),
+  ],
+  normalizeReceb,
+);
 
 function getRecebimentosBrutos(ano: number, forcarFresco = false): Promise<RecebRow[]> {
-  const hit = _cr.get(ano);
-  if (!forcarFresco && hit && Date.now() - hit.ts < hit.ttl) return Promise.resolve(hit.rows);
-
-  const inflight = _inFlightR.get(ano);
-  if (inflight) return inflight;
-
-  const promise = (async () => {
-    try {
-      const settled = await Promise.allSettled([
-        comBreaker('SJC', fbSJC.host, () => queryFirebird(fbSJC, fbReceb('SJC', ano))),
-        comBreaker('SPM', fbSPM.host, () => queryFirebird(fbSPM, fbReceb('SPM', ano))),
-        comBreaker('LOCKEY MG', fbLockeyMG.host, () => queryFirebird(fbLockeyMG, fbReceb('LOCKEY MG', ano))),
-        comBreaker('LOCKEY SP/FAST', fbLockey.host, () => queryFirebird(fbLockey, fbRecebLockey(ano))),
-        comBreaker('Rio de Janeiro', fbLockeyRJ.host, () => queryFirebird(fbLockeyRJ, fbReceb('Rio de Janeiro', ano))),
-        comBreaker('Belo Horizonte', fbLockeyBH.host, () => queryFirebird(fbLockeyBH, fbReceb('Belo Horizonte', ano))),
-        comBreaker('LOCKEY RS', myLockeyRS.host, () => queryMySQL(myLockeyRS, mysqlReceb('LOCKEY RS', ano))),
-        comBreaker('NITEROI', myNiteroi.host, () => queryMySQL(myNiteroi, mysqlReceb('NITEROI', ano))),
-      ]);
-
-      const raw: Record<string, unknown>[] = [];
-      let incompleto = false;
-      settled.forEach(r => {
-        if (r.status === 'fulfilled') raw.push(...r.value);
-        else {
-          incompleto = true;
-          console.error('[dados-externos] recebimentos:', (r.reason as Error)?.message ?? r.reason);
-        }
-      });
-
-      const rows = normalizeReceb(raw);
-      _cr.set(ano, { rows, ts: Date.now(), ttl: incompleto ? TTL_INCOMPLETO : TTL });
-      return rows;
-    } finally {
-      _inFlightR.delete(ano);
-    }
-  })();
-
-  _inFlightR.set(ano, promise);
-  return promise;
+  return obterAno(_cacheReceb, ano, forcarFresco);
 }
 
-// forcarFresco=true ignora o cache em memória e busca direto nas 8 bases externas.
+let _aquecimentoIniciado = false;
+
+/**
+ * Chamado uma vez na subida do servidor: já busca o ano corrente (assim a primeira tela do
+ * dia não paga a consulta fria) e passa a renovar o cache sozinho enquanto o painel estiver
+ * em uso. O timer não segura o processo vivo e nunca lança.
+ */
+export function iniciarAquecimentoComissao(): void {
+  if (_aquecimentoIniciado) return;
+  _aquecimentoIniciado = true;
+  const ano = new Date().getFullYear();
+  void getVendasBrutas(ano).catch((e) => console.error('[dados-externos] aquecimento vendas:', e?.message ?? e));
+  void getRecebimentosBrutos(ano).catch((e) => console.error('[dados-externos] aquecimento recebimentos:', e?.message ?? e));
+  const timer = setInterval(() => {
+    try {
+      if (Date.now() - _ultimaAtividade > JANELA_ATIVIDADE) return;
+      aquecerCache(_cacheVendas);
+      aquecerCache(_cacheReceb);
+    } catch (e) {
+      console.error('[dados-externos] aquecimento:', (e as Error)?.message ?? e);
+    }
+  }, INTERVALO_AQUECIMENTO);
+  timer.unref();
+}
+
+// forcarFresco=true ignora o cache do mês corrente e do anterior e busca direto nas bases
+// externas (os meses fechados não mudam o bastante para justificar).
 // Usado na tela individual do vendedor, onde o número precisa refletir a venda que
 // acabou de entrar, não o que foi buscado há até 2 min por outra pessoa.
 export async function getVendas(ano: number, forcarFresco = false): Promise<VendaRow[]> {
@@ -533,10 +784,11 @@ export async function getRecebimentos(ano: number, forcarFresco = false): Promis
 }
 
 export function invalidarCache() {
-  _cv.clear();
-  _cr.clear();
-  _inFlightV.clear();
-  _inFlightR.clear();
+  for (const c of [_cacheVendas, _cacheReceb]) {
+    c.slots.clear();
+    c.emVoo.clear();
+    c.montados.clear();
+  }
 }
 
 // ─── Helpers de filtro e agregação (usados nos routes) ───────────────────────

@@ -32,6 +32,7 @@ import { startMultiPrecoJob } from "./jobs/multiPrecoJob";
 import { startCobrancaJob } from "./jobs/cobrancaJob";
 import { startProductFirstMovementJob } from "./jobs/productFirstMovementJob";
 import { startEstoqueMinimoJob } from "./jobs/estoqueMinimoJob";
+import { iniciarAquecimentoComissao } from "./services/comissao/dados-externos";
 import { setupSwagger } from "./swagger";
 
 const app = express();
@@ -136,4 +137,6 @@ httpServer.listen(PORT, "0.0.0.0", () => {
   startCobrancaJob();
   startProductFirstMovementJob().catch((err) => console.error("[product-first-movement] Erro ao iniciar:", err));
   startEstoqueMinimoJob().catch((err) => console.error("[estoque-minimo] Erro ao iniciar:", err));
+  // Painel de comissão: já busca o ano corrente e mantém o cache quente enquanto estiver em uso
+  iniciarAquecimentoComissao();
 });

@@ -599,8 +599,29 @@ export default function ComissaoGestor() {
       porSetor.get(v.setor)!.push(v);
     });
 
+    // Vendedora com meta cadastrada no mês mas sem nenhuma venda ainda não aparece em
+    // `vendedores` (a lista vem das vendas do período) — mas a meta dela faz parte da meta
+    // do setor do mesmo jeito. Por isso, em Distribuidores e Ferragens, a soma percorre
+    // também todos os vendedores com meta configurada (distMetasMap/ferrMetasMap).
+    // Com filtro de empresa a lista já é um recorte das vendas, então não completamos.
+    const completarComMetas = !filtroEmpresa;
+    const nomesComMeta = (lista: ResumoVendedor[], mapa: Record<string, unknown>) => {
+      const nomes = new Set(lista.map((v) => v.vendedor));
+      if (completarComMetas) Object.keys(mapa).forEach((n) => nomes.add(n));
+      return [...nomes];
+    };
+
     const somaMeta = (lista: ResumoVendedor[], mapa: Record<string, { [k: string]: number | string }>, campo: string) =>
       lista.reduce((s, v) => s + (Number(mapa[v.vendedor]?.[campo]) || 0), 0);
+    const somaMetaConfig = (lista: ResumoVendedor[], mapa: Record<string, { [k: string]: number | string }>, campo: string) =>
+      nomesComMeta(lista, mapa).reduce((s, nome) => s + (Number(mapa[nome]?.[campo]) || 0), 0);
+
+    // Setor sem nenhuma venda no período, mas com metas configuradas (início de mês):
+    // o card do setor também aparece (só quando o filtro de setor permite).
+    if (completarComMetas && (!filtroSetor || filtroSetor === 'DISTRIBUIDORES')
+        && !porSetor.has('DISTRIBUIDORES') && Object.keys(distMetasMap).length > 0) {
+      porSetor.set('DISTRIBUIDORES', []);
+    }
 
     const resumos: MetaSetorResumo[] = [];
     porSetor.forEach((lista, setor) => {
@@ -614,19 +635,19 @@ export default function ComissaoGestor() {
       if (isFerr) {
         realizado = lista.reduce((s, v) => s + v.total_vendas, 0);
         tiersDef = [
-          { label: 'Meta 1', valor: somaMeta(lista, ferrMetasMap, 'meta1_valor') },
-          { label: 'Meta 2', valor: somaMeta(lista, ferrMetasMap, 'meta2_valor') },
-          { label: 'Meta 3', valor: somaMeta(lista, ferrMetasMap, 'meta3_valor') },
-          { label: 'Meta Desafio', valor: somaMeta(lista, ferrMetasMap, 'metadesafio_valor') },
+          { label: 'Meta 1', valor: somaMetaConfig(lista, ferrMetasMap, 'meta1_valor') },
+          { label: 'Meta 2', valor: somaMetaConfig(lista, ferrMetasMap, 'meta2_valor') },
+          { label: 'Meta 3', valor: somaMetaConfig(lista, ferrMetasMap, 'meta3_valor') },
+          { label: 'Meta Desafio', valor: somaMetaConfig(lista, ferrMetasMap, 'metadesafio_valor') },
         ];
       } else if (isDist) {
         realizado = lista.reduce((s, v) => s + v.total_vendas, 0);
         tiersDef = [
-          { label: 'Meta 1', valor: somaMeta(lista, distMetasMap, 'meta1_valor') },
-          { label: 'Meta 2', valor: somaMeta(lista, distMetasMap, 'meta2_valor') },
-          { label: 'Meta 3', valor: somaMeta(lista, distMetasMap, 'meta3_valor') },
-          { label: 'Meta 4', valor: somaMeta(lista, distMetasMap, 'meta4_valor') },
-          { label: 'Meta Desafio', valor: somaMeta(lista, distMetasMap, 'metadesafio_valor') },
+          { label: 'Meta 1', valor: somaMetaConfig(lista, distMetasMap, 'meta1_valor') },
+          { label: 'Meta 2', valor: somaMetaConfig(lista, distMetasMap, 'meta2_valor') },
+          { label: 'Meta 3', valor: somaMetaConfig(lista, distMetasMap, 'meta3_valor') },
+          { label: 'Meta 4', valor: somaMetaConfig(lista, distMetasMap, 'meta4_valor') },
+          { label: 'Meta Desafio', valor: somaMetaConfig(lista, distMetasMap, 'metadesafio_valor') },
         ];
       } else {
         realizado = isTV
@@ -673,7 +694,7 @@ export default function ComissaoGestor() {
     });
 
     return resumos.sort((a, b) => a.setor.localeCompare(b.setor));
-  }, [vendedores, metasMap, ferrMetasMap, distMetasMap, ferrMetaGrupo]);
+  }, [vendedores, metasMap, ferrMetasMap, distMetasMap, ferrMetaGrupo, filtroEmpresa, filtroSetor]);
 
   // Projeção do mês — ritmo em dias úteis (seg–sex) decorridos vs total do mês
   const hoje = new Date();

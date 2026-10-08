@@ -858,6 +858,21 @@ router.get("/vendedor/:nome", async (req: any, res: any) => {
       };
     });
 
+    // Sem venda no período mas com vendas no ano: devolve uma linha zerada (setor/empresa da
+    // venda mais recente) — assim a tela do vendedor ainda mostra a meta dele e o setor,
+    // mesmo antes da primeira venda do mês.
+    if (resumo.length === 0 && vendasAno.length > 0) {
+      const ref = vendasAno.reduce((a, b) => (b.PDV_DATA.getTime() > a.PDV_DATA.getTime() ? b : a));
+      resumo.push({
+        vendedor: ref.USU_NOME ?? vendedor,
+        setor: ref.RVS_NOME ?? '',
+        empresa: ref.EMP,
+        total_vendas: 0,
+        total_qtde: 0,
+        total_registros: 0,
+      });
+    }
+
     // Permissão GESTOR: verifica se o setor do vendedor está nos setores do usuário
     if (!podeVerTudo(usuario.cargo) && usuario.cargo !== 'VENDEDOR') {
       const setorDoVendedor = resumo[0]?.setor;

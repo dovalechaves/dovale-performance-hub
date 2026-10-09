@@ -1,5 +1,5 @@
 import { Server as SocketServer } from "socket.io";
-import { getSupa, supaGetAll, supaInsertBatch } from "./supabase";
+import * as db from "./disparo-db";
 import * as meta from "./meta-api";
 import * as cw from "./chatwoot";
 
@@ -130,22 +130,39 @@ async function enviarParaContato(
   }
 }
 
+// Disparos com loop ativo neste processo. Se o processo reinicia no meio de uma
+// pausa, o status fica PAUSING sem nenhum loop vivo — é assim que dá pra detectar.
+const disparosAtivos = new Set<number>();
+
+export function disparoEmExecucao(disparoId: number): boolean {
+  return disparosAtivos.has(disparoId);
+}
+
 export async function processarDisparo(disparoId: number, inboxId: number) {
-  const supa = getSupa();
-  const { data: dData } = await supa.from("disparos").select("*").eq("id", disparoId).single();
+  if (disparosAtivos.has(disparoId)) return;
+  disparosAtivos.add(disparoId);
+  try {
+    await executarDisparo(disparoId, inboxId);
+  } finally {
+    disparosAtivos.delete(disparoId);
+  }
+}
+
+async function executarDisparo(disparoId: number, inboxId: number) {
+  const dData = await db.obterDisparo(disparoId);
   if (!dData) return;
 
-  await supa.from("disparos").update({ status: "PROCESSING" }).eq("id", disparoId);
+  await db.atualizarStatusDisparo(disparoId, "PROCESSING");
   emit("status_disparo", { id: disparoId, status: "PROCESSING" });
 
-  const todosContatos = await supaGetAll("contatos_lista", { column: "lista_id", value: dData.lista_id });
+  const todosContatos = await db.listarContatos(dData.lista_id);
   const totalGeral = todosContatos.length;
 
-  const logsExistentes = await supaGetAll("logs_disparo", { column: "disparo_id", value: disparoId });
+  const logsExistentes = await db.listarLogs(disparoId);
   const processados = new Set(
-    logsExistentes.filter((l: any) => l.status === "SENT" || l.status === "FAILED").map((l: any) => l.contato_numero),
+    logsExistentes.filter((l) => l.status === "SENT" || l.status === "FAILED").map((l) => l.contato_numero),
   );
-  const pendentes = todosContatos.filter((c: any) => !processados.has(c.numero));
+  const pendentes = todosContatos.filter((c) => !processados.has(c.numero));
 
   const cfg = parseConfiguracao(dData.configuracao);
   const lang = cfg.language_code ?? "pt_BR";
@@ -170,10 +187,8 @@ export async function processarDisparo(disparoId: number, inboxId: number) {
   let etiqueta = String(cfg.etiqueta ?? "").trim();
   if (!etiqueta) {
     try {
-      const { data: cfgs } = await supa.from("template_configs").select("*");
-      const nome = String(dData.template_nome).toLowerCase();
-      const row = (cfgs ?? []).find((r: any) => String(r.template_nome).toLowerCase() === nome);
-      if (row?.etiqueta) etiqueta = row.etiqueta;
+      const mapa = await db.mapaTemplateEtiqueta();
+      etiqueta = mapa[String(dData.template_nome).toLowerCase()] ?? "";
     } catch {}
   }
   let timeId: number | null = cfg.time_id ? Number(cfg.time_id) : null;
@@ -192,19 +207,18 @@ export async function processarDisparo(disparoId: number, inboxId: number) {
   if (!sincronizado) {
     const erroMsg = `Template '${dData.template_nome}' não sincronizado no Chatwoot. Verifique se está APROVADO na Meta e sincronize os templates no inbox.`;
     console.error(`[Disparo ${disparoId}] ${erroMsg}`);
-    await supa.from("disparos").update({ status: "FAILED", resultado: erroMsg }).eq("id", disparoId);
+    await db.atualizarStatusDisparo(disparoId, "FAILED", erroMsg);
     emit("status_disparo", { id: disparoId, status: "FAILED", erro: erroMsg });
     return;
   }
 
-  let sucessos = logsExistentes.filter((l: any) => l.status === "SENT").length;
-  let falhas = logsExistentes.filter((l: any) => l.status === "FAILED").length;
+  let sucessos = logsExistentes.filter((l) => l.status === "SENT").length;
+  let falhas = logsExistentes.filter((l) => l.status === "FAILED").length;
 
   for (let i = 0; i < pendentes.length; i += LOTE) {
     // Verifica pausa
-    const { data: check } = await supa.from("disparos").select("status").eq("id", disparoId).single();
-    if (check?.status === "PAUSING") {
-      await supa.from("disparos").update({ status: "PAUSED" }).eq("id", disparoId);
+    if ((await db.obterStatusDisparo(disparoId)) === "PAUSING") {
+      await db.atualizarStatusDisparo(disparoId, "PAUSED");
       emit("status_disparo", { id: disparoId, status: "PAUSED" });
       console.log(`[Disparo ${disparoId}] Pausado após ${sucessos + falhas}/${totalGeral}`);
       return;
@@ -238,7 +252,7 @@ export async function processarDisparo(disparoId: number, inboxId: number) {
       }
     }
 
-    if (logsLote.length) await supaInsertBatch("logs_disparo", logsLote);
+    if (logsLote.length) await db.inserirLogs(logsLote);
 
     const feitos = sucessos + falhas;
     emit("progresso_disparo", {
@@ -249,7 +263,7 @@ export async function processarDisparo(disparoId: number, inboxId: number) {
     });
   }
 
-  await supa.from("disparos").update({ status: "COMPLETED" }).eq("id", disparoId);
+  await db.atualizarStatusDisparo(disparoId, "COMPLETED");
   emit("status_disparo", { id: disparoId, status: "COMPLETED" });
   console.log(`[Disparo ${disparoId}] Concluído — ${sucessos} enviados, ${falhas} falhas`);
 }

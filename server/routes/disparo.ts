@@ -4,14 +4,14 @@ import mime from "mime-types";
 import path from "path";
 import fs from "fs";
 import jwt from "jsonwebtoken";
-import { getSupa, supaGetAll, supaInsertBatch, resetSupa } from "../services/supabase";
+import * as db from "../services/disparo-db";
 import { getPool } from "../db/sqlserver";
 import * as meta from "../services/meta-api";
 import * as cw from "../services/chatwoot";
 import { validarArquivo } from "../services/importer";
 import {
   parseConfiguracao, montarComponentesTemplate, detalharTemplate,
-  processarDisparo, setSocketIO,
+  processarDisparo, disparoEmExecucao, setSocketIO,
 } from "../services/disparo-engine";
 import type { Server as SocketServer } from "socket.io";
 
@@ -28,8 +28,9 @@ const NUMEROS_APROVADORES = (process.env.NUMERO_APROVADOR ?? "5512981898755,5519
 const APROVACAO_TIMEOUT_MIN = Number(process.env.APROVACAO_TIMEOUT_MIN) || 10;
 const UPLOAD_DIR = path.resolve("uploads");
 const MEDIA_DIR = path.resolve("uploads_media");
-// Bucket público no Supabase Storage (CDN) — aguenta a Meta baixar a imagem N vezes no disparo
-const BUCKET_MIDIA = process.env.SUPABASE_BUCKET_MIDIA ?? "disparo-midia";
+// A mídia é servida pelo próprio backend, atrás do Cloudflare: com cache imutável a Meta
+// baixa a imagem do CDN (uma vez por destinatário) sem custo de banda nem carga no backend.
+const MEDIA_CACHE_MAX_AGE = "365d";
 // Inbox padrão do Chatwoot (configurado no .env) — usado quando o disparo não especifica
 const INBOX_PADRAO = Number(process.env.inbox_id_chatwoot) || 1;
 const MEDIA_MAX_BYTES = 16 * 1024 * 1024; // Meta limita vídeos a 16 MB
@@ -75,14 +76,10 @@ router.post("/webhook/chatwoot", async (req: Request, res: Response) => {
     const isNegado = textoFinal.includes("NEGADO") || textoFinal.includes("NÃO") || textoFinal.includes("NAO");
     if (!isAutorizado && !isNegado) return;
 
-    const supa = getSupa();
-    const conversaId = conversation?.id ?? null;
+    const conversaId = Number(conversation?.id) || null;
 
-    // Busca disparo aguardando aprovação — primeiro pelo conversa_id, depois qualquer pendente
-    let query = supa.from("disparos").select("*").eq("status", "AWAITING_APPROVAL");
-    if (conversaId) query = query.eq("aprovacao_conversa_id", conversaId);
-    const { data: disparos } = await query.order("data_inicio", { ascending: false }).limit(1);
-    const d = disparos?.[0];
+    // Busca disparo aguardando aprovação pelo conversa_id (ou qualquer pendente, se não vier)
+    const d = await db.obterDisparoAguardandoAprovacao(conversaId);
     if (!d) {
       console.warn("[webhook-chatwoot] Nenhum disparo aguardando aprovação encontrado.");
       return;
@@ -91,11 +88,11 @@ router.post("/webhook/chatwoot", async (req: Request, res: Response) => {
     if (isAutorizado) {
       console.log(`[webhook-chatwoot] Disparo #${d.id} AUTORIZADO via webhook.`);
       const cfg = parseConfiguracao(d.configuracao);
-      await supa.from("disparos").update({ status: "PROCESSING" }).eq("id", d.id);
+      await db.atualizarStatusDisparo(d.id, "PROCESSING");
       processarDisparo(d.id, cfg.inbox_id ?? INBOX_PADRAO);
     } else {
       console.log(`[webhook-chatwoot] Disparo #${d.id} NEGADO via webhook.`);
-      await supa.from("disparos").update({ status: "REJECTED" }).eq("id", d.id);
+      await db.atualizarStatusDisparo(d.id, "REJECTED");
     }
   } catch (e: any) {
     console.error("[webhook-chatwoot] Erro:", e.message);
@@ -202,24 +199,17 @@ router.post("/upload", uploadContatos.single("file"), async (req: Request, res: 
 
   try {
     const { contatos, descartados } = validarArquivo(destPath);
-    let novaListaId: number;
-    for (let t = 0; t < 3; t++) {
-      try {
-        const supa = getSupa();
-        const { data, error } = await supa.from("listas_contatos").insert({ nome_arquivo: originalName, total_contatos: contatos.length }).select("id").single();
-        if (error) throw error;
-        novaListaId = data.id;
-        break;
-      } catch (e: any) {
-        resetSupa();
-        if (t === 2) return res.status(503).json({ erro: `Falha BD: ${e.message}` });
-      }
-    }
     const rows = contatos.map((c) => ({
-      lista_id: novaListaId!, nome: c.Nome, numero: c.Numero, dados_extras: JSON.stringify(c.dadosExtras),
+      nome: c.Nome, numero: c.Numero, dados_extras: JSON.stringify(c.dadosExtras),
     }));
-    await supaInsertBatch("contatos_lista", rows);
-    res.status(201).json({ mensagem: "Lista importada com sucesso", lista_id: novaListaId!, total: contatos.length, descartados });
+    let novaListaId: number;
+    try {
+      novaListaId = await db.criarListaComContatos(originalName, rows);
+    } catch (e: any) {
+      console.error("[disparo] POST /upload falha BD:", e);
+      return res.status(503).json({ erro: `Falha BD: ${e.message}` });
+    }
+    res.status(201).json({ mensagem: "Lista importada com sucesso", lista_id: novaListaId, total: contatos.length, descartados });
   } catch (e: any) {
     res.status(400).json({ erro: e.message });
   }
@@ -302,13 +292,7 @@ router.post("/templates", async (req: Request, res: Response) => {
 
     // Salvar etiqueta/setor automaticamente
     const etiqueta = String(req.body.etiqueta ?? "").trim();
-    if (etiqueta) {
-      const supa = getSupa();
-      await supa.from("template_configs").upsert(
-        { template_nome: payload!.name, etiqueta, atualizado_em: new Date().toISOString() },
-        { onConflict: "template_nome" },
-      );
-    }
+    if (etiqueta) await db.salvarTemplateEtiqueta(payload!.name, etiqueta);
 
     // Não sincroniza o Chatwoot aqui: o template acabou de ser criado e está PENDING na
     // Meta, e o Chatwoot só lista os APROVADOS. O sync acontece no POST /disparar.
@@ -360,23 +344,25 @@ router.get("/chatwoot/times", async (_req: Request, res: Response) => {
 });
 
 router.get("/template-etiquetas", async (_req: Request, res: Response) => {
-  const supa = getSupa();
-  const { data } = await supa.from("template_configs").select("*");
-  const mapa: Record<string, string> = {};
-  for (const r of data ?? []) { if (r.etiqueta) mapa[r.template_nome] = r.etiqueta; }
-  res.json(mapa);
+  try {
+    res.json(await db.mapaTemplateEtiqueta());
+  } catch (e: any) {
+    console.error("[disparo] GET /template-etiquetas erro:", e);
+    res.status(500).json({ erro: e.message });
+  }
 });
 
 router.post("/template-etiquetas", async (req: Request, res: Response) => {
   const updates: Record<string, string> = req.body ?? {};
-  const supa = getSupa();
-  for (const [nome, etiqueta] of Object.entries(updates)) {
-    await supa.from("template_configs").upsert(
-      { template_nome: nome.toLowerCase(), etiqueta: etiqueta || null, atualizado_em: new Date().toISOString() },
-      { onConflict: "template_nome" },
-    );
+  try {
+    for (const [nome, etiqueta] of Object.entries(updates)) {
+      await db.salvarTemplateEtiqueta(nome, etiqueta || null);
+    }
+    res.json({ ok: true });
+  } catch (e: any) {
+    console.error("[disparo] POST /template-etiquetas erro:", e);
+    res.status(500).json({ erro: e.message });
   }
-  res.json({ ok: true });
 });
 
 // ── Upload mídia ─────────────────────────────────────────────────────────────
@@ -389,25 +375,11 @@ router.post("/upload-midia", uploadMidia.single("file"), async (req: Request, re
   const destino = path.join(MEDIA_DIR, novoNome);
   fs.renameSync(req.file.path, destino);
 
-  // Hospeda a mídia no Supabase Storage (CDN público) — é a URL que vai pro template do Chatwoot.
-  // CDN aguenta a Meta baixar a imagem uma vez por destinatário sem sobrecarregar o backend.
-  let mediaUrl: string;
-  try {
-    const supa = getSupa();
-    const buffer = fs.readFileSync(destino);
-    const contentType = mime.lookup(destino) || "application/octet-stream";
-    const { error: upErr } = await supa.storage
-      .from(BUCKET_MIDIA)
-      .upload(novoNome, buffer, { contentType: String(contentType), upsert: true });
-    if (upErr) throw upErr;
-    mediaUrl = supa.storage.from(BUCKET_MIDIA).getPublicUrl(novoNome).data.publicUrl;
-    console.log("[disparo] Mídia no Supabase Storage:", mediaUrl);
-  } catch (e: any) {
-    // Fallback: serve do próprio backend (URL pública via PUBLIC_BASE_URL)
-    console.error("[disparo] Falha no upload pro Supabase Storage, usando fallback do backend:", e.message);
-    const basePublica = (process.env.PUBLIC_BASE_URL ?? "").replace(/\/+$/, "") || `http://localhost:${process.env.SERVER_PORT ?? 3001}`;
-    mediaUrl = `${basePublica}/api/disparo/media/${novoNome}`;
-  }
+  // URL pública servida pelo próprio backend (GET /media/:filename, cacheada pelo Cloudflare).
+  // É a URL que vai no template do Chatwoot — precisa ser o arquivo direto, sem redirect.
+  const basePublica = (process.env.PUBLIC_BASE_URL ?? "").replace(/\/+$/, "") || `http://localhost:${process.env.SERVER_PORT ?? 3001}`;
+  const mediaUrl = `${basePublica}/api/disparo/media/${novoNome}`;
+  console.log("[disparo] Mídia disponível em:", mediaUrl);
 
   // Pré-gera handle Meta para agilizar criação de template (evita re-upload e timeout)
   // Timeout de 55s garante resposta antes do limite do proxy/Cloudflare (~100s)
@@ -427,9 +399,16 @@ router.post("/upload-midia", uploadMidia.single("file"), async (req: Request, re
 });
 
 router.get("/media/:filename", (req: Request, res: Response) => {
-  const filepath = path.join(MEDIA_DIR, String(req.params.filename));
-  if (!fs.existsSync(filepath)) return res.status(404).json({ erro: "Arquivo não encontrado" });
-  res.sendFile(filepath);
+  // basename impede sair da pasta; sem extensão de mídia (ex.: temporário do multer) não serve
+  const nome = path.basename(String(req.params.filename));
+  const filepath = path.join(MEDIA_DIR, nome);
+  if (!mime.lookup(nome) || !fs.existsSync(filepath)) {
+    // no-store: o Cloudflare cacheia até 404 de .jpg — não pode prender um "não encontrado"
+    return res.status(404).set("Cache-Control", "no-store").json({ erro: "Arquivo não encontrado" });
+  }
+  // O nome é um UUID nunca reaproveitado → cache imutável. O Cloudflare guarda a cópia no
+  // edge e a Meta (que baixa uma vez por destinatário) quase não chega no backend.
+  res.sendFile(filepath, { maxAge: MEDIA_CACHE_MAX_AGE, immutable: true });
 });
 
 // ── Disparar ─────────────────────────────────────────────────────────────────
@@ -441,19 +420,21 @@ router.post("/disparar", async (req: Request, res: Response) => {
   const cfg = parseConfiguracao(cfgRaw);
   cfg.inbox_id = inbox_id;
 
-  const supa = getSupa();
   const usuarioAtual = (req as any).usuarioLogado ?? {};
 
   // Bloqueia se já existe disparo ativo (antes das validações externas — falha barata)
-  const { data: ativos } = await supa.from("disparos").select("id, status, configuracao")
-    .in("status", ["AWAITING_APPROVAL", "PROCESSING", "PAUSING", "PAUSED"])
-    .limit(1);
-  if (ativos?.length) {
+  let ativo: db.Disparo | null;
+  try {
+    ativo = await db.obterDisparoAtivo();
+  } catch (e: any) {
+    console.error("[disparo] POST /disparar falha BD:", e);
+    return res.status(503).json({ erro: `Falha BD: ${e.message}` });
+  }
+  if (ativo) {
     const lblMap: Record<string, string> = { AWAITING_APPROVAL: "aguardando aprovação", PROCESSING: "em andamento", PAUSING: "pausando", PAUSED: "pausado" };
-    let solicitante = "";
-    try { solicitante = JSON.parse(ativos[0].configuracao ?? "{}").solicitante ?? ""; } catch {}
+    const solicitante = parseConfiguracao(ativo.configuracao).solicitante ?? "";
     const porQuem = solicitante ? ` de "${solicitante}"` : "";
-    return res.status(409).json({ erro: `Já existe um disparo ${lblMap[ativos[0].status] ?? ativos[0].status}${porQuem} (#${ativos[0].id}). Aguarde a conclusão ou cancele-o antes de iniciar outro.` });
+    return res.status(409).json({ erro: `Já existe um disparo ${lblMap[ativo.status] ?? ativo.status}${porQuem} (#${ativo.id}). Aguarde a conclusão ou cancele-o antes de iniciar outro.` });
   }
 
   // ── Gate do template ───────────────────────────────────────────────────────
@@ -498,15 +479,19 @@ router.post("/disparar", async (req: Request, res: Response) => {
   // Salva o nome do solicitante na configuração
   cfg.solicitante = usuarioAtual.nome ?? usuarioAtual.usuario ?? "";
 
-  const { count } = await supa.from("contatos_lista").select("id", { count: "exact", head: true }).eq("lista_id", lista_id);
-  const totalContatos = count ?? 0;
-
-  const { data: dispData, error: dispErr } = await supa.from("disparos").insert({
-    lista_id, template_nome, status: "AWAITING_APPROVAL",
-    configuracao: JSON.stringify(cfg),
-  }).select("*").single();
-  if (dispErr) return res.status(500).json({ erro: dispErr.message });
-  const disparoId = dispData.id;
+  let totalContatos: number;
+  let disparoId: number;
+  try {
+    totalContatos = await db.contarContatos(Number(lista_id));
+    const novo = await db.criarDisparo({
+      lista_id: Number(lista_id), template_nome, status: "AWAITING_APPROVAL",
+      configuracao: JSON.stringify(cfg),
+    });
+    disparoId = novo.id;
+  } catch (e: any) {
+    console.error("[disparo] POST /disparar falha ao gravar disparo:", e);
+    return res.status(500).json({ erro: e.message });
+  }
 
   // Envia pedido de aprovação via Meta
   const usuario = (req as any).usuarioLogado ?? {};
@@ -523,12 +508,7 @@ router.post("/disparar", async (req: Request, res: Response) => {
     const cwContatoId = (await cw.criarContato(NUMEROS_APROVADORES[0], "Aprovador Disparos", inbox_id)).id;
     if (cwContatoId) {
       const cwConversaId = (await cw.criarConversa(cwContatoId, inbox_id)).id;
-      if (cwConversaId) {
-        await supa.from("disparos").update({
-          aprovacao_conversa_id: cwConversaId, aprovacao_msg_id: 0,
-          aprovacao_ts: new Date().toISOString(),
-        }).eq("id", disparoId);
-      }
+      if (cwConversaId) await db.registrarConversaAprovacao(disparoId, cwConversaId);
     }
   } catch (e: any) {
     console.error(`[Aprovação] Erro: ${e.message}`);
@@ -543,32 +523,24 @@ router.post("/disparar", async (req: Request, res: Response) => {
 // ── Status / Logs ────────────────────────────────────────────────────────────
 
 router.get("/disparos/:id/logs", async (req: Request, res: Response) => {
-  const supa = getSupa();
-  const { data: d } = await supa.from("disparos").select("*").eq("id", req.params.id).single();
+  const d = await db.obterDisparo(Number(req.params.id));
   if (!d) return res.status(404).json({ erro: "Disparo não encontrado" });
-  const logs = await supaGetAll("logs_disparo", { column: "disparo_id", value: d.id });
+  const logs = await db.listarLogs(d.id);
   res.json({
     disparo_id: d.id, template: d.template_nome, status: d.status,
-    logs: logs.map((l: any) => ({
+    logs: logs.map((l) => ({
       numero: l.contato_numero, status: l.status, wamid: l.meta_wamid ?? "",
-      erro: l.mensagem_erro ?? "", timestamp: l.timestamp ?? "",
+      erro: l.mensagem_erro ?? "", timestamp: l.criado_em ? l.criado_em.toISOString() : "",
     })),
   });
 });
 
 router.get("/disparos/ativo", async (_req: Request, res: Response) => {
-  const supa = getSupa();
-  const { data } = await supa.from("disparos").select("*")
-    .in("status", ["AWAITING_APPROVAL", "PROCESSING", "PAUSING", "PAUSED"])
-    .order("data_inicio", { ascending: false }).limit(1);
-  if (!data?.length) return res.json({ ativo: false });
+  const d = await db.obterDisparoAtivo();
+  if (!d) return res.json({ ativo: false });
 
-  const d = data[0];
-  const { count } = await supa.from("contatos_lista").select("id", { count: "exact", head: true }).eq("lista_id", d.lista_id);
-  const total = count ?? 0;
-  const logs = await supaGetAll("logs_disparo", { column: "disparo_id", value: d.id });
-  const enviados = logs.filter((l: any) => l.status === "SENT").length;
-  const falhas = logs.filter((l: any) => l.status === "FAILED").length;
+  const total = await db.contarContatos(d.lista_id);
+  const { enviados, falhas } = await db.contarLogsPorStatus(d.id);
   const feitos = enviados + falhas;
 
   res.json({
@@ -580,8 +552,7 @@ router.get("/disparos/ativo", async (_req: Request, res: Response) => {
 // ── Aprovação ────────────────────────────────────────────────────────────────
 
 router.get("/disparos/:id/aprovacao", async (req: Request, res: Response) => {
-  const supa = getSupa();
-  const { data: d } = await supa.from("disparos").select("*").eq("id", req.params.id).single();
+  const d = await db.obterDisparo(Number(req.params.id));
   if (!d) return res.status(404).json({ erro: "Disparo não encontrado" });
 
   if (d.status !== "AWAITING_APPROVAL") {
@@ -592,9 +563,9 @@ router.get("/disparos/:id/aprovacao", async (req: Request, res: Response) => {
 
   // Verifica timeout
   if (d.aprovacao_ts) {
-    const elapsed = Date.now() - new Date(d.aprovacao_ts).getTime();
+    const elapsed = Date.now() - d.aprovacao_ts.getTime();
     if (elapsed > APROVACAO_TIMEOUT_MIN * 60 * 1000) {
-      await supa.from("disparos").update({ status: "REJECTED" }).eq("id", d.id);
+      await db.atualizarStatusDisparo(d.id, "REJECTED");
       return res.json({ status: "expirado" });
     }
   }
@@ -609,10 +580,10 @@ router.get("/disparos/:id/aprovacao", async (req: Request, res: Response) => {
     }
   }
   if (!todasMsgs.length && d.aprovacao_conversa_id) {
-    todasMsgs = await cw.buscarMensagensRecentes(d.aprovacao_conversa_id);
+    todasMsgs = await cw.buscarMensagensRecentes(Number(d.aprovacao_conversa_id));
   }
 
-  const aprovacaoTs = d.aprovacao_ts ? new Date(d.aprovacao_ts) : null;
+  const aprovacaoTs = d.aprovacao_ts;
   const respostas = todasMsgs.filter((m: any) => {
     const isIncoming = m.message_type === 0 || m.message_type === "incoming";
     if (!isIncoming) return false;
@@ -630,12 +601,12 @@ router.get("/disparos/:id/aprovacao", async (req: Request, res: Response) => {
 
     if (textoFinal.includes("AUTORIZADO")) {
       const cfg = parseConfiguracao(d.configuracao);
-      await supa.from("disparos").update({ status: "PROCESSING" }).eq("id", d.id);
+      await db.atualizarStatusDisparo(d.id, "PROCESSING");
       processarDisparo(d.id, cfg.inbox_id ?? INBOX_PADRAO);
       return res.json({ status: "aprovado" });
     }
     if (textoFinal.includes("NEGADO") || textoFinal.includes("NÃO") || textoFinal.includes("NAO")) {
-      await supa.from("disparos").update({ status: "REJECTED" }).eq("id", d.id);
+      await db.atualizarStatusDisparo(d.id, "REJECTED");
       return res.json({ status: "negado", motivo: resp.content ?? "Negado pelo aprovador" });
     }
   }
@@ -646,17 +617,16 @@ router.get("/disparos/:id/aprovacao", async (req: Request, res: Response) => {
 // ── Aprovação manual ─────────────────────────────────────────────────────────
 
 router.post("/disparos/:id/aprovar", async (req: Request, res: Response) => {
-  const supa = getSupa();
-  const { data: d } = await supa.from("disparos").select("*").eq("id", req.params.id).single();
+  const d = await db.obterDisparo(Number(req.params.id));
   if (!d) return res.status(404).json({ erro: "Disparo não encontrado" });
   if (d.status !== "AWAITING_APPROVAL") return res.status(400).json({ erro: `Disparo não está aguardando aprovação (status: ${d.status})` });
   const { acao } = req.body ?? {};
   if (acao === "negar") {
-    await supa.from("disparos").update({ status: "REJECTED" }).eq("id", d.id);
+    await db.atualizarStatusDisparo(d.id, "REJECTED");
     return res.json({ status: "negado", mensagem: "Disparo negado manualmente" });
   }
   const cfg = parseConfiguracao(d.configuracao);
-  await supa.from("disparos").update({ status: "PROCESSING" }).eq("id", d.id);
+  await db.atualizarStatusDisparo(d.id, "PROCESSING");
   processarDisparo(d.id, cfg.inbox_id ?? INBOX_PADRAO);
   res.json({ status: "aprovado", mensagem: "Disparo aprovado e iniciado" });
 });
@@ -664,31 +634,33 @@ router.post("/disparos/:id/aprovar", async (req: Request, res: Response) => {
 // ── Controle (pausar/retomar/cancelar) ───────────────────────────────────────
 
 router.post("/disparos/:id/cancelar", async (req: Request, res: Response) => {
-  const supa = getSupa();
-  const { data: d } = await supa.from("disparos").select("*").eq("id", req.params.id).single();
+  const d = await db.obterDisparo(Number(req.params.id));
   if (!d) return res.status(404).json({ erro: "Disparo não encontrado" });
   const cancelable = ["AWAITING_APPROVAL", "PAUSING", "PAUSED"];
   if (!cancelable.includes(d.status)) return res.status(400).json({ erro: `Não é possível cancelar disparo com status: ${d.status}` });
-  await supa.from("disparos").update({ status: "REJECTED" }).eq("id", d.id);
+  await db.atualizarStatusDisparo(d.id, "REJECTED");
   res.json({ mensagem: "Disparo cancelado", disparo_id: d.id });
 });
 
 router.post("/disparos/:id/pausar", async (req: Request, res: Response) => {
-  const supa = getSupa();
-  const { data: d } = await supa.from("disparos").select("*").eq("id", req.params.id).single();
+  const d = await db.obterDisparo(Number(req.params.id));
   if (!d) return res.status(404).json({ erro: "Disparo não encontrado" });
   if (d.status !== "PROCESSING") return res.status(400).json({ erro: `Disparo não está em andamento (status: ${d.status})` });
-  await supa.from("disparos").update({ status: "PAUSING" }).eq("id", d.id);
+  await db.atualizarStatusDisparo(d.id, "PAUSING");
   res.json({ mensagem: "Pausa solicitada", disparo_id: d.id });
 });
 
 router.post("/disparos/:id/retomar", async (req: Request, res: Response) => {
-  const supa = getSupa();
-  const { data: d } = await supa.from("disparos").select("*").eq("id", req.params.id).single();
+  const d = await db.obterDisparo(Number(req.params.id));
   if (!d) return res.status(404).json({ erro: "Disparo não encontrado" });
-  if (d.status !== "PAUSED") return res.status(400).json({ erro: `Disparo não está pausado (status: ${d.status})` });
+  if (!["PAUSED", "PAUSING"].includes(d.status)) return res.status(400).json({ erro: `Disparo não está pausado (status: ${d.status})` });
+  // PAUSING com loop vivo: basta desfazer o pedido de pausa. Sem loop (processo reiniciou), reinicia o envio.
+  if (d.status === "PAUSING" && disparoEmExecucao(d.id)) {
+    await db.atualizarStatusDisparo(d.id, "PROCESSING");
+    return res.json({ mensagem: "Pausa cancelada, disparo segue em andamento", disparo_id: d.id });
+  }
   const cfg = parseConfiguracao(d.configuracao);
-  await supa.from("disparos").update({ status: "PROCESSING" }).eq("id", d.id);
+  await db.atualizarStatusDisparo(d.id, "PROCESSING");
   processarDisparo(d.id, cfg.inbox_id ?? INBOX_PADRAO);
   res.json({ mensagem: "Disparo retomado", disparo_id: d.id });
 });

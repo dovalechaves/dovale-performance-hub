@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import * as meta from "../services/meta-api";
 import * as cw from "../services/chatwoot";
-import { getSupa } from "../services/supabase";
+import { mapaTemplateEtiqueta, salvarTemplateEtiqueta } from "../services/disparo-db";
 import { obterCotacaoUsdBrl } from "../services/cambio";
 
 const router = Router();
@@ -37,16 +37,6 @@ function periodoDoMes(mes: string): { start: number; end: number } | null {
   const start = Math.floor(Date.UTC(ano, mesIdx, 1) / 1000);
   const end = Math.floor(Date.UTC(ano, mesIdx + 1, 1) / 1000);
   return { start, end };
-}
-
-async function mapaTemplateEtiqueta(): Promise<Record<string, string>> {
-  const supa = getSupa();
-  const { data } = await supa.from("template_configs").select("template_nome,etiqueta");
-  const mapa: Record<string, string> = {};
-  for (const r of data ?? []) {
-    if (r.etiqueta) mapa[String(r.template_nome).toLowerCase()] = String(r.etiqueta);
-  }
-  return mapa;
 }
 
 // ── Relatório de custos por setor ────────────────────────────────────────────
@@ -192,16 +182,7 @@ router.post("/de-para", async (req: Request, res: Response) => {
     const etiqueta = String(req.body?.etiqueta ?? "").trim();
     if (!template_nome) return res.status(400).json({ erro: "template_nome obrigatório" });
 
-    const supa = getSupa();
-    const { error } = await supa.from("template_configs").upsert(
-      {
-        template_nome: template_nome.toLowerCase(),
-        etiqueta: etiqueta || null,
-        atualizado_em: new Date().toISOString(),
-      },
-      { onConflict: "template_nome" },
-    );
-    if (error) throw error;
+    await salvarTemplateEtiqueta(template_nome, etiqueta || null);
     res.json({ ok: true });
   } catch (e: any) {
     console.error("[relatorio-custos] POST /de-para erro:", e);

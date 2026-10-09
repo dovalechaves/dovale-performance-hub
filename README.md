@@ -15,7 +15,7 @@ Hub interno da Dovale: um único painel web (SSO, com controle de acesso por app
   - **Firebird (Microsys)** — o ERP em si, **uma base por loja física** (12 hoje: SJC, BH, Santana, RJ, Fast, Campinas, Rio Preto, MG, Fortaleza, Uberlândia, Goiânia, Bosque). Boa parte do hub existe pra consultar/gravar nessas bases sem precisar abrir o Microsys.
   - **MySQL** — sistemas de parceiros/franquias (Porto Alegre, Niterói) que não rodam Microsys.
 - **Autenticação**: JWT próprio, com login também integrável a Active Directory (usado no Onboarding). Cada usuário tem um perfil (admin/gestor/vendedor) **por app** — dá pra alguém ser gestor no Painel de Comissões e só visualizar no Inventário, por exemplo.
-- **Integrações externas**: Chatwoot (self-hosted `wpp.dovale.online` + nuvem `app.chatwoot.com`) para WhatsApp, Meta Graph API, OpenAI (bot de demandas e análises), Mercado Livre / Shopee / Amazon (ads e estoque FULL), Supabase Storage (mídia de disparo).
+- **Integrações externas**: Chatwoot (self-hosted `wpp.dovale.online` + nuvem `app.chatwoot.com`) para WhatsApp, Meta Graph API, OpenAI (bot de demandas e análises), Mercado Livre / Shopee / Amazon (ads e estoque FULL). O Disparo guarda listas, disparos e logs no SQL Server (tabelas `DISPARO_*`) e serve a mídia pelo próprio backend (cache do Cloudflare).
 - **Jobs agendados** (cron, `server/jobs/`): sincronização multi-preço, cobrança automática, snapshot mensal de fechamento de estoque, checagem de estoque mínimo, monitor de primeira movimentação de produto.
 - **Ambientes**: produção (branch `main`) e homologação (branch `homologacao`), ambos no Coolify.
 - **Em andamento**: migração incremental do backend pra ASP.NET Core (.NET 10) rodando em paralelo ao Node, ainda não integrada ao fluxo principal.

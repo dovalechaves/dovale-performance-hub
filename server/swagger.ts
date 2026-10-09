@@ -447,7 +447,7 @@ const spec: object = {
     "/disparo/template-etiquetas": {
       get: {
         tags: ["Disparo em Massa"],
-        summary: "Mapa template → etiqueta (Supabase)",
+        summary: "Mapa template → etiqueta (SQL Server)",
         responses: { 200: { description: "Mapa" } },
       },
       post: {

@@ -35,7 +35,7 @@ export interface AppCard {
 }
 
 // Setores do Painel de Comissões (RVS_NOME) — usados na config do Gestor
-export const PAINEL_SETORES = ["TELEVENDAS", "TELEVENDAS MG", "DISTRIBUIDORES", "FERRAGENS"];
+export const PAINEL_SETORES = ["TELEVENDAS", "TELEVENDAS MG", "DISTRIBUIDORES", "FERRAGENS", "ECOMMERCE"];
 export const PAINEL_ROLE_LABELS: Record<Role, string> = {
   admin: "Administrador",
   manager: "Gestor",

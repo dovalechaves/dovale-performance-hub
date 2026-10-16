@@ -5,6 +5,8 @@ interface KPICardProps {
   extra?: string;
   icon: React.ReactNode;
   accent?: boolean;
+  /** destaque em verde (ex.: o valor que a pessoa vai receber) */
+  green?: boolean;
   trend?: { value: number; label: string };
 }
 
@@ -15,20 +17,21 @@ export default function KPICard({
   extra,
   icon,
   accent = false,
+  green = false,
   trend,
 }: KPICardProps) {
   return (
     <div
       className="rounded-xl p-5 flex flex-col gap-3 shadow-sm"
       style={{
-        background: accent ? '#FFD700' : '#ffffff',
-        border: accent ? 'none' : '1px solid #e2e8f0',
+        background: green ? '#15803d' : accent ? '#FFD700' : '#ffffff',
+        border: accent || green ? 'none' : '1px solid #e2e8f0',
       }}
     >
       <div className="flex items-start justify-between">
         <p
           className="text-xs font-semibold uppercase tracking-wider"
-          style={{ color: accent ? '#00205C' : '#64748b' }}
+          style={{ color: green ? '#dcfce7' : accent ? '#00205C' : '#64748b' }}
         >
           {title}
         </p>
@@ -37,8 +40,8 @@ export default function KPICard({
           style={{
             width: 36,
             height: 36,
-            background: accent ? '#00205C' : '#0a1628',
-            color: accent ? '#FFD700' : '#ffffff',
+            background: green ? '#14532d' : accent ? '#00205C' : '#0a1628',
+            color: green ? '#ffffff' : accent ? '#FFD700' : '#ffffff',
           }}
         >
           {icon}
@@ -47,15 +50,15 @@ export default function KPICard({
 
       <div>
         <p
-          className="text-2xl font-bold leading-tight"
-          style={{ color: accent ? '#00205C' : '#0a1628' }}
+          className={`${green ? 'text-3xl' : 'text-2xl'} font-bold leading-tight`}
+          style={{ color: green ? '#ffffff' : accent ? '#00205C' : '#0a1628' }}
         >
           {value}
         </p>
         {extra && (
           <p
             className="text-xs mt-1 font-medium"
-            style={{ color: accent ? '#00205C' : '#64748b' }}
+            style={{ color: green ? '#f0fdf4' : accent ? '#00205C' : '#64748b' }}
           >
             {extra}
           </p>
@@ -63,7 +66,7 @@ export default function KPICard({
         {subtitle && (
           <p
             className="text-xs mt-0.5"
-            style={{ color: accent ? '#1a3a6e' : '#94a3b8' }}
+            style={{ color: green ? '#dcfce7' : accent ? '#1a3a6e' : '#94a3b8' }}
           >
             {subtitle}
           </p>

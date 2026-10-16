@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import AppShell from './layout/AppShell';
+import { useEcommerceAcesso } from './ecommerce/api';
+import SimulacaoEcommerce from './ecommerce/SimulacaoEcommerce';
 import { formatBRL, MESES } from './_shared/format';
 import {
   calcularComissaoTelevendas,
@@ -323,7 +325,7 @@ export default function ComissaoSimulacao() {
   const api = useComissaoApi();
 
   // Setor mode
-  const [modoSetor, setModoSetor] = useState<'televendas' | 'ferragens' | 'distribuidores'>('televendas');
+  const [modoSetor, setModoSetor] = useState<'televendas' | 'ferragens' | 'distribuidores' | 'ecommerce'>('televendas');
 
   // ── Televendas ──
   const [vendedor, setVendedor] = useState('');
@@ -519,6 +521,9 @@ export default function ComissaoSimulacao() {
   const setoresUsuario = useMemo(() => setoresUsuarioKey ? setoresUsuarioKey.split('|') : [], [setoresUsuarioKey]);
   const isVendedor = usuario && usuario !== 'loading' && usuario.cargo === 'VENDEDOR';
   const isAdm = usuario && usuario !== 'loading' && usuario.cargo === 'ADM';
+  const ecomAcesso = useEcommerceAcesso();
+  const ecomOk = ecomAcesso.data?.ecommerce === true;
+  const souVendedoraEcom = ecomAcesso.data?.papel === 'VENDEDORA';
   const abasPermitidas = useMemo(() => ([
     {
       key: 'televendas', label: 'Televendas / Televendas MG',
@@ -532,7 +537,11 @@ export default function ComissaoSimulacao() {
       key: 'distribuidores', label: 'Distribuidores',
       allowed: isLoadingUser || isAdm || setoresUsuario.includes('DISTRIBUIDORES') || (isVendedor && distVendedores.length > 0),
     },
-  ] as const).filter((tab) => tab.allowed), [isAdm, isLoadingUser, isVendedor, setoresUsuario, vendedores, ferrVendedores, distVendedores]);
+    {
+      key: 'ecommerce', label: 'E-commerce',
+      allowed: ecomOk && (isAdm || souVendedoraEcom || setoresUsuario.includes('ECOMMERCE')),
+    },
+  ] as const).filter((tab) => tab.allowed && (!souVendedoraEcom || tab.key === 'ecommerce')), [isAdm, isLoadingUser, isVendedor, setoresUsuario, vendedores, ferrVendedores, distVendedores, ecomOk, souVendedoraEcom]);
 
   useEffect(() => {
     if (abasPermitidas.length && !abasPermitidas.some((tab) => tab.key === modoSetor)) {
@@ -643,6 +652,8 @@ export default function ComissaoSimulacao() {
             </button>
           ))}
         </div>
+
+        {modoSetor === 'ecommerce' && <SimulacaoEcommerce />}
 
         {/* ── TELEVENDAS ────────────────────────────────────────── */}
         {modoSetor === 'televendas' && (<>

@@ -174,6 +174,8 @@ function BuscaSelect({ value, onChange, options, placeholder }: {
 }
 
 import AppShell from './layout/AppShell';
+import { useEcommerceAcesso } from './ecommerce/api';
+import ConfigEcommerce from './ecommerce/ConfigEcommerce';
 import { MESES, formatBRL } from './_shared/format';
 import { Save, CheckCircle, AlertCircle, Calendar, Users, Loader2 } from 'lucide-react';
 import { useComissaoUser as useUser, useComissaoApi } from './_shared/hooks';
@@ -268,7 +270,7 @@ export default function ComissaoConfiguracao() {
   const usuario = useUser();
   const api = useComissaoApi();
   const navigate = useNavigate();
-  const [aba, setAba] = useState<'televendas' | 'ferragens' | 'distribuidores' | 'vendedores'>('televendas');
+  const [aba, setAba] = useState<'televendas' | 'ferragens' | 'distribuidores' | 'ecommerce' | 'vendedores'>('televendas');
   const [tvAba, setTvAba] = useState<'metas' | 'bonus'>('metas');
 
   // ── Vendedores ativo/inativo ──
@@ -786,12 +788,15 @@ export default function ComissaoConfiguracao() {
   const setoresUsuarioKey = usuario && usuario !== 'loading' ? (usuario.setores || []).join('|') : '';
   const setoresUsuario = useMemo(() => setoresUsuarioKey ? setoresUsuarioKey.split('|') : [], [setoresUsuarioKey]);
   const isAdm = usuario && usuario !== 'loading' && usuario.cargo === 'ADM';
+  const ecomAcesso = useEcommerceAcesso();
+  const ecomPodeConfigurar = ecomAcesso.data?.pode_configurar === true;
   const abasPrincipais = useMemo(() => ([
     { key: 'televendas', label: 'Televendas', allowed: isAdm || setoresUsuario.some((s) => s === 'TELEVENDAS' || s === 'TELEVENDAS MG') },
     { key: 'ferragens', label: 'Ferragens', allowed: isAdm || setoresUsuario.includes('FERRAGENS') },
     { key: 'distribuidores', label: 'Distribuidores', allowed: isAdm || setoresUsuario.includes('DISTRIBUIDORES') },
+    { key: 'ecommerce', label: 'E-commerce', allowed: ecomPodeConfigurar },
     { key: 'vendedores', label: 'Vendedores', allowed: isAdm || setoresUsuario.length > 0 },
-  ] as const).filter((tab) => tab.allowed), [isAdm, setoresUsuario]);
+  ] as const).filter((tab) => tab.allowed), [isAdm, setoresUsuario, ecomPodeConfigurar]);
 
   useEffect(() => {
     if (abasPrincipais.length && !abasPrincipais.some((tab) => tab.key === aba)) {
@@ -830,6 +835,8 @@ export default function ComissaoConfiguracao() {
             </button>
           ))}
         </div>
+
+        {aba === 'ecommerce' && <ConfigEcommerce />}
 
         {/* ══════════════════════════════
             ABA: TELEVENDAS

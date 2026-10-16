@@ -19,6 +19,7 @@ import {
 } from "../services/comissao/commission-distribuidores";
 import { ensureFerrTables } from "../services/comissao/ferragens-tables";
 import { ensureDistTables } from "../services/comissao/distribuidores-tables";
+import { getEcommerceSerieAno } from "../services/comissao/ecommerce";
 import {
   getVendas, getRecebimentos,
   filtrarVendas, filtrarReceb,
@@ -601,16 +602,48 @@ router.get("/dashboard", async (req: any, res: any) => {
       }
     }
 
+    // ── E-commerce (SQL Server, NF-e) ──────────────────────────────────────
+    // Fora do pipeline multi-base: soma nos totais do ADM e ganha linha própria por setor/empresa/mês.
+    // Se a consulta falhar, o dashboard segue sem o e-commerce (nunca derruba o restante).
+    let eco_ano = 0;
+    let eco_periodo = 0;
+    let eco_serie: Array<{ mes: number; total: number }> = [];
+    try {
+      eco_serie = await getEcommerceSerieAno(ano);
+      eco_ano = eco_serie.reduce((s, m) => s + m.total, 0);
+      eco_periodo = mes ? (eco_serie[parseInt(mes) - 1]?.total ?? 0) : eco_ano;
+    } catch (ecoErr) {
+      console.error('[dashboard] e-commerce falhou:', ecoErr);
+    }
+    const vendas_por_setor_final = eco_periodo > 0
+      ? [...vendas_por_setor, { setor: 'ECOMMERCE', total_vendas: eco_periodo, total_qtde: 0, total_registros: 0 }]
+          .sort((a, b) => b.total_vendas - a.total_vendas)
+      : vendas_por_setor;
+    const vendas_por_empresa_final = eco_ano > 0
+      ? [...vendas_por_empresa, { empresa: 'E-COMMERCE', total_vendas: eco_ano, total_qtde: 0 }]
+          .sort((a, b) => b.total_vendas - a.total_vendas)
+      : vendas_por_empresa;
+    const tendencia_final = (() => {
+      const porMes = new Map(tendencia_mensal.map((t) => [t.mes, { ...t }]));
+      for (const e of eco_serie) {
+        if (e.total <= 0) continue;
+        const t = porMes.get(e.mes);
+        if (t) t.total_vendas += e.total;
+        else porMes.set(e.mes, { ano, mes: e.mes, total_vendas: e.total, total_qtde: 0 });
+      }
+      return [...porMes.values()].sort((a, b) => a.mes - b.mes);
+    })();
+
     avisarFontesIndisponiveis(res);
     return res.json({
-      total_vendas,
-      total_vendas_mes,
+      total_vendas: total_vendas + eco_ano,
+      total_vendas_mes: total_vendas_mes + eco_periodo,
       total_vendedores,
-      total_setores,
+      total_setores: total_setores + (eco_ano > 0 ? 1 : 0),
       top_vendedores,
-      vendas_por_setor,
-      vendas_por_empresa,
-      tendencia_mensal,
+      vendas_por_setor: vendas_por_setor_final,
+      vendas_por_empresa: vendas_por_empresa_final,
+      tendencia_mensal: tendencia_final,
       total_pa_televendas,
       total_recebimentos_televendas,
       total_comissao_televendas,

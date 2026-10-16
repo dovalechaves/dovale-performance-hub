@@ -163,6 +163,7 @@ export default function ComissaoDashboard() {
     'FERRAGENS':       '#1e40af',
     'TELEVENDAS':      '#b45309',
     'TELEVENDAS MG':   '#065f46',
+    'ECOMMERCE':       '#7c3aed',
   };
 
   // Projeção (apenas mês atual)

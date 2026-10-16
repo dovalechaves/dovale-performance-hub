@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import AppShell from './layout/AppShell';
+import { useEcommerceAcesso } from './ecommerce/api';
+import VendedorEcommerce from './ecommerce/VendedorEcommerce';
 import KPICard from './ui/KPICard';
 import { formatBRL, formatNumber, MESES } from './_shared/format';
 import { DollarSign, TrendingUp, ChevronDown, Search, User } from 'lucide-react';
@@ -122,21 +124,31 @@ export default function ComissaoVendedor() {
     },
     staleTime: 60_000,
   });
-  const vendedores = useMemo(() => filtrosQuery.data?.vendedores ?? [], [filtrosQuery.data]);
+  // Setor E-commerce: as vendedoras não aparecem nas vendas do ERP, então entram na lista pelo cadastro do setor.
+  const ecomAcesso = useEcommerceAcesso();
+  const ecomNomes = useMemo(() => ecomAcesso.data?.vendedoras ?? [], [ecomAcesso.data]);
+  const souVendedoraEcom = ecomAcesso.data?.papel === 'VENDEDORA';
+  const vendedores = useMemo(() => {
+    if (souVendedoraEcom) return ecomNomes;
+    const base = filtrosQuery.data?.vendedores ?? [];
+    const extras = ecomNomes.filter((n) => !base.some((b) => b.toUpperCase() === n.toUpperCase()));
+    return [...base, ...extras];
+  }, [filtrosQuery.data, ecomNomes, souVendedoraEcom]);
+  const ehEcom = souVendedoraEcom || (!!vendedorSel && ecomNomes.some((n) => n.toUpperCase() === vendedorSel.toUpperCase()));
 
   // Seleciona o primeiro vendedor da lista automaticamente (ou mantém a seleção
   // atual se ela ainda existir na lista) — igual ao que carregarVendedores fazia
   // toda vez que a lista chegava (fetch inicial ou revalidação por foco).
   useEffect(() => {
-    if (!filtrosQuery.data) return;
-    const lista = filtrosQuery.data.vendedores ?? [];
+    if (!filtrosQuery.data && !ecomAcesso.data) return;
+    const lista = vendedores;
     setVendedorSel((atual) => {
       if (atual && lista.includes(atual)) return atual;
       const primeiro = lista[0] ?? '';
       setBusca(primeiro);
       return primeiro;
     });
-  }, [filtrosQuery.data]);
+  }, [filtrosQuery.data, ecomAcesso.data, vendedores]);
 
   const isVendedor = usuario && usuario !== 'loading' && usuario.cargo === 'VENDEDOR' && vendedores.length <= 1;
 
@@ -183,7 +195,7 @@ export default function ComissaoVendedor() {
       const r = await api(`/vendedor/${encodeURIComponent(vendedorSel)}?${params}`, { cache: 'no-store' });
       return r.json() as Promise<VendedorData>;
     },
-    enabled: !!vendedorSel,
+    enabled: !!vendedorSel && !ehEcom,
     staleTime: 0,
     gcTime: 0,
   });
@@ -427,6 +439,9 @@ export default function ComissaoVendedor() {
           </div>
         </div>
 
+        {ehEcom ? (
+          <VendedorEcommerce periodo={{ ano, mes }} vendedora={souVendedoraEcom ? undefined : vendedorSel} />
+        ) : (<>
         {/* Vendedor Info Card */}
         {resumo[0] && (
           <div
@@ -995,6 +1010,7 @@ export default function ComissaoVendedor() {
           </div>
         )}
 
+        </>)}
       </div>
     </AppShell>
   );

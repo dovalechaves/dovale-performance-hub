@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import AppShell from './layout/AppShell';
+import { useEcommerceAcesso } from './ecommerce/api';
+import GestorEcommerce from './ecommerce/GestorEcommerce';
 import { formatBRL, formatNumber, MESES, CORES_GRAFICO } from './_shared/format';
 import { calcularComissaoTelevendas, type MetaConfig, type BonusConfig } from './_shared/commission';
 import { calcularComissaoFerragens, type FerrMetaConfig, type FerrBonusConfig, type FerrMetaGrupoConfig } from './_shared/commission-ferragens';
@@ -330,11 +332,19 @@ export default function ComissaoGestor() {
     },
     staleTime: 60_000,
   });
-  const setores = filtrosQuery.data?.setores ?? [];
+  // Setor E-commerce: fora das bases do ERP, entra como mais uma opção do seletor de setor.
+  const ecomAcesso = useEcommerceAcesso();
+  const ecomOk = ecomAcesso.data?.ecommerce === true && ecomAcesso.data?.papel !== 'VENDEDORA';
+  const setoresErp = filtrosQuery.data?.setores ?? [];
+  const setores = useMemo(() => (ecomOk && !setoresErp.includes('ECOMMERCE') ? [...setoresErp, 'ECOMMERCE'] : setoresErp), [ecomOk, setoresErp]);
+  const soEcom = ecomOk && !isAdm && !!usuario && usuario !== 'loading' && usuario.setores.length > 0 && usuario.setores.every((x) => x.toUpperCase() === 'ECOMMERCE');
+  useEffect(() => { if (soEcom) setFiltroSetor('ECOMMERCE'); }, [soEcom]);
+  const modoEcom = filtroSetor === 'ECOMMERCE';
   const empresas = filtrosQuery.data?.empresas ?? [];
 
   const bonusConfigQuery = useQuery({
     queryKey: ['comissao', 'gestor', 'bonus-config'],
+    enabled: !soEcom, // gestor só do e-commerce não consulta as bases do ERP
     queryFn: async () => {
       const r = await api('/bonus-config');
       return r.json() as Promise<BonusConfig>;
@@ -351,6 +361,7 @@ export default function ComissaoGestor() {
 
   const metasQuery = useQuery({
     queryKey: ['comissao', 'gestor', 'metas', ano, mes],
+    enabled: !soEcom, // gestor só do e-commerce não consulta as bases do ERP
     queryFn: async () => {
       const url = mes ? `/metas-mensais?ano=${ano}&mes=${mes}` : '/metas';
       const r = await api(url);
@@ -376,6 +387,7 @@ export default function ComissaoGestor() {
 
   const ferrConfigQuery = useQuery({
     queryKey: ['comissao', 'gestor', 'ferragens-config', ano, mesFetch],
+    enabled: !soEcom, // gestor só do e-commerce não consulta as bases do ERP
     queryFn: async () => {
       const r = await api(`/ferragens/config?ano=${ano}&mes=${mesFetch}`, { cache: 'no-store' });
       if (!r.ok) throw new Error(String(r.status));
@@ -404,6 +416,7 @@ export default function ComissaoGestor() {
 
   const distConfigQuery = useQuery({
     queryKey: ['comissao', 'gestor', 'distribuidores-config', ano, mesFetch],
+    enabled: !soEcom, // gestor só do e-commerce não consulta as bases do ERP
     queryFn: async () => {
       const r = await api(`/distribuidores/config?ano=${ano}&mes=${mesFetch}`, { cache: 'no-store' });
       if (!r.ok) throw new Error(String(r.status));
@@ -431,6 +444,7 @@ export default function ComissaoGestor() {
 
   const vendedoresQuery = useQuery({
     queryKey: ['comissao', 'gestor', 'vendedores', ano, mes, filtroSetor, filtroEmpresa],
+    enabled: !soEcom, // gestor só do e-commerce não consulta as bases do ERP
     queryFn: async () => {
       const params = new URLSearchParams({ ano: ano.toString() });
       if (mes) params.set('mes', mes.toString());
@@ -793,7 +807,7 @@ export default function ComissaoGestor() {
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             {/* Filtros */}
-            {isAdm ? (
+            {isAdm || ecomOk ? (
               <div className="relative">
                 <select
                   value={filtroSetor}
@@ -801,7 +815,7 @@ export default function ComissaoGestor() {
                   className="appearance-none rounded-lg pl-8 pr-8 py-2 text-sm font-medium cursor-pointer"
                   style={{ background: '#ffffff', border: '1px solid #e2e8f0', color: '#00205C' }}
                 >
-                  <option value="">Todos os setores</option>
+                  {!soEcom && <option value="">Todos os setores</option>}
                   {setores.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
                 <Filter size={13} className="absolute left-2.5 top-3 pointer-events-none" style={{ color: '#64748b' }} />
@@ -864,6 +878,9 @@ export default function ComissaoGestor() {
           </div>
         </div>
 
+        {modoEcom ? (
+          <GestorEcommerce periodo={{ ano, mes }} />
+        ) : (<>
         {/* KPI resumo */}
         <div className={`grid gap-4 ${temProjecao ? 'grid-cols-4' : 'grid-cols-3'}`}>
           <div className="rounded-xl p-5 shadow-sm" style={{ background: '#00205C' }}>
@@ -1245,6 +1262,7 @@ export default function ComissaoGestor() {
             </table>
           </div>
         </div>
+        </>)}
       </div>
 
       {vendedorEvolucao && (

@@ -44,8 +44,8 @@ export interface ComissaoEcommerce {
 
 export const PERCENTUAL_SEM_META_PADRAO = 0.25;
 
-/** Plataformas que não entram no bônus (não são um canal acompanhado). */
-export const PLATAFORMAS_SEM_BONUS = ['NAO IDENTIFICADA', 'VENDA DIRETA'];
+/** Plataformas que não entram no bônus. Hoje nenhuma: venda direta e não identificadas contam como Loja Virtual. */
+export const PLATAFORMAS_SEM_BONUS: string[] = [];
 
 export const FAIXAS_BONUS_PADRAO: EcomFaixa[] = [
   { cresc_min: 5, valor: 50 },

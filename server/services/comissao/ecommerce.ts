@@ -9,7 +9,7 @@ const TABELA = '[TI-MARKETING_95-NFeEcommerce]';
 //  1. EMP de fulfillment (ML FULL / SHOPEE FULL / AMAZON FULL) → plataforma do próprio centro
 //  2. PDV_OBS1 conhecido (inclui "ML DV" = Mercado Livre)
 //  3. PEDIDO_SHOPEE preenchido → Shopee
-//  4. caso contrário → NAO IDENTIFICADA (conta no faturamento, mas não entra no bônus)
+//  4. VENDA DIRETA e tudo que não for identificado → LOJA VIRTUAL (decisão do Willian, 16/10/2026)
 export const PLATAFORMA_SQL = `CASE
   WHEN EMP = 'ML FULL' THEN 'MERCADO LIVRE'
   WHEN EMP = 'SHOPEE FULL' THEN 'SHOPEE'
@@ -20,9 +20,9 @@ export const PLATAFORMA_SQL = `CASE
   WHEN UPPER(LTRIM(RTRIM(PDV_OBS1))) = 'MAGAZINE LUIZA' THEN 'MAGALU'
   WHEN UPPER(LTRIM(RTRIM(PDV_OBS1))) = 'TIKTOK SHOP' THEN 'TIKTOK'
   WHEN UPPER(LTRIM(RTRIM(PDV_OBS1))) = 'LOJA VIRTUAL' THEN 'LOJA VIRTUAL'
-  WHEN UPPER(LTRIM(RTRIM(PDV_OBS1))) = 'VENDA DIRETA' THEN 'VENDA DIRETA'
+  WHEN UPPER(LTRIM(RTRIM(PDV_OBS1))) = 'VENDA DIRETA' THEN 'LOJA VIRTUAL'
   WHEN PEDIDO_SHOPEE IS NOT NULL THEN 'SHOPEE'
-  ELSE 'NAO IDENTIFICADA' END`;
+  ELSE 'LOJA VIRTUAL' END`;
 
 // Nome de exibição da filial (EMP). A filial SJC é a da Loja Virtual da Dovale.
 const FILIAL_LABEL: Record<string, string> = {

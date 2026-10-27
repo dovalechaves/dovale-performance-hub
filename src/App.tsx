@@ -33,6 +33,7 @@ import InventarioFullApi from "./pages/InventarioFullApi.tsx";
 import Prospeccao from "./pages/Prospecção.tsx";
 import ClientesProspeccao from "./pages/ClientesProspeccao.tsx";
 import EstoqueMinimo from "./pages/EstoqueMinimo.tsx";
+import ConsultaProdutos from "./pages/ConsultaProdutos.tsx";
 import NotasFiscaisAmazon from "./pages/NotasFiscaisAmazon.tsx";
 import MargemLojas from "./pages/MargemLojas.tsx";
 import EnvBanner from "./components/EnvBanner.tsx";
@@ -191,6 +192,14 @@ function MargemLojasRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function ConsultaProdutosRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.canAccessHub) return <Navigate to="/login" replace />;
+  if (!user.apps.consultaprodutos?.canAccess) return <Navigate to="/hub" replace />;
+  return <>{children}</>;
+}
+
 function ComissaoRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const location = useLocation();
@@ -266,6 +275,7 @@ const App = () => (
             <Route path="/estoque-minimo" element={<EstoqueMinimoRoute><EstoqueMinimo /></EstoqueMinimoRoute>} />
             <Route path="/notas-fiscais-amazon" element={<NotasFiscaisAmazonRoute><NotasFiscaisAmazon /></NotasFiscaisAmazonRoute>} />
             <Route path="/margem-lojas" element={<MargemLojasRoute><MargemLojas /></MargemLojasRoute>} />
+            <Route path="/consulta-produtos" element={<ConsultaProdutosRoute><ConsultaProdutos /></ConsultaProdutosRoute>} />
             <Route path="/comissao" element={<ComissaoRoute><ComissaoDashboard /></ComissaoRoute>} />
             <Route path="/comissao/vendedor" element={<ComissaoRoute><ComissaoVendedor /></ComissaoRoute>} />
             <Route path="/comissao/gestor" element={<ComissaoRoute><ComissaoGestor /></ComissaoRoute>} />

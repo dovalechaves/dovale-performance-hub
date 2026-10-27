@@ -25,6 +25,7 @@ import comissaoRouter from "./routes/comissao";
 import comissaoEcommerceRouter from "./routes/comissao-ecommerce";
 import productFirstMovementRouter from "./routes/product-first-movement";
 import estoqueMinimoRouter from "./routes/estoque-minimo";
+import consultaProdutosRouter from "./routes/consulta-produtos";
 import notasFiscaisAmazonRouter from "./routes/notas-fiscais-amazon";
 import margemLojasRouter from "./routes/margem-lojas";
 import { startSyncJob } from "./jobs/syncJob";
@@ -74,6 +75,7 @@ app.use("/api/product-first-movement", productFirstMovementRouter);
 app.use("/api/estoque-minimo",    estoqueMinimoRouter);
 app.use("/api/notas-fiscais-amazon", notasFiscaisAmazonRouter);
 app.use("/api/margem-lojas",      margemLojasRouter);
+app.use("/api/consulta-produtos", consultaProdutosRouter);
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });

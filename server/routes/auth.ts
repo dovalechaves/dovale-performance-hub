@@ -6,7 +6,7 @@ import { getPool } from "../db/sqlserver";
 const router = Router();
 const VALID_ROLES = ["admin", "manager", "viewer"] as const;
 const VALID_HUB_ROLES = ["admin", "viewer"] as const;
-const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento", "assistente", "multipreco", "inventario", "onboarding", "prospeccao", "primeiramov", "invfull", "score", "cobranca", "ecommercedisparo", "sugestaocompras", "salescompass", "painelcomissao", "relatoriocustos", "estoqueminimo", "notasfiscaisamazon", "margemlojas"] as const;
+const MANAGED_APPS = ["dashboard", "calculadora", "disparo", "fechamento", "assistente", "multipreco", "inventario", "onboarding", "prospeccao", "primeiramov", "invfull", "score", "cobranca", "ecommercedisparo", "sugestaocompras", "salescompass", "painelcomissao", "relatoriocustos", "estoqueminimo", "notasfiscaisamazon", "margemlojas", "consultaprodutos"] as const;
 
 type Role = typeof VALID_ROLES[number];
 type HubRole = typeof VALID_HUB_ROLES[number];
@@ -254,6 +254,12 @@ function buildDefaultApps(usuario: string, localRole: unknown, localLoja: unknow
       loja: null,
       can_access: false,
     },
+    consultaprodutos: {
+      app_key: "consultaprodutos" as AppKey,
+      role: baseRole,
+      loja: null,
+      can_access: false,
+    },
   };
 }
 
@@ -288,6 +294,7 @@ function mergeApps(
     estoqueminimo: { ...defaults.estoqueminimo },
     notasfiscaisamazon: { ...defaults.notasfiscaisamazon },
     margemlojas: { ...defaults.margemlojas },
+    consultaprodutos: { ...defaults.consultaprodutos },
   };
 
   for (const row of appRows) {
@@ -349,6 +356,7 @@ function normalizeAppsPayload(
     estoqueminimo: { ...defaults.estoqueminimo },
     notasfiscaisamazon: { ...defaults.notasfiscaisamazon },
     margemlojas: { ...defaults.margemlojas },
+    consultaprodutos: { ...defaults.consultaprodutos },
   };
 
   if (payload && typeof payload === "object") {
@@ -573,7 +581,7 @@ router.get("/users", async (req, res) => {
       pool.request().query(`
         SELECT usuario, app_key, role, loja, ativo, usu_codigo_sistema, config
         FROM dbo.USUARIOS_APPS
-        WHERE app_key IN ('dashboard', 'calculadora', 'disparo', 'fechamento', 'assistente', 'multipreco', 'inventario', 'onboarding', 'prospeccao', 'primeiramov', 'invfull', 'score', 'cobranca', 'ecommercedisparo', 'sugestaocompras', 'salescompass', 'painelcomissao', 'relatoriocustos', 'estoqueminimo', 'notasfiscaisamazon', 'margemlojas')
+        WHERE app_key IN ('dashboard', 'calculadora', 'disparo', 'fechamento', 'assistente', 'multipreco', 'inventario', 'onboarding', 'prospeccao', 'primeiramov', 'invfull', 'score', 'cobranca', 'ecommercedisparo', 'sugestaocompras', 'salescompass', 'painelcomissao', 'relatoriocustos', 'estoqueminimo', 'notasfiscaisamazon', 'margemlojas', 'consultaprodutos')
       `),
     ]);
 

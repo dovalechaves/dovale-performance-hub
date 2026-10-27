@@ -1,4 +1,4 @@
-import { BarChart3, Calculator, Send, Archive, Bot, Database, ClipboardList, UserPlus, PackageSearch, ShieldCheck, BellRing, ShoppingCart, Sparkles, Compass, TrendingDown, Coins, Search, PackageSearch as PackageSearchIcon, AlertTriangle, FileText, Percent } from "lucide-react";
+import { BarChart3, Calculator, Send, Archive, Bot, Database, ClipboardList, UserPlus, PackageSearch, ShieldCheck, BellRing, ShoppingCart, Sparkles, Compass, TrendingDown, Coins, Search, PackageSearch as PackageSearchIcon, AlertTriangle, FileText, Percent, Smartphone } from "lucide-react";
 import type { AuthManagedUser } from "@/services/api";
 import type { Role } from "@/lib/rbac";
 
@@ -190,6 +190,13 @@ export const APPS: AppCard[] = [
     route: "/margem-lojas",
     color: "from-emerald-500/20 to-green-600/10 border-emerald-500/30 hover:border-emerald-500/60",
   },
+  {
+    title: "Consulta de Produtos",
+    description: "Consulte no celular preço, custo, saldo e disponível por produto nas filiais SJC e MG.",
+    icon: <Smartphone className="w-8 h-8" />,
+    route: "/consulta-produtos",
+    color: "from-sky-500/20 to-blue-600/10 border-sky-500/30 hover:border-sky-500/60",
+  },
 ];
 
 export const APP_BY_ROUTE: Record<string, keyof AuthManagedUser["apps"]> = {
@@ -214,4 +221,5 @@ export const APP_BY_ROUTE: Record<string, keyof AuthManagedUser["apps"]> = {
   "/estoque-minimo": "estoqueminimo",
   "/notas-fiscais-amazon": "notasfiscaisamazon",
   "/margem-lojas": "margemlojas",
+  "/consulta-produtos": "consultaprodutos",
 };

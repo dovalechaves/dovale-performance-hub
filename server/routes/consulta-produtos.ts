@@ -59,14 +59,8 @@ router.use(async (req: Request, res: Response, next) => {
   }
 });
 
-// Mês/ano de hoje no fuso de São Paulo (o servidor pode estar em UTC).
-const MESES_PADRAO = ["JANEIRO", "FEVEREIRO", "MAR_O", "ABRIL", "MAIO", "JUNHO", "JULHO", "AGOSTO", "SETEMBRO", "OUTUBRO", "NOVEMBRO", "DEZEMBRO"]; // "_" cobre o Ç de MARÇO
-export function mesAtual(agora = new Date()) {
-  const [ano, mes] = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(agora).split("-").map(Number);
-  const mm = String(mes).padStart(2, "0");
-  const ultimo = new Date(Date.UTC(ano, mes, 0)).getUTCDate();
-  return { ano, nomePadrao: MESES_PADRAO[mes - 1], primeiroDia: `${ano}-${mm}-01`, ultimoDia: `${ano}-${mm}-${String(ultimo).padStart(2, "0")}` };
-}
+// Hoje (AAAA-MM-DD) no fuso de São Paulo (o servidor pode estar em UTC).
+const hojeSP = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
 
 const num = (v: unknown): number | null => (v == null || v === "" || Number.isNaN(Number(v)) ? null : Number(v));
 const txt = (v: unknown) => String(v ?? "").trim();
@@ -154,38 +148,32 @@ async function limitar<T>(fn: () => Promise<T>): Promise<T> {
   try { return await fn(); } finally { emAndamento--; fila.shift()?.(); }
 }
 
-// Tabela "PROMOÇÃO MENSAL" do MÊS ATUAL — regra estrita, todas as condições ao mesmo tempo:
+// Tabelas "PROMOÇÃO MENSAL" em vigor — regra estrita, todas as condições ao mesmo tempo:
 //  - marcada como promoção (tab_ind_promocao=1) e ATIVA (tab_situacao=1);
-//  - nome no padrão "PROMOÇÃO MENSAL <mês> <ano>" com o mês e o ano de HOJE (um mês antigo que tenha
-//    ficado ativo por engano não casa);
-//  - validade dentro do mês atual e ainda não vencida.
-// Sem nenhuma tabela que satisfaça tudo, nenhum produto é mostrado como promoção. Se (anomalia)
-// houver mais de uma, vale a de maior código. Resultado guardado 5 min (e descartado na virada de
-// mês/dia), pois a tabela do mês quase nunca muda durante o dia.
-type TabelaPromo = { codigo: number; nome: string; validade: string | null } | null;
-const cachePromo = new Map<string, { chave: string; ts: number; valor: TabelaPromo }>();
+//  - nome no padrão "PROMOÇÃO MENSAL ..." (promoções DDF, Televendas etc. ficam de fora);
+//  - validade definida e ainda não vencida (hoje <= validade).
+// Pode haver mais de uma ao mesmo tempo (ex.: a de novembro ativada antes da virada do mês). Quando o
+// produto está em mais de uma, vale a de VALIDADE MAIS LONGA (empate: maior código). A lista já vem
+// ordenada assim e o primeiro acerto de cada produto é o escolhido. Sem tabela que satisfaça tudo,
+// nenhum produto é mostrado como promoção. Resultado guardado 5 min (descartado na virada do dia).
+type TabelaPromo = { codigo: number; nome: string; validade: string };
+const cachePromo = new Map<string, { dia: string; ts: number; valor: TabelaPromo[] }>();
 const PROMO_TTL = 5 * 60 * 1000;
 
-export async function tabelaPromocaoMes(loja: "sjc" | "mg"): Promise<TabelaPromo> {
-  const mes = mesAtual();
-  const hoje = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
-  const chave = `${mes.primeiroDia}|${hoje}`;
+export async function tabelasPromocaoMensais(loja: "sjc" | "mg"): Promise<TabelaPromo[]> {
+  const hoje = hojeSP();
   const c = cachePromo.get(loja);
-  if (c && c.chave === chave && Date.now() - c.ts < PROMO_TTL) return c.valor;
+  if (c && c.dia === hoje && Date.now() - c.ts < PROMO_TTL) return c.valor;
   const rows = await queryFirebird<Record<string, unknown>>(loja, `
     SELECT tab_codigo, tab_nome, tab_dt_validade FROM tabelas_precos
     WHERE tab_ind_promocao = 1 AND tab_situacao = 1
-      AND UPPER(tab_nome) LIKE 'PROMO%MENSAL%${mes.nomePadrao}%${mes.ano}%'
-      AND tab_dt_validade >= CAST('${mes.primeiroDia}' AS DATE)
-      AND tab_dt_validade <= CAST('${mes.ultimoDia}' AS DATE)
-      AND tab_dt_validade >= CAST('NOW' AS DATE)
-    ORDER BY tab_codigo DESC`);
-  if (rows.length > 1) console.warn(`[consulta-produtos] ${loja}: ${rows.length} tabelas de promoção mensal ativas no mês; usando a de maior código`);
-  const r = rows[0];
-  const valor: TabelaPromo = r
-    ? { codigo: Number(r.TAB_CODIGO), nome: txt(r.TAB_NOME), validade: r.TAB_DT_VALIDADE ? new Date(r.TAB_DT_VALIDADE as string).toISOString().slice(0, 10) : null }
-    : null;
-  cachePromo.set(loja, { chave, ts: Date.now(), valor });
+      AND UPPER(tab_nome) LIKE 'PROMO%MENSAL%'
+      AND tab_dt_validade >= CAST('${hoje}' AS DATE)
+    ORDER BY tab_dt_validade DESC, tab_codigo DESC`);
+  const valor = rows.map((r): TabelaPromo => ({
+    codigo: Number(r.TAB_CODIGO), nome: txt(r.TAB_NOME), validade: new Date(r.TAB_DT_VALIDADE as string).toISOString().slice(0, 10),
+  }));
+  cachePromo.set(loja, { dia: hoje, ts: Date.now(), valor });
   return valor;
 }
 
@@ -311,28 +299,36 @@ async function estoques(loja: "sjc" | "mg", filial: number, codigos: string[]): 
 export async function detalhes(loja: "sjc" | "mg", filial: number, codigos: string[]) {
   if (!codigos.length) return [];
   const lista = codigos.map((c) => `'${c.replace(/[^0-9A-Za-z._-]/g, "")}'`).join(",");
-  const promo = await tabelaPromocaoMes(loja).catch(() => null);
-  const joinPromo = promo
-    ? `LEFT JOIN tabelas_produtos tpm ON tpm.tbp_pro_codigo = p.pro_codigo AND tpm.tbp_tab_codigo = ${promo.codigo} AND tpm.tbp_preco > 0`
-    : "";
+  const promos = await tabelasPromocaoMensais(loja).catch(() => [] as TabelaPromo[]);
   // preços/custos de todos os produtos numa consulta só; estoque de cada produto em paralelo
-  const [rows, estoquesPorCodigo] = await Promise.all([
+  const [rows, estoquesPorCodigo, precosPromo] = await Promise.all([
     limitar(() => queryFirebird<Record<string, unknown>>(loja, `
       SELECT p.pro_codigo, p.pro_resumo, p.pro_tipo,
         t1.tbp_preco AS preco_1, t1.tbp_custo AS custo_1,
-        t4.tbp_preco AS preco_4, t4.tbp_custo AS custo_4,
-        ${promo ? "tpm.tbp_preco" : "CAST(NULL AS DOUBLE PRECISION)"} AS promo_preco
+        t4.tbp_preco AS preco_4, t4.tbp_custo AS custo_4
       FROM produtos p
       LEFT JOIN tabelas_produtos t1 ON t1.tbp_pro_codigo = p.pro_codigo AND t1.tbp_tab_codigo = 1
       LEFT JOIN tabelas_produtos t4 ON t4.tbp_pro_codigo = p.pro_codigo AND t4.tbp_tab_codigo = 4
-      ${joinPromo}
       WHERE p.pro_codigo IN (${lista})`)),
     estoques(loja, filial, codigos),
+    // preço do produto em cada promoção mensal em vigor (uma consulta só)
+    promos.length
+      ? limitar(() => queryFirebird<Record<string, unknown>>(loja, `
+          SELECT tbp_pro_codigo, tbp_tab_codigo, tbp_preco FROM tabelas_produtos
+          WHERE tbp_tab_codigo IN (${promos.map((t) => t.codigo).join(",")}) AND tbp_preco > 0 AND tbp_pro_codigo IN (${lista})`))
+      : Promise.resolve([] as Record<string, unknown>[]),
   ]);
-  return rows.map((r): Record<string, unknown> => ({
-    ...r, ...(estoquesPorCodigo.get(txt(r.PRO_CODIGO)) ?? {}),
-    PROMO_NOME: promo?.nome ?? null, PROMO_VALIDADE: promo?.validade ?? null,
-  }));
+  // validade mais longa primeiro (`promos` já está ordenada); o primeiro acerto do produto é o que vale
+  const precoPorTabela = new Map(precosPromo.map((r) => [`${txt(r.TBP_PRO_CODIGO)}|${Number(r.TBP_TAB_CODIGO)}`, Number(r.TBP_PRECO)]));
+  return rows.map((r): Record<string, unknown> => {
+    const codigo = txt(r.PRO_CODIGO);
+    const t = promos.find((x) => precoPorTabela.has(`${codigo}|${x.codigo}`));
+    return {
+      ...r, ...(estoquesPorCodigo.get(codigo) ?? {}),
+      PROMO_PRECO: t ? precoPorTabela.get(`${codigo}|${t.codigo}`) : null,
+      PROMO_NOME: t?.nome ?? null, PROMO_VALIDADE: t?.validade ?? null,
+    };
+  });
 }
 
 /** GET /api/consulta-produtos/sugestoes?q=texto — até 8 sugestões (código + descrição) para o autocomplete */

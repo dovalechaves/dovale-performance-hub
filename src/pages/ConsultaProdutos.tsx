@@ -104,8 +104,8 @@ function CardProduto({ p, filiais, ocultarCusto }: { p: ProdutoConsulta; filiais
     ...(comTotal ? [{ texto: "", cor: MUTED }] : []),
   ];
 
-  // Promoção do mês: só aparece quando o servidor confirma que o produto está na tabela
-  // "PROMOÇÃO MENSAL" do mês atual (regra estrita no backend).
+  // Promoção mensal: só aparece quando o servidor confirma que o produto está numa tabela
+  // "PROMOÇÃO MENSAL" ativa e dentro da validade (se estiver em mais de uma, vale a de validade mais longa).
   const promoDe = (f: FilialKey) => dado(f)?.promocao ?? null;
   const emPromo = filiais.some((f) => promoDe(f) != null);
   const refPromo = filiais.map(promoDe).find((x) => x != null) ?? null;

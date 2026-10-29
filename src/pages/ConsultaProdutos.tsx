@@ -43,13 +43,17 @@ function Secao({ cor, titulo, subtitulo, children }: { cor: string; titulo: stri
   );
 }
 
+// Colunas de preço/custo: largas o bastante para "R$ 12.345,67" em negrito (antes 78px: os valores
+// das duas filiais se sobrepunham). Larguras fixas mantêm cabeçalho e linhas alinhados.
+const COLUNAS_PRECO = (n: number) => `minmax(56px,1fr) repeat(${n}, 112px)`;
+
 // Linha de grade: rótulo + uma célula por coluna (filiais e, quando há, o total).
 function LinhaGrade({ rotulo, celulas, colunas, destaque }: { rotulo: string; celulas: Celula[]; colunas: string; destaque?: boolean }) {
   return (
     <div className="grid items-center py-1.5" style={{ gridTemplateColumns: colunas, borderTop: `1px solid ${BORDER}` }}>
       <span className="text-xs" style={{ color: MUTED, fontWeight: destaque ? 700 : 500 }}>{rotulo}</span>
       {celulas.map((c, i) => (
-        <span key={i} className="text-right tabular-nums" style={{ fontSize: destaque ? 15 : 13, fontWeight: destaque ? 700 : 500, color: c.cor ?? NAVY }}>
+        <span key={i} className="text-right tabular-nums whitespace-nowrap" style={{ fontSize: destaque ? 15 : 13, fontWeight: destaque ? 700 : 500, color: c.cor ?? NAVY }}>
           {c.texto}
         </span>
       ))}
@@ -109,7 +113,7 @@ function CardProduto({ p, filiais, ocultarCusto }: { p: ProdutoConsulta; filiais
   const promoDe = (f: FilialKey) => dado(f)?.promocao ?? null;
   const emPromo = filiais.some((f) => promoDe(f) != null);
   const refPromo = filiais.map(promoDe).find((x) => x != null) ?? null;
-  const colunasPromo = `minmax(64px,1fr) repeat(${filiais.length}, 78px)`;
+  const colunasPromo = COLUNAS_PRECO(filiais.length);
   const descontoPct = (f: FilialKey) => {
     const orig = dado(f)?.tabelas.atacado.preco, pr = promoDe(f)?.preco;
     return orig && pr ? `-${Math.round((1 - pr / orig) * 100)}%` : "—";
@@ -151,15 +155,15 @@ function CardProduto({ p, filiais, ocultarCusto }: { p: ProdutoConsulta; filiais
       </Secao>
 
       <Secao cor={TAB_PRECO} titulo="TABELA 1 · ATACADO PADRÃO" subtitulo="preço e custo">
-        <CabecalhoColunas nomes={filiais.map((f) => FILIAL_NOME[f])} colunas={`minmax(64px,1fr) repeat(${filiais.length}, 78px)`} totalIdx={-1} />
-        <LinhaGrade rotulo="Preço" colunas={`minmax(64px,1fr) repeat(${filiais.length}, 78px)`} celulas={preco("atacado", "preco").slice(0, filiais.length)} destaque />
-        {!ocultarCusto && <LinhaGrade rotulo="Custo" colunas={`minmax(64px,1fr) repeat(${filiais.length}, 78px)`} celulas={preco("atacado", "custo").slice(0, filiais.length)} />}
+        <CabecalhoColunas nomes={filiais.map((f) => FILIAL_NOME[f])} colunas={COLUNAS_PRECO(filiais.length)} totalIdx={-1} />
+        <LinhaGrade rotulo="Preço" colunas={COLUNAS_PRECO(filiais.length)} celulas={preco("atacado", "preco").slice(0, filiais.length)} destaque />
+        {!ocultarCusto && <LinhaGrade rotulo="Custo" colunas={COLUNAS_PRECO(filiais.length)} celulas={preco("atacado", "custo").slice(0, filiais.length)} />}
       </Secao>
 
       <Secao cor={TAB_PRECO} titulo="TABELA 4 · DDF" subtitulo="preço e custo">
-        <CabecalhoColunas nomes={filiais.map((f) => FILIAL_NOME[f])} colunas={`minmax(64px,1fr) repeat(${filiais.length}, 78px)`} totalIdx={-1} />
-        <LinhaGrade rotulo="Preço" colunas={`minmax(64px,1fr) repeat(${filiais.length}, 78px)`} celulas={preco("ddf", "preco").slice(0, filiais.length)} destaque />
-        {!ocultarCusto && <LinhaGrade rotulo="Custo" colunas={`minmax(64px,1fr) repeat(${filiais.length}, 78px)`} celulas={preco("ddf", "custo").slice(0, filiais.length)} />}
+        <CabecalhoColunas nomes={filiais.map((f) => FILIAL_NOME[f])} colunas={COLUNAS_PRECO(filiais.length)} totalIdx={-1} />
+        <LinhaGrade rotulo="Preço" colunas={COLUNAS_PRECO(filiais.length)} celulas={preco("ddf", "preco").slice(0, filiais.length)} destaque />
+        {!ocultarCusto && <LinhaGrade rotulo="Custo" colunas={COLUNAS_PRECO(filiais.length)} celulas={preco("ddf", "custo").slice(0, filiais.length)} />}
       </Secao>
     </div>
   );

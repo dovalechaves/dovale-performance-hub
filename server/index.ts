@@ -28,6 +28,7 @@ import estoqueMinimoRouter from "./routes/estoque-minimo";
 import consultaProdutosRouter from "./routes/consulta-produtos";
 import notasFiscaisAmazonRouter from "./routes/notas-fiscais-amazon";
 import margemLojasRouter from "./routes/margem-lojas";
+import cofresRouter from "./routes/cofres";
 import { startSyncJob } from "./jobs/syncJob";
 import { startStockSnapshotJob, runStockSnapshotManual, getStockSnapshotStatus } from "./jobs/stockSnapshotJob";
 import { startMultiPrecoJob } from "./jobs/multiPrecoJob";
@@ -75,6 +76,9 @@ app.use("/api/product-first-movement", productFirstMovementRouter);
 app.use("/api/estoque-minimo",    estoqueMinimoRouter);
 app.use("/api/notas-fiscais-amazon", notasFiscaisAmazonRouter);
 app.use("/api/margem-lojas",      margemLojasRouter);
+app.use("/api/cofres",           cofresRouter);
+// Sala dos Cofres: página estática pública (fala com /api/cofres no mesmo host)
+app.use("/cofres",               express.static("server/cofres"));
 app.use("/api/consulta-produtos", consultaProdutosRouter);
 
 app.get("/api/health", (_req, res) => {
